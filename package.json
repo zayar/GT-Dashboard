@@ -1,0 +1,19 @@
+{
+  "name": "aichat",
+  "version": "1.0.0",
+  "description": "AI Chat Application",
+  "scripts": {
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "start": "concurrently \"cd backend && npm start\" \"cd frontend && npm run preview\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "apexcharts": "^4.5.0",
+    "openai": "^4.87.3",
+    "react-apexcharts": "^1.7.0",
+    "uuid": "^11.1.0"
+  }
+}

@@ -1,0 +1,3 @@
+env_variables:
+  VITE_API_URL: "https://${GOOGLE_CLOUD_PROJECT}-backend.appspot.com"
+  NODE_ENV: "production"

@@ -1,0 +1,1411 @@
+import { useState, useEffect, useMemo, lazy, Suspense, useRef } from 'react';
+import { Box, Container, TextField, Button, Typography, Paper, CircularProgress, IconButton, Avatar, TableContainer, Table, TableHead, TableBody, TableRow, TableCell } from '@mui/material';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, BarElement } from 'chart.js';
+import { Bar } from 'react-chartjs-2';
+import SendIcon from '@mui/icons-material/Send';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import PersonIcon from '@mui/icons-material/Person';
+import { SUGGESTION_PROMPTS } from './config/suggestions';
+import axios from 'axios';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import { BrowserRouter as Router, Routes, Route, useNavigate, Link, Navigate } from 'react-router-dom';
+import CustomerDetails from './components/CustomerDetails';
+import ServiceDetails from './components/ServiceDetails';
+import TherapistDetails from './components/TherapistDetails';
+import CommissionPage from './components/CommissionPage';
+import QueenCommissionPage from './components/CommissionPage';
+import DailyTreatmentReport from './components/DailyTreatmentReport';
+import PaymentDetails from './components/PaymentDetails';
+import BankingDetails from './components/BankingDetails';
+import EnhancedChatMessage from './components/EnhancedChatMessage';
+import { useConversationContext } from './hooks/useConversationContext';
+import SuggestedQueries from './components/SuggestedQueries';
+
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+interface QueryResult {
+  [key: string]: any;
+}
+
+interface HeatmapData {
+  days: string[];
+  hours: string[];
+  values: {
+    [key: string]: {
+      [key: string]: number;
+    };
+  };
+}
+
+interface MessageData {
+  sql: string;
+  results: any[];
+  chartData?: any;
+  chartType?: string;
+  showTable?: boolean;
+  isHeatmap?: boolean;
+  heatmapData?: HeatmapData;
+  isReminderSuggestion?: boolean;
+  isPaymentSuggestion?: boolean;
+  isBankingSuggestion?: boolean;
+  isCustomerInsight?: boolean;
+  customerName?: string;
+  customerData?: any[];
+  showCustomerProfile?: boolean;
+  isRecommendation?: boolean;
+  businessMetrics?: any[];
+  isHelp?: boolean;
+  examples?: string[];
+  isNavigationSuggestion?: boolean;
+  targetPage?: string;
+  isCustomerDetailsSuggestion?: boolean;
+  isClarification?: boolean;
+}
+
+interface Message {
+  id: string;
+  type: 'user' | 'assistant';
+  content: string;
+  data?: MessageData;
+}
+
+const LazyDataTable = lazy(() => import('./components/DataTable'));
+
+const MainChat = () => {
+  const navigate = useNavigate();
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const savedMessages = sessionStorage.getItem('chatMessages');
+    return savedMessages ? JSON.parse(savedMessages) : [{
+      id: 'welcome',
+      type: 'assistant' as const,
+      content: 'Hi there! 👋 I\'m here to help answer your questions and uncover insights. What would you like to know?'
+    }];
+  });
+  const [inputMessage, setInputMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [schema, setSchema] = useState<any>(null);
+  const [schemaLoading, setSchemaLoading] = useState(true);
+  const messagesEndRef = useRef<null | HTMLDivElement>(null);
+  const [_error, setError] = useState('');
+  
+  // Use our new conversation context hook
+  const { 
+    contextMemory, 
+    updateContext, 
+    clearContext, 
+    getConversationHistory, 
+    addRecentTopic 
+  } = useConversationContext(messages);
+
+  const fetchSchema = async () => {
+    try {
+      setSchemaLoading(true);
+      const response = await axios.get('http://localhost:3000/api/schema');
+      if (response.data.success) {
+        setSchema(response.data.data);
+      } else {
+        throw new Error('Failed to fetch schema data');
+      }
+    } catch (error) {
+      console.error('Failed to fetch schema:', error);
+      setError('Failed to fetch database schema. Please ensure the backend service is running and properly configured.');
+      setSchema(null);
+    } finally {
+      setSchemaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSchema();
+  }, []);
+
+  // Add reminder keywords detection
+  const checkForReminderKeywords = (message: string) => {
+    const reminderKeywords = ['reminder', 'followup', 'follow-up', 'follow up', 'remind'];
+    const normalizedMessage = message.toLowerCase();
+    return reminderKeywords.some(keyword => normalizedMessage.includes(keyword));
+  };
+
+  // Add payment keywords detection
+  const checkForPaymentKeywords = (message: string) => {
+    const paymentKeywords = [
+      'payment record', 'payment records', 
+      'payment report', 'payment details',
+      'payment', 'invoice', 'invoices',
+      'payment history', 'financial record',
+      'bill', 'bills', 'billing',
+      'wallet'
+    ];
+    // Only match 'bank' or 'transaction' if the message doesn't contain banking keywords
+    const secondaryKeywords = ['bank', 'transaction', 'transactions'];
+    
+    const normalizedMessage = message.toLowerCase();
+    
+    // First check if it contains any banking keywords to avoid conflict
+    const hasBankingKeyword = checkForBankingKeywords(normalizedMessage);
+    if (hasBankingKeyword) return false;
+    
+    // Then check for primary payment keywords
+    const hasPrimaryKeyword = paymentKeywords.some(keyword => normalizedMessage.includes(keyword));
+    
+    // Only check secondary keywords if no banking keyword is found
+    const hasSecondaryKeyword = secondaryKeywords.some(keyword => normalizedMessage.includes(keyword));
+    
+    return hasPrimaryKeyword || hasSecondaryKeyword;
+  };
+
+  // Add banking keywords detection
+  const checkForBankingKeywords = (message: string) => {
+    const bankingKeywords = [
+      'banking', 'banking details', 'banking summary',
+      'bank details', 'bank records', 'bank summary',
+      'payment breakdown', 'payment summary',
+      'payment methods', 'payment method summary',
+      'transaction summary', 'financial summary',
+      'banking transaction', 'banking transactions'
+    ];
+    const normalizedMessage = typeof message === 'string' ? message.toLowerCase() : message;
+    return bankingKeywords.some(keyword => normalizedMessage.includes(keyword));
+  };
+
+  const isBankingRelated = (message: string) => {
+    const normalizedMessage = message.toLowerCase();
+    const bankingKeywords = ['bank', 'transaction', 'payment', 'balance', 'money', 'deposit', 'withdraw', 'account'];
+    return bankingKeywords.some(keyword => normalizedMessage.includes(keyword));
+  };
+  
+  // Add extractTopicsFromMessage function
+  const extractTopicsFromMessage = (message: string) => {
+    // Extract common topics from message
+    const topics = [];
+    
+    // Check for customer-related topics
+    if (/customer|client/i.test(message)) {
+      topics.push('customer');
+    }
+    
+    // Check for payment-related topics
+    if (/payment|transaction|money|paid/i.test(message)) {
+      topics.push('payment');
+    }
+    
+    // Check for service-related topics
+    if (/service|appointment|booking|session/i.test(message)) {
+      topics.push('service');
+    }
+    
+    // Check for therapist-related topics
+    if (/therapist|provider|staff/i.test(message)) {
+      topics.push('therapist');
+    }
+    
+    // Add extracted topics to conversation context
+    topics.forEach(topic => addRecentTopic(topic));
+    
+    return topics;
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim()) return;
+  
+    // Create and add user message
+    const newUserMessage: Message = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'user',
+      content: inputMessage
+    };
+  
+    setMessages(prev => [...prev, newUserMessage]);
+    setInputMessage('');
+    setLoading(true);
+    setError('');
+  
+    try {
+      // Use the getConversationHistory function from our useConversationContext hook
+      const conversationHistory = getConversationHistory();
+      
+      // Extract topics from message
+      extractTopicsFromMessage(inputMessage);
+      
+      // Import chat utilities
+      const { 
+        classifyIntent, 
+        handleGeneralQuestion, 
+        handleCustomerInsight,
+        handleRecommendation,
+        handleHelp,
+        handleSmallTalk,
+        extractNavigationIntent,
+        createConversationHistory
+      } = await import('./utils/chatUtils');
+
+      // Classify user intent
+      const intent = await classifyIntent(inputMessage, conversationHistory);
+      
+      // Update context memory with the current intent and query
+      updateContext({
+        lastIntent: intent,
+        lastQuery: inputMessage
+      });
+      
+      // Handle different intents
+      switch (intent) {
+        case 'SMALL_TALK': {
+          // Handle small talk directly without API call
+          const smallTalkResponse = handleSmallTalk(inputMessage);
+          
+          const assistantMessage: Message = {
+            id: Date.now().toString(),
+            type: 'assistant',
+            content: smallTalkResponse
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+          break;
+        }
+          
+        case 'PAGE_NAVIGATION': {
+          // Handle navigation intents
+          const navigationInfo = extractNavigationIntent(intent, inputMessage);
+          
+          let content = 'I can help you navigate to that page.';
+          let data: MessageData = { sql: '', results: [] };
+          
+          if (navigationInfo) {
+            if (navigationInfo.page === '/banking') {
+              content = 'I can help you view your banking details! The Banking Details page provides a summary of payment methods and all transactions. You can see totals by payment method and filter transaction details. Would you like to go there now?';
+              data = { isBankingSuggestion: true, sql: '', results: [] };
+            } else if (navigationInfo.page === '/reminders') {
+              content = "I notice you're asking about reminders. Would you like to go to the Reminders page to view all upcoming service reminders? Click here to navigate.";
+              data = { isReminderSuggestion: true, sql: '', results: [] };
+            } else if (navigationInfo.page.includes('/customer-details')) {
+              content = `I can take you to the customer details page for ${navigationInfo.params?.name || 'the selected customer'}. Would you like to go there now?`;
+              data = { isCustomerDetailsSuggestion: true, customerName: navigationInfo.params?.name, sql: '', results: [] };
+            } else {
+              content = `I can help you navigate to the ${navigationInfo.page.replace('/', '')} page. Would you like to go there now?`;
+              data = { isNavigationSuggestion: true, targetPage: navigationInfo.page, sql: '', results: [] };
+            }
+          }
+          
+          const assistantMessage: Message = {
+            id: Date.now().toString(),
+            type: 'assistant',
+            content,
+            data
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+          break;
+        }
+          
+        case 'GENERAL_QUESTION': {
+          // Handle general business questions that don't require SQL
+          const generalResponse = await handleGeneralQuestion(inputMessage, conversationHistory);
+          
+          const assistantMessage: Message = {
+            id: Date.now().toString(),
+            type: 'assistant',
+            content: generalResponse
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+          break;
+        }
+          
+        case 'HELP': {
+          // Handle help requests
+          const helpResponse = await handleHelp(inputMessage);
+          
+          const assistantMessage: Message = {
+            id: Date.now().toString(),
+            type: 'assistant',
+            content: helpResponse,
+            data: {
+              isHelp: true,
+              examples: [
+                "Show me top 5 customers last month",
+                "What services generated the most revenue?",
+                "How many appointments did we have this week?",
+                "What days are busiest for our salon?",
+                "Show me therapist performance"
+              ],
+              sql: '',
+              results: []
+            }
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+          break;
+        }
+          
+        case 'DATA_QUERY': {
+          // This is the default SQL query handling path - use existing code
+          if (schemaLoading) {
+            throw new Error('Schema data is still loading. Please wait...');
+          }
+          if (!schema || !schema.fields) {
+            throw new Error('Schema data is not available. Please ensure the backend service is running and properly configured.');
+          }
+      
+          const axiosConfig = {
+            timeout: 30000,
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          };
+      
+          const schemaContext = schema.fields.map((field: { name: string; type: string }) => `${field.name} (${field.type})`).join('\n');
+      
+          if (!import.meta.env.VITE_OPENAI_API_KEY) {
+            throw new Error('OpenAI API key is not configured. Please check your .env file.');
+          }
+      
+          const { OPENAI_SQL_CONFIG, OPENAI_INSIGHTS_CONFIG } = await import('./config/openai');
+          
+          // Check if the query is about busiest time slots
+          const isBusiestTimeQuery = inputMessage.toLowerCase().includes('busiest time') || 
+                                    inputMessage.toLowerCase().includes('peak hours') ||
+                                    inputMessage.toLowerCase().includes('time slots by day');
+      
+          let sqlQuery: string;
+          let queryResults: any;
+      
+          if (isBusiestTimeQuery) {
+            // Use a specific SQL query for busiest time slots with Myanmar time
+            sqlQuery = `
+WITH HourlyBookings AS (
+  SELECT
+    CAST(FORMAT_DATE('%A', DATE(CheckInTime)) AS STRING) as day_of_week,
+    CAST(EXTRACT(HOUR FROM CheckInTime) AS STRING) as hour_of_day,
+    COUNT(*) as booking_count
+  FROM great_time.LemonDataView
+  WHERE 
+    CheckInTime IS NOT NULL
+    AND EXTRACT(HOUR FROM CheckInTime) BETWEEN 9 AND 19
+  GROUP BY day_of_week, hour_of_day
+)
+SELECT
+  day_of_week,
+  hour_of_day,
+  booking_count
+FROM HourlyBookings
+ORDER BY 
+  CASE day_of_week
+    WHEN 'Monday' THEN 1
+    WHEN 'Tuesday' THEN 2
+    WHEN 'Wednesday' THEN 3
+    WHEN 'Thursday' THEN 4
+    WHEN 'Friday' THEN 5
+    WHEN 'Saturday' THEN 6
+    WHEN 'Sunday' THEN 7
+  END,
+  CAST(hour_of_day AS INT64);`;
+          } else {
+            // Use general SQL query translation
+            const translationResponse = await axios.post(OPENAI_SQL_CONFIG.apiEndpoint, {
+              model: OPENAI_SQL_CONFIG.model,
+              messages: [
+                ...OPENAI_SQL_CONFIG.formatMessages(schemaContext, inputMessage),
+                {
+                  role: "system",
+                  content: `When generating SQL queries:
+                  1. For timestamp fields and comparisons:
+                     - Always use TIMESTAMP() for timestamp literals
+                     - Always cast string dates to TIMESTAMP type before comparison
+                     - Example: TIMESTAMP(field) >= TIMESTAMP('2024-01-01')
+                  
+                  2. For date/time formatting:
+                     - Use FORMAT_TIMESTAMP() for timestamp fields
+                     - Use FORMAT_DATE() for date fields
+                     - Examples:
+                       - FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', field)
+                       - FORMAT_DATE('%Y-%m-%d', DATE(field))
+                  
+                  3. For date/time extraction and arithmetic:
+                     - Use EXTRACT() for getting specific parts
+                     - Use TIMESTAMP_ADD() or TIMESTAMP_SUB() for calculations
+                     - Examples:
+                       - EXTRACT(HOUR FROM field)
+                       - TIMESTAMP_ADD(field, INTERVAL 1 DAY)
+                  
+                  4. For timezone handling:
+                     - Always specify timezone in comparisons
+                     - Use AT TIME ZONE when needed
+                     - Example: field AT TIME ZONE 'UTC'
+                  
+                  5. For date/time aggregations:
+                     - Group by formatted timestamps for consistency
+                     - Example: GROUP BY FORMAT_TIMESTAMP('%Y-%m-%d', field)
+                  
+                  6. NEVER compare TIMESTAMP with DATETIME directly
+                     - Always convert to same type first
+                     - Use CAST(field AS TIMESTAMP) if needed`
+                }
+              ]
+            }, axiosConfig);
+      
+            if (!translationResponse.data.choices?.[0]?.message?.content) {
+              throw new Error('No response received from OpenAI API. Please try again.');
+            }
+      
+            const response = translationResponse.data.choices[0].message.content;
+            const sqlMatch = response.match(/\[SQL Query\]([\s\S]*?)\[End SQL\]/i);
+      
+            if (!sqlMatch) {
+              throw new Error('Invalid response format: Missing SQL query. Please try rephrasing your question.');
+            }
+      
+            sqlQuery = sqlMatch[1].trim().replace(/FROM\s+LemonDataView/g, 'FROM great_time.LemonDataView');
+          }
+      
+          const queryResponse = await axios.post('http://localhost:3000/api/query', { query: sqlQuery }, axiosConfig);
+          if (!queryResponse.data.success) {
+            throw new Error(queryResponse.data.error || 'Failed to execute SQL query');
+          }
+          queryResults = queryResponse.data.data;
+          
+          // Store results in context memory
+          updateContext({
+            lastResults: queryResults
+          });
+      
+          // Handle chart visualization
+          const showGraph = inputMessage.toLowerCase().includes('chart') || 
+                        inputMessage.toLowerCase().includes('graph') || 
+                        inputMessage.toLowerCase().includes('show me with chart') || 
+                        inputMessage.includes('visualize');
+      
+          const chartData = showGraph ? {
+            ...prepareChartData(queryResults),
+            datasets: prepareChartData(queryResults).datasets.map(dataset => ({
+              ...dataset,
+              backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e', '#6366f1', '#14b8a6', '#d946ef', '#84cc16'],
+              borderColor: '#3b82f6'
+            }))
+          } : null;
+      
+          // If it's a heatmap query, handle specially
+          if (isBusiestTimeQuery) {
+            const heatmapData = prepareHeatmapData(queryResults);
+            const assistantMessage: Message = {
+              id: Date.now().toString(),
+              type: 'assistant',
+              content: 'Here\'s a heatmap showing the busiest time slots by day. Darker shades indicate higher booking counts.',
+              data: {
+                sql: sqlQuery,
+                results: queryResults,
+                isHeatmap: true,
+                heatmapData: heatmapData,
+                showTable: false
+              }
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+          } else {
+            // Get insights about the query results
+            const insightsResponse = await axios.post(OPENAI_INSIGHTS_CONFIG.apiEndpoint, {
+              model: OPENAI_INSIGHTS_CONFIG.model,
+              messages: OPENAI_INSIGHTS_CONFIG.formatMessages(JSON.stringify(queryResults), inputMessage)
+            }, axiosConfig);
+        
+            if (!insightsResponse.data.choices?.[0]?.message?.content) {
+              throw new Error('No insights received from OpenAI API. Please try again.');
+            }
+        
+            const insightsContent = insightsResponse.data.choices[0].message.content;
+            const businessInsightsMatch = insightsContent.match(/\[Response\]([\s\S]*?)\[End Response\]/i);
+            
+            if (!businessInsightsMatch) {
+              throw new Error('Invalid insights format. Please try again.');
+            }
+        
+            const responseContent = businessInsightsMatch[1].trim();
+        
+            const assistantMessage: Message = {
+              id: Date.now().toString(),
+              type: 'assistant',
+              content: responseContent,
+              data: {
+                sql: sqlQuery,
+                results: queryResults,
+                chartData: showGraph ? chartData : undefined,
+                chartType: showGraph ? 'bar' : undefined,
+                showTable: true
+              }
+            };
+        
+            setMessages(prev => [...prev, assistantMessage]);
+          }
+          break;
+        }
+          
+        case 'CUSTOMER_INSIGHT': {
+          // Extract customer name if present
+          const customerNameMatch = inputMessage.match(/(?:about|for|on)\s+([A-Z][a-z]+ [A-Z][a-z]+)/i);
+          const customerName = customerNameMatch ? customerNameMatch[1] : null;
+          
+          if (!customerName) {
+            // No customer name found, ask for clarification
+            const assistantMessage: Message = {
+              id: Date.now().toString(),
+              type: 'assistant',
+              content: "I'd be happy to provide insights about a specific customer. Could you please specify which customer you'd like information about?"
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
+            break;
+          }
+          
+          // First, get customer data using SQL
+          if (schemaLoading) {
+            throw new Error('Schema data is still loading. Please wait...');
+          }
+          
+          const { OPENAI_SQL_CONFIG } = await import('./config/openai');
+          
+          const axiosConfig = {
+            timeout: 30000,
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          };
+          
+          // Get customer data using a predefined SQL query
+          const customerQuery = `
+          SELECT 
+            c.Name AS CustomerName,
+            c.Phone AS CustomerPhone,
+            c.Email AS CustomerEmail,
+            COUNT(DISTINCT a.ID) AS TotalAppointments,
+            SUM(a.Total) AS TotalSpent,
+            AVG(a.Total) AS AverageSpent,
+            MAX(a.CheckInTime) AS LastVisit,
+            STRING_AGG(DISTINCT s.ServiceName, ', ') AS PreferredServices
+          FROM great_time.LemonDataView a
+          JOIN great_time.LemonDataView c ON a.CustomerID = c.ID
+          JOIN great_time.LemonDataView s ON a.ServiceID = s.ID
+          WHERE c.Name LIKE '%${customerName}%'
+          GROUP BY c.Name, c.Phone, c.Email
+          `;
+          
+          try {
+            const queryResponse = await axios.post('http://localhost:3000/api/query', { query: customerQuery }, axiosConfig);
+            if (!queryResponse.data.success) {
+              throw new Error(queryResponse.data.error || 'Failed to retrieve customer data');
+            }
+            
+            const customerData = queryResponse.data.data;
+            
+            if (!customerData || customerData.length === 0) {
+              // No customer found with that name
+              const assistantMessage: Message = {
+                id: Date.now().toString(),
+                type: 'assistant',
+                content: `I couldn't find any customer named "${customerName}" in our database. Please check the spelling or try a different customer name.`
+              };
+              
+              setMessages(prev => [...prev, assistantMessage]);
+              break;
+            }
+            
+            // Store customer data in context memory
+            updateContext({
+              customerContext: JSON.stringify(customerData)
+            });
+            
+            // Get customer insights
+            const insightResponse = await handleCustomerInsight(inputMessage, JSON.stringify(customerData));
+            
+            const assistantMessage: Message = {
+              id: Date.now().toString(),
+              type: 'assistant',
+              content: insightResponse,
+              data: {
+                isCustomerInsight: true,
+                customerName: customerName,
+                customerData: customerData,
+                showCustomerProfile: true,
+                sql: '',
+                results: []
+              }
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
+          } catch (error) {
+            console.error('Error fetching customer data:', error);
+            throw new Error('Failed to retrieve customer information. Please try again.');
+          }
+          break;
+        }
+          
+        case 'RECOMMENDATION': {
+          // Handle business recommendations
+          // First, we need some business data to make recommendations
+          if (schemaLoading) {
+            throw new Error('Schema data is still loading. Please wait...');
+          }
+          
+          const axiosConfig = {
+            timeout: 30000,
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          };
+          
+          // Get relevant business metrics for recommendations
+          const metricsQuery = `
+          SELECT
+            'Revenue' AS Metric,
+            SUM(Total) AS Value,
+            EXTRACT(MONTH FROM CheckInTime) AS Month
+          FROM great_time.LemonDataView
+          WHERE CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 6 MONTH)
+          GROUP BY Month
+          
+          UNION ALL
+          
+          SELECT
+            'Customers' AS Metric,
+            COUNT(DISTINCT CustomerID) AS Value,
+            EXTRACT(MONTH FROM CheckInTime) AS Month
+          FROM great_time.LemonDataView
+          WHERE CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 6 MONTH)
+          GROUP BY Month
+          
+          UNION ALL
+          
+          SELECT
+            'ServicesByCategory' AS Metric,
+            COUNT(*) AS Value,
+            ServiceType AS Month
+          FROM great_time.LemonDataView
+          WHERE CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 6 MONTH)
+          GROUP BY ServiceType
+          `;
+          
+          try {
+            const queryResponse = await axios.post('http://localhost:3000/api/query', { query: metricsQuery }, axiosConfig);
+            if (!queryResponse.data.success) {
+              throw new Error(queryResponse.data.error || 'Failed to retrieve business metrics');
+            }
+            
+            const businessData = queryResponse.data.data;
+            
+            // Store business metrics in context memory
+            updateContext({
+              businessContext: JSON.stringify(businessData)
+            });
+            
+            // Get business recommendations
+            const recommendationResponse = await handleRecommendation(inputMessage, JSON.stringify(businessData));
+            
+            const assistantMessage: Message = {
+              id: Date.now().toString(),
+              type: 'assistant',
+              content: recommendationResponse,
+              data: {
+                isRecommendation: true,
+                businessMetrics: businessData,
+                sql: '',
+                results: []
+              }
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
+          } catch (error) {
+            console.error('Error fetching business metrics:', error);
+            throw new Error('Failed to generate business recommendations. Please try again.');
+          }
+          break;
+        }
+          
+        case 'CLARIFICATION': {
+          // Handle clarification about previous responses
+          // Use context from the last query if available
+          if (contextMemory.lastResults && contextMemory.lastQuery) {
+            const { OPENAI_INSIGHTS_CONFIG } = await import('./config/openai');
+            
+            const axiosConfig = {
+              timeout: 30000,
+              headers: {
+                'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+              }
+            };
+            
+            // Combine the current question with context about the previous question
+            const clarificationPrompt = `Previous question: ${contextMemory.lastQuery}\nCurrent clarification: ${inputMessage}`;
+            
+            try {
+              // Get insights about the previous query results with the clarification
+              const insightsResponse = await axios.post(OPENAI_INSIGHTS_CONFIG.apiEndpoint, {
+                model: OPENAI_INSIGHTS_CONFIG.model,
+                messages: OPENAI_INSIGHTS_CONFIG.formatMessages(JSON.stringify(contextMemory.lastResults), clarificationPrompt)
+              }, axiosConfig);
+          
+              if (!insightsResponse.data.choices?.[0]?.message?.content) {
+                throw new Error('No insights received from OpenAI API. Please try again.');
+              }
+          
+              const insightsContent = insightsResponse.data.choices[0].message.content;
+              const businessInsightsMatch = insightsContent.match(/\[Response\]([\s\S]*?)\[End Response\]/i);
+              
+              if (!businessInsightsMatch) {
+                throw new Error('Invalid insights format. Please try again.');
+              }
+          
+              const responseContent = businessInsightsMatch[1].trim();
+          
+              const assistantMessage: Message = {
+                id: Date.now().toString(),
+                type: 'assistant',
+                content: responseContent,
+                data: {
+                  isClarification: true,
+                  results: contextMemory.lastResults,
+                  showTable: true,
+                  sql: ''
+                }
+              };
+          
+              setMessages(prev => [...prev, assistantMessage]);
+            } catch (error) {
+              console.error('Error clarifying previous response:', error);
+              throw new Error('Failed to clarify the previous response. Please try asking your question again.');
+            }
+          } else {
+            // No context available
+            const assistantMessage: Message = {
+              id: Date.now().toString(),
+              type: 'assistant',
+              content: "I'm not sure what you'd like me to clarify. Could you please provide more details or ask a new question?"
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
+          }
+          break;
+        }
+          
+        default: {
+          // Fall back to default SQL query handling
+          // This should be handled by the DATA_QUERY case, but just in case
+          const assistantMessage: Message = {
+            id: Date.now().toString(),
+            type: 'assistant',
+            content: "I'm not sure how to process that request. Could you try rephrasing your question?"
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error:', err);
+      let errorMessage = '';
+      
+      if (err.response?.status === 404) {
+        errorMessage = 'OpenAI API endpoint not found. Please check your API configuration.';
+      } else if (err.response?.status === 401) {
+        errorMessage = 'Invalid API key. Please check your OpenAI API key configuration.';
+      } else if (err.response?.status === 429) {
+        errorMessage = 'Rate limit exceeded. Please try again later.';
+      } else if (err.code === 'ECONNREFUSED') {
+        errorMessage = 'Could not connect to the API. Please check your internet connection.';
+      } else {
+        errorMessage = err.response?.data?.error
+          || err.response?.data?.message
+          || err.message
+          || 'Unknown error occurred';
+      }
+      
+      setError(errorMessage);
+  
+      const errorAssistantMessage: Message = {
+        id: Date.now().toString(),
+        type: 'assistant',
+        content: `Error: ${errorMessage}`
+      };
+  
+      setMessages(prev => [...prev, errorAssistantMessage]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const prepareChartData = useMemo(() => (data: any[]) => {
+    if (!data || !Array.isArray(data) || data.length === 0) return { labels: [], datasets: [{ data: [] }] };
+
+    let chartData = [];
+    {
+      const numericKey = Object.keys(data[0]).find(key => typeof data[0][key] === 'number');
+      const labelKey = Object.keys(data[0]).find(key => typeof data[0][key] === 'string');
+
+      if (!numericKey || !labelKey) return { labels: [], datasets: [{ data: [] }] };
+
+      chartData = data.map(item => ({
+        name: item[labelKey]?.toString() || 'Unknown',
+        value: Number(item[numericKey]) || 0
+      }));
+    }
+
+    return {
+      labels: chartData.map(item => item.name),
+      datasets: [{
+        data: chartData.map(item => item.value)
+      }]
+    };
+  }, []);
+
+  // Update the prepareHeatmapData function to only show business hours
+  const prepareHeatmapData = (data: any[]) => {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const hours = Array.from({ length: 11 }, (_, i) => (i + 9).toString()); // 9:00 to 19:00
+    
+    // Initialize the heatmap data structure
+    const heatmapData = {
+      days,
+      hours,
+      values: {} as { [key: string]: { [key: string]: number } }
+    };
+
+    // Initialize all slots with 0
+    days.forEach(day => {
+      heatmapData.values[day] = {};
+      hours.forEach(hour => {
+        heatmapData.values[day][hour] = 0;
+      });
+    });
+
+    // Fill in the actual values
+    data.forEach((item: any) => {
+      if (item.day_of_week && item.hour_of_day !== undefined) {
+        const hour = parseInt(item.hour_of_day);
+        if (hour >= 9 && hour <= 19) {
+          heatmapData.values[item.day_of_week][item.hour_of_day] = item.booking_count;
+        }
+      }
+    });
+
+    return heatmapData;
+  };
+
+  useEffect(() => {
+    sessionStorage.setItem('chatMessages', JSON.stringify(messages));
+  }, [messages]);
+
+  const handleRefresh = () => {
+    const welcomeMessage = {
+      id: 'welcome',
+      type: 'assistant' as const,
+      content: 'Hi there! 👋 I\'m here to help answer your questions and uncover insights. What would you like to know?'
+    };
+    setMessages([welcomeMessage]);
+    setInputMessage('');
+    setLoading(false);
+    setError('');
+    fetchSchema();
+  };
+
+  const renderMessageContent = (content: string, data?: MessageData) => {
+    // For messages with special UI elements or data visualizations
+    if (data?.isHeatmap || data?.chartData || data?.sql) {
+      // For data-focused messages, continue using the original rendering approach
+      // These need special UI handling for SQL, charts, and tables that are already implemented
+      return (
+        <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+          {content}
+        </Typography>
+      );
+    }
+    
+    // For standard message types that can benefit from enhanced rendering
+    if (data?.isCustomerInsight || 
+        data?.isRecommendation || 
+        data?.isHelp || 
+        data?.isBankingSuggestion || 
+        data?.isReminderSuggestion ||
+        data?.isPaymentSuggestion || 
+        data?.isNavigationSuggestion || 
+        data?.isCustomerDetailsSuggestion ||
+        data?.isClarification) {
+      // Use our new component for enhanced UI rendering
+      return (
+        <EnhancedChatMessage message={{ id: 'temp-id', type: 'assistant', content, data }} />
+      );
+    }
+    
+    // Check if the message is about daily report - keep this special case
+    if (content.toLowerCase().includes('daily report') || content.toLowerCase().includes('daily treatment')) {
+      return (
+        <Box>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            You can view the Daily Treatment Report here:
+          </Typography>
+          <Link 
+            to="/daily-treatment"
+            style={{ textDecoration: 'none' }}
+          >
+            <Button
+              variant="contained"
+              sx={{
+                bgcolor: '#1a73e8',
+                '&:hover': {
+                  bgcolor: '#1557b0'
+                }
+              }}
+            >
+              Go to Daily Treatment Report
+            </Button>
+          </Link>
+        </Box>
+      );
+    }
+
+    // Process markdown links
+    const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = linkRegex.exec(content)) !== null) {
+      // Add text before the link
+      if (match.index > lastIndex) {
+        parts.push(content.slice(lastIndex, match.index));
+      }
+
+      // Add the link component
+      parts.push(
+        <Link
+          key={match.index}
+          to={match[2]}
+          style={{
+            color: '#1a73e8',
+            textDecoration: 'none'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.textDecoration = 'underline';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.textDecoration = 'none';
+          }}
+        >
+          {match[1]}
+        </Link>
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add any remaining text
+    if (lastIndex < content.length) {
+      parts.push(content.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : content;
+  };
+
+  // New function to extract topics from user message
+  const extractTopicsFromMessage = (message: string) => {
+    const lowercaseMsg = message.toLowerCase();
+    
+    // Check for common topics
+    const topics = [
+      'customer', 'customers', 'client', 'clients',
+      'service', 'services', 'treatment', 'treatments',
+      'therapist', 'therapists', 'staff', 'employee',
+      'sales', 'revenue', 'income', 'profit',
+      'appointment', 'appointments', 'booking', 'bookings'
+    ];
+    
+    topics.forEach(topic => {
+      if (lowercaseMsg.includes(topic)) {
+        // Normalize to singular form
+        const normalizedTopic = topic.replace(/s$/, '');
+        addRecentTopic(normalizedTopic);
+      }
+    });
+  };
+
+  // Add suggested query handler
+  const handleSuggestedQuerySelect = (query: string) => {
+    setInputMessage(query);
+    // Optional: Auto-send the query when selected
+    setTimeout(() => {
+      document.getElementById('send-message-button')?.click();
+    }, 100);
+  };
+
+  useEffect(() => {
+    // Scroll to bottom when messages change
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Save messages to session storage
+    sessionStorage.setItem('chatMessages', JSON.stringify(messages));
+  }, [messages]);
+
+  return (
+    <Container maxWidth={false} sx={{ 
+      p: { xs: 1, sm: 2, md: 3 },
+      m: 0,
+      minHeight: '100vh',
+      width: '100vw',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      bgcolor: '#ffffff',
+      color: '#000000',
+      overflowX: 'hidden'
+    }}>
+      <Paper sx={{ 
+        flex: 1,
+        m: { xs: 1, sm: 2, md: 3 },
+        p: { xs: 2, sm: 3, md: 4 },
+        height: { xs: 'calc(100vh - 32px)', sm: 'calc(100vh - 48px)', md: 'calc(100vh - 64px)' },
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        bgcolor: '#ffffff',
+        borderRadius: { xs: 2, sm: 3, md: 4 },
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      }}>
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3
+        }}>
+          <Typography variant="h6" sx={{ color: '#000000', fontWeight: 500 }}>
+            AI Chat Assistant
+          </Typography>
+          <IconButton
+            onClick={handleRefresh}
+            sx={{
+              color: '#1a73e8',
+              '&:hover': {
+                backgroundColor: 'rgba(26, 115, 232, 0.04)',
+                transform: 'rotate(180deg)'
+              },
+              transition: 'all 0.3s ease'
+            }}
+          >
+            <RefreshIcon />
+          </IconButton>
+        </Box>
+        <Box sx={{ 
+          flex: 1, 
+          overflowY: 'auto', 
+          mb: 8,
+          pb: { xs: '160px', sm: '140px' }  // Add padding at the bottom for the input container
+        }}>          
+          {messages.map(message => (
+            <Box
+              key={message.id}
+              sx={{
+                display: 'flex',
+                flexDirection: message.type === 'user' ? 'row-reverse' : 'row',
+                mb: 3,
+                gap: 2
+              }}
+            >
+              <Avatar 
+                sx={{ 
+                  bgcolor: message.type === 'user' ? '#1a73e8' : 'rgba(33, 33, 33, 0.8)',
+                  width: 40,
+                  height: 40,
+                  '& .MuiSvgIcon-root': {
+                    fontSize: '1.5rem'
+                  }
+                }}
+              >
+                {message.type === 'user' ? <PersonIcon /> : <AutoAwesomeIcon />}
+              </Avatar>
+              <Paper
+                sx={{
+                  p: { xs: 1.5, sm: 2 },
+                  maxWidth: { xs: '85%', sm: '80%', md: '75%' },
+                  bgcolor: message.type === 'user' ? '#1a73e8' : '#f5f5f5',
+                  color: message.type === 'user' ? '#ffffff' : '#000000',
+                  borderRadius: { xs: 1.5, sm: 2 },
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  wordBreak: 'break-word'
+                }}
+              >
+                <Typography sx={{ 
+                  fontSize: { xs: '0.9rem', sm: '1rem' }, 
+                  lineHeight: 1.6,
+                  '& a': {
+                    color: message.type === 'user' ? '#ffffff' : '#1a73e8',
+                    textDecoration: 'none',
+                    '&:hover': {
+                      textDecoration: 'underline'
+                    }
+                  }
+                }}>
+                  {renderMessageContent(message.content, message.data)}
+                </Typography>
+                {message.data && (
+                  <Box sx={{ mt: 2 }}>
+                    {message.data.isHeatmap && message.data.heatmapData && (
+                      <TableContainer sx={{ 
+                        maxHeight: 500,
+                        overflowX: 'auto',
+                        width: '100%'
+                      }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell 
+                                sx={{ 
+                                  bgcolor: '#f5f5f5',
+                                  color: '#000000',
+                                  fontWeight: 'bold',
+                                  position: 'sticky',
+                                  left: 0,
+                                  zIndex: 3,
+                                  borderRight: '1px solid rgba(0, 0, 0, 0.12)'
+                                }}
+                              >
+                                Day
+                              </TableCell>
+                              {(message.data?.heatmapData?.hours || []).map((hour: string) => (
+                                <TableCell 
+                                  key={hour} 
+                                  align="center"
+                                  sx={{ 
+                                    bgcolor: '#f5f5f5',
+                                    color: '#000000',
+                                    fontWeight: 'bold',
+                                    minWidth: '60px'
+                                  }}
+                                >
+                                  {`${hour}:00`}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {(message.data?.heatmapData?.days || []).map((day: string) => {
+                              const dayValues = message.data?.heatmapData?.values[day] ?? {};
+                              const dayValueArray = Object.values(dayValues).map(v => Number(v));
+                              const maxDayValue = dayValueArray.length > 0 ? Math.max(...dayValueArray) : 0;
+                              
+                              return (
+                                <TableRow key={day}>
+                                  <TableCell 
+                                    sx={{ 
+                                      color: '#000000',
+                                      position: 'sticky',
+                                      left: 0,
+                                      bgcolor: '#ffffff',
+                                      borderRight: '1px solid rgba(0, 0, 0, 0.12)',
+                                      minWidth: '120px'
+                                    }}
+                                  >
+                                    {day}
+                                  </TableCell>
+                                  {(message.data?.heatmapData?.hours || []).map((hour: string) => {
+                                    const value = Number(dayValues[hour] ?? 0);
+                                    const opacity = value === 0 ? 0 : 0.2 + (value / maxDayValue) * 0.7;
+                                    return (
+                                      <TableCell 
+                                        key={`${day}-${hour}`} 
+                                        align="center"
+                                        sx={{ 
+                                          color: '#000000',
+                                          bgcolor: `rgba(26, 115, 232, ${opacity})`,
+                                          transition: 'background-color 0.3s ease',
+                                          '&:hover': {
+                                            bgcolor: value > 0 ? `rgba(26, 115, 232, ${Math.min(opacity + 0.2, 1)})` : 'transparent'
+                                          }
+                                        }}
+                                      >
+                                        {value}
+                                      </TableCell>
+                                    );
+                                  })}
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                    {!message.data.isHeatmap && message.data.results && message.data.results.length > 0 && message.data.results[0] && (
+                      <Box sx={{ mt: 2 }}>
+                        <Suspense fallback={<CircularProgress />}>
+                          <LazyDataTable 
+                            data={message.data.results} 
+                            onCustomerClick={(customerName) => {
+                              if (!customerName) {
+                                alert('Customer name is required');
+                                return;
+                              }
+                              navigate(`/customer/${encodeURIComponent(customerName)}`);
+                            }}
+                            onServiceClick={(serviceName) => {
+                              if (!serviceName) {
+                                alert('Service name is required');
+                                return;
+                              }
+                              navigate(`/service/${encodeURIComponent(serviceName)}`);
+                            }}
+                            onTherapistClick={(therapistName) => {
+                              if (!therapistName) {
+                                alert('Therapist name is required');
+                                return;
+                              }
+                              navigate(`/therapist/${encodeURIComponent(therapistName)}`);
+                            }}
+                          />
+                        </Suspense>
+                        {message.data.chartData && (
+                          <Box sx={{
+                            mt: 2,
+                            width: '100%',
+                            position: 'relative',
+                            aspectRatio: { xs: '4/3', sm: '2/1' },
+                            minHeight: { xs: '180px', sm: '200px' },
+                            maxHeight: { xs: '300px', sm: '350px', md: '400px' }
+                          }}>
+                            <Bar
+                              data={message.data.chartData}
+                              options={{
+                                responsive: true,
+                                maintainAspectRatio: true,
+                                plugins: {
+                                  legend: { display: false },
+                                  title: { display: false }
+                                },
+                                scales: {
+                                  y: {
+                                    beginAtZero: true,
+                                    ticks: { color: '#000000' },
+                                    grid: { color: 'rgba(0, 0, 0, 0.1)' }
+                                  },
+                                  x: {
+                                    ticks: { color: '#000000' },
+                                    grid: { color: 'rgba(0, 0, 0, 0.1)' }
+                                  }
+                                }
+                              }}
+                            />
+                          </Box>
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                )}
+              </Paper>
+            </Box>
+          ))}
+        </Box>
+        
+        <Box
+          sx={{
+            position: 'fixed',
+            bottom: 0,
+            left: { xs: 0, sm: 'auto' },
+            right: { xs: 0, sm: 'auto' },
+            width: { xs: '100%', sm: 'calc(100% - 32px)', md: 'calc(100% - 48px)' },
+            p: { xs: 2, sm: 3 },
+            boxSizing: 'border-box',
+            bgcolor: '#ffffff',
+            borderTop: '1px solid rgba(0, 0, 0, 0.12)',
+            zIndex: 5
+          }}
+        >
+          {/* Add SuggestedQueries component */}
+          {!loading && messages.length > 0 && (
+            <SuggestedQueries 
+              recentTopics={contextMemory.recentTopics}
+              onSelectQuery={handleSuggestedQuerySelect}
+            />
+          )}
+          
+          <Box sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 1 
+          }}>
+            <TextField
+              fullWidth
+              placeholder="Ask me anything about your business data..."
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              autoFocus
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: 3,
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#1a73e8'
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#1a73e8'
+                  }
+                }
+              }}
+              multiline
+              maxRows={4}
+            />
+            <IconButton 
+              onClick={handleSendMessage} 
+              disabled={loading || !inputMessage.trim()}
+              sx={{
+                backgroundColor: '#1a73e8',
+                color: 'white',
+                width: 48,
+                height: 48,
+                '&:hover': {
+                  backgroundColor: '#1557b0'
+                },
+                '&.Mui-disabled': {
+                  backgroundColor: '#e0e0e0',
+                  color: '#9e9e9e'
+                }
+              }}
+            >
+              {loading ? <CircularProgress size={24} color="inherit" /> : <SendIcon />}
+            </IconButton>
+          </Box>
+        </Box>
+      </Paper>
+    </Container>
+  );
+}
+
+const App = () => {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<MainChat />} />
+        <Route path="/commission" element={<CommissionPage />} />
+        <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
+        <Route path="/payment-details" element={<PaymentDetails />} />
+        <Route path="/banking-details" element={<BankingDetails />} />
+        <Route path="/customer/:name" element={<CustomerDetails />} />
+        <Route path="/service/:name" element={<ServiceDetails />} />
+        <Route path="/therapist/:name" element={<TherapistDetails />} />
+      </Routes>
+    </Router>
+  );
+};
+
+export default App;
