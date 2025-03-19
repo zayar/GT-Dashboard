@@ -33,6 +33,7 @@ interface Transaction {
   Date: string;
   InvoiceNumber: string;
   CustomerName: string;
+  CustomerPhoneNumber: string;
   ServiceName: string;
   ServicePackageName: string | null;
   PaymentMethod: string;
@@ -585,7 +586,19 @@ const SalesBySalesPerson: React.FC = () => {
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.Date}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.SellerName || '-'}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.InvoiceNumber}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.CustomerName}</TableCell>
+                          <TableCell 
+                            sx={{ 
+                              color: '#3b82f6', 
+                              borderBottom: '1px solid #2d3748',
+                              cursor: 'pointer',
+                              '&:hover': {
+                                textDecoration: 'underline'
+                              } 
+                            }}
+                            onClick={() => navigate(`/customers/${encodeURIComponent(transaction.CustomerPhoneNumber || transaction.CustomerName)}`)}
+                          >
+                            {transaction.CustomerName}
+                          </TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.ServiceName}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.ServicePackageName || '-'}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.PaymentMethod}</TableCell>
