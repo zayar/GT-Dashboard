@@ -1,12 +1,11 @@
-import React, { useMemo, useCallback, useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, TablePagination, useTheme } from '@mui/material';
-import { Bar } from 'react-chartjs-2';
-import { ChartData } from 'chart.js';
-import axios from 'axios';
-import { SelectChangeEvent } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { Avatar, Box, CircularProgress, Grid, IconButton, MenuItem, Pagination, Paper, Select, SelectChangeEvent, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, useTheme } from '@mui/material';
+import axios from 'axios';
+import { ChartData } from 'chart.js';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Bar } from 'react-chartjs-2';
+import { useNavigate, useParams } from 'react-router-dom';
 
 interface ServiceDetailsProps {}
 
@@ -232,7 +231,7 @@ WHERE ServiceName = '${escapedServiceName}'
 AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
 GROUP BY ServiceName, ServiceStats.ServiceImage, total_bookings, total_customers, total_revenue;`;
 
-        const profileResponse = await axios.post('http://localhost:3000/api/query', 
+        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: profileQuery },
           {
             headers: {
@@ -322,7 +321,7 @@ SELECT
   ARRAY(SELECT AS STRUCT * FROM Customers) as customers,
   ARRAY(SELECT AS STRUCT * FROM ServiceRecords) as serviceRecords;`;
 
-        const dataResponse = await axios.post('http://localhost:3000/api/query', 
+        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: dataQuery },
           {
             headers: {
@@ -1021,7 +1020,7 @@ SELECT
                           }}
                           onClick={() => {
                             // Look for phone in record or find it in the service data
-                            const customerPhone = record.phone || 
+                            const customerPhone = (record as any ).phone || 
                               // Try to find the phone number from the customers array if available
                               (serviceData.customers?.find(c => c.name === record.customer_name)?.phone) || 
                               record.customer_name;

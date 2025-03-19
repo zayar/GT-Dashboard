@@ -247,7 +247,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       LIMIT 5
       `;
       
-      const response = await axios.post('/api/query', 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
         { query: recommendationsQuery },
         {
           headers: {
@@ -548,7 +548,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       
       try {
         console.log('Fetching payment history for customer:', escapedPhoneNumber);
-        const response = await axios.post('/api/query',
+        const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
           { 
             query: paymentQuery 
           },
@@ -701,7 +701,7 @@ GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
       console.log('Executing profile query:', profileQuery);
 
       try {
-        const profileResponse = await axios.post('/api/query', 
+        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { 
             query: profileQuery
           },
@@ -799,7 +799,7 @@ SELECT
 
         console.log('Executing data query:', dataQuery);
 
-        const dataResponse = await axios.post('/api/query', 
+        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { 
             query: dataQuery
           },

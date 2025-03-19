@@ -87,8 +87,8 @@ const DailyTreatmentReport: React.FC = () => {
       ORDER BY CheckInTime DESC;`;
 
       const [matrixResponse, recordsResponse] = await Promise.all([
-        axios.post('/api/query', { query: matrixQuery }),
-        axios.post('/api/query', { query: recordsQuery })
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, { query: matrixQuery }),
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, { query: recordsQuery })
       ]);
 
       if (!matrixResponse.data.success || !recordsResponse.data.success) {

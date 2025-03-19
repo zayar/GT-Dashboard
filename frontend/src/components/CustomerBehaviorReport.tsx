@@ -114,14 +114,14 @@ const CustomerBehaviorReport: React.FC = () => {
       
       // Execute queries in parallel
       const [visitsResponse, customersResponse] = await Promise.all([
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: customerVisitsSQL },
           {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000
           }
         ),
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: monthlyCustomersSQL },
           {
             headers: { 'Content-Type': 'application/json' },

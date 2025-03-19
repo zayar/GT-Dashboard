@@ -1,36 +1,30 @@
-import React, { useState, useEffect, useMemo, lazy, Suspense, useRef } from 'react';
-import { Box, Container, TextField, Button, Typography, Paper, CircularProgress, IconButton, Avatar, TableContainer, Table, TableHead, TableBody, TableRow, TableCell } from '@mui/material';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, BarElement } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
-import SendIcon from '@mui/icons-material/Send';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import PersonIcon from '@mui/icons-material/Person';
-import { SUGGESTION_PROMPTS } from './config/suggestions';
-import axios from 'axios';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { BrowserRouter as Router, Routes, Route, useNavigate, Link, Navigate } from 'react-router-dom';
+import SendIcon from '@mui/icons-material/Send';
+import { Box, Button, CircularProgress, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
+import axios from 'axios';
+import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Title, Tooltip } from 'chart.js';
+import { lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Bar } from 'react-chartjs-2';
+import { Toaster } from 'react-hot-toast';
+import { Link, Navigate, Route, BrowserRouter as Router, Routes, useNavigate } from 'react-router-dom';
+import Appointments from './components/Appointments';
+import BankingDetails from './components/BankingDetails';
+import Commission from './components/Commission';
+import CustomerBehaviorReport from './components/CustomerBehaviorReport';
 import CustomerDetails from './components/CustomerDetails';
+import CustomersTable from './components/CustomersTable';
+import DailyTreatmentReport from './components/DailyTreatmentReport';
+import Dashboard from './components/Dashboard';
+import Login from './components/Login';
+import PaymentDetails from './components/PaymentDetails';
+import SalesBySalesPerson from './components/SalesBySalesPerson';
+import ServiceBehaviorReport from './components/ServiceBehaviorReport';
 import ServiceDetails from './components/ServiceDetails';
 import ServicesTable from './components/ServicesTable';
+import Sidebar from './components/Sidebar';
 import TherapistDetails from './components/TherapistDetails';
 import TherapistList from './components/TherapistList';
-import CommissionPage from './components/CommissionPage';
-import DailyTreatmentReport from './components/DailyTreatmentReport';
-import PaymentDetails from './components/PaymentDetails';
-import BankingDetails from './components/BankingDetails';
-import Appointments from './components/Appointments';
-import { v4 as uuidv4 } from 'uuid';
-import Sidebar from './components/Sidebar';
-import CustomersTable from './components/CustomersTable';
-import { Toaster } from 'react-hot-toast';
-import Dashboard from './components/Dashboard';
-import CustomerBehaviorReport from './components/CustomerBehaviorReport';
-import ServiceBehaviorReport from './components/ServiceBehaviorReport';
-import ClinicSelector from './components/ClinicSelector';
-import { ClinicProvider, useClinic, Clinic } from './contexts/ClinicContext';
-import SalesBySalesPerson from './components/SalesBySalesPerson';
-import Login from './components/Login';
-import Commission from './components/Commission';
+import { ClinicProvider, useClinic } from './contexts/ClinicContext';
 
 ChartJS.register(
   CategoryScale,
@@ -110,7 +104,12 @@ const MainChat = () => {
   const fetchSchema = async () => {
     try {
       setSchemaLoading(true);
-      const response = await axios.get('http://localhost:3000/api/schema');
+      const searchQuery = new URLSearchParams({
+        datasetId: import.meta.env.VITE_DATASET_ID,
+        tableId: import.meta.env.VITE_TABLE_ID,
+      })
+      setSchemaLoading(true);
+      const response = await axios.get(`${import.meta.env.VITE_API_URL}/schema?${searchQuery}`);
       if (response.data.success) {
         setSchema(response.data.data);
       } else {
@@ -364,7 +363,7 @@ ORDER BY
         sqlQuery = sqlMatch[1].trim().replace(/FROM\s+LemonDataView/g, 'FROM great_time.LemonDataView');
       }
   
-        const queryResponse = await axios.post('http://localhost:3000/api/query', { query: sqlQuery }, axiosConfig);
+        const queryResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query: sqlQuery }, axiosConfig);
         if (!queryResponse.data.success) {
           throw new Error(queryResponse.data.error || 'Failed to execute SQL query');
         }

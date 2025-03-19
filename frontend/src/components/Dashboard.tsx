@@ -164,7 +164,7 @@ const Dashboard: React.FC = () => {
 
         // API endpoint to execute the query
         console.log('Executing query:', query);
-        const response = await fetch('/api/query', {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -293,7 +293,7 @@ const Dashboard: React.FC = () => {
         
         console.log('Executing full query:', fullQuery);
         
-        const fullResponse = await fetch('/api/query', {
+        const fullResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -491,7 +491,7 @@ const Dashboard: React.FC = () => {
         
         console.log('Executing stats query:', statsQuery);
         
-        const statsResponse = await fetch('/api/query', {
+        const statsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -615,7 +615,7 @@ const Dashboard: React.FC = () => {
         
         console.log('Executing top services query:', topServicesQuery);
         
-        const topServicesResponse = await fetch('/api/query', {
+        const topServicesResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -707,7 +707,7 @@ const Dashboard: React.FC = () => {
         
         console.log('Executing payment methods query:', paymentMethodsQuery);
         
-        const paymentMethodsResponse = await fetch('/api/query', {
+        const paymentMethodsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -793,7 +793,7 @@ const Dashboard: React.FC = () => {
         
         console.log('Executing therapists query:', therapistsQuery);
         
-        const therapistsResponse = await fetch('/api/query', {
+        const therapistsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

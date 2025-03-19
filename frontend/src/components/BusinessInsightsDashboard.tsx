@@ -154,28 +154,28 @@ const BusinessInsightsDashboard: React.FC = () => {
       
       // Execute queries in parallel
       const [keyMetricsResponse, customerResponse, serviceResponse, salesResponse] = await Promise.all([
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: keyMetricsSQL },
           {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000
           }
         ),
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: customerDataSQL },
           {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000
           }
         ),
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: serviceDataSQL },
           {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000
           }
         ),
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: salesDataSQL },
           {
             headers: { 'Content-Type': 'application/json' },

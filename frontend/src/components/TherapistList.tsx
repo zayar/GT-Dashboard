@@ -68,7 +68,7 @@ const TherapistList: React.FC = () => {
       LIMIT 100
       `;
 
-      const response = await axios.post('/api/query', 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
         { query },
         {
           headers: {

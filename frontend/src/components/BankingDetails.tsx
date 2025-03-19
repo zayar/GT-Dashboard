@@ -158,7 +158,7 @@ const BankingDetails: React.FC = () => {
       `;
 
       // Simulate API call with fetch
-      const response = await fetch('/api/query', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

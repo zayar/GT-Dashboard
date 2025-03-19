@@ -92,7 +92,7 @@ const Appointments: React.FC = () => {
       `;
 
       console.log('Executing query:', query);
-      const response = await axios.post('/api/query', { query });
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query });
       
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch appointments');

@@ -106,7 +106,7 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
       
       console.log('Fetching clinics with query:', query);
       
-      const response = await fetch('/api/query', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

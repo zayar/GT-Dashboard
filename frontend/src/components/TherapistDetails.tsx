@@ -1,12 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Container, TextField, useTheme, Button } from '@mui/material';
+import { Avatar, Box, Button, CircularProgress, Grid, MenuItem, Pagination, Paper, Select, SelectChangeEvent, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, useTheme } from '@mui/material';
 import axios from 'axios';
-import { SelectChangeEvent } from '@mui/material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 
 interface TherapistDetailsProps {}
 
@@ -171,7 +167,7 @@ SELECT
   CAST(total_service_hours / 24 AS INT64) as total_service_days
 FROM TherapistStats;`;
 
-        const profileResponse = await axios.post('http://localhost:3000/api/query', 
+        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: profileQuery },
           {
             headers: {
@@ -229,7 +225,7 @@ SELECT
   ARRAY(SELECT AS STRUCT * FROM CustomersByMonth) as customersByMonth,
   ARRAY(SELECT AS STRUCT * FROM ServiceRecords) as serviceRecords;`;
 
-        const dataResponse = await axios.post('http://localhost:3000/api/query', 
+        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: dataQuery },
           {
             headers: {
