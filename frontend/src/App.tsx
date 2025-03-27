@@ -688,16 +688,18 @@ ORDER BY
             const serviceField = Object.keys(queryResults[0]).find(key => 
               ['service_name', 'ServiceName', 'service', 'treatment'].includes(key));
             
-            const timeField = Object.keys(queryResults[0]).find(key => 
-              ['check_in_time', 'CheckInTime', 'appointment_time', 'time', 'date', 'schedule_time'].includes(key));
+            // Remove time field handling since it's causing display issues
+            // const timeField = Object.keys(queryResults[0]).find(key => 
+            //   ['check_in_time', 'CheckInTime', 'appointment_time', 'time', 'date', 'schedule_time'].includes(key));
             
             const therapistField = Object.keys(queryResults[0]).find(key => 
               ['practitioner_name', 'PractitionerName', 'therapist_name', 'therapist', 'staff'].includes(key));
             
             if (customerField && serviceField) {
-              // Create headers based on available fields
+              // Create headers based on available fields - exclude Time
               const headers = ['#', 'Customer Name', 'Service'];
-              if (timeField) headers.push('Time');
+              // Don't include the time field that causes issues
+              // if (timeField) headers.push('Time');
               if (therapistField) headers.push('Therapist');
               
               // Create rows with available data
@@ -708,18 +710,18 @@ ORDER BY
                   item[serviceField]
                 ];
                 
-                // Add time if available, with formatting
-                if (timeField) {
-                  try {
-                    const date = new Date(item[timeField]);
-                    row.push(format(date, 'MMM dd, yyyy h:mm a'));
-                  } catch (e) {
-                    row.push(item[timeField] || 'N/A');
-                  }
-                }
+                // Skip time field that causes issues
+                // if (timeField) {
+                //   try {
+                //     const date = new Date(item[timeField]);
+                //     row.push(format(date, 'MMM dd, yyyy h:mm a'));
+                //   } catch (e) {
+                //     row.push(item[timeField]?.toString() || 'N/A');
+                //   }
+                // }
                 
                 // Add therapist if available
-                if (therapistField) row.push(item[therapistField] || 'N/A');
+                if (therapistField) row.push(item[therapistField]?.toString() || 'N/A');
                 
                 return row;
               });
@@ -1338,7 +1340,9 @@ ORDER BY
                             borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                           }}
                         >
-                          {cell}
+                          {typeof cell === 'object' && cell !== null 
+                            ? (cell.value?.toString() || 'N/A') 
+                            : (cell?.toString() || 'N/A')}
                         </TableCell>
                       );
                     })}
@@ -1481,7 +1485,9 @@ ORDER BY
                               borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                             }}
                           >
-                            {cell}
+                            {typeof cell === 'object' && cell !== null 
+                              ? (cell.value?.toString() || 'N/A') 
+                              : (cell?.toString() || 'N/A')}
                           </TableCell>
                         );
                       })}
