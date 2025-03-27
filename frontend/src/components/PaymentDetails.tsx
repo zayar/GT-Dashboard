@@ -33,6 +33,7 @@ import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface PaymentRecord {
   Date: string;
@@ -50,6 +51,7 @@ interface PaymentRecord {
 
 const PaymentDetails: React.FC = () => {
   const navigate = useNavigate();
+  const { currentClinic } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<PaymentRecord[]>([]);
@@ -156,13 +158,13 @@ const PaymentDetails: React.FC = () => {
   }, [data, viewMode]);
 
   useEffect(() => {
-    if (selectedDate) {
+    if (selectedDate && currentClinic) {
       fetchPaymentData();
     }
-  }, [selectedDate, filterType]);
+  }, [selectedDate, filterType, currentClinic]);
 
   const fetchPaymentData = async () => {
-    if (!selectedDate) return;
+    if (!selectedDate || !currentClinic) return;
     
     try {
       setLoading(true);
@@ -179,13 +181,14 @@ const PaymentDetails: React.FC = () => {
           PaymentStatus,
           PaymentMethod,
           CAST(NetTotal AS FLOAT64) as InvoiceNetTotal
-        FROM great_time.QueenPaymentView
+        FROM great_time.MainPaymentView
         WHERE ${filterType === 'day' 
           ? `DATE(OrderCreatedDate) = DATE('${selectedDate.toISOString().split('T')[0]}')`
           : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate.toISOString().split('T')[0]}'))`
         }
-        AND NOT STARTS_WITH(InvoiceNumber, 'CO-')  /* Filter out invoices starting with CO- */
+
         AND PaymentMethod != 'PASS'  /* Filter out transactions with PASS payment method */
+        AND ClinicCode = '${currentClinic.code}'  /* Filter by selected clinic */
         ORDER BY OrderCreatedDate DESC
       `;
 

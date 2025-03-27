@@ -28,6 +28,7 @@ import { ApexOptions } from 'apexcharts';
 import SearchIcon from '@mui/icons-material/Search';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import { useClinic } from '../contexts/ClinicContext';
 
 // Define period type for time selection
 type PeriodType = 'monthly' | 'quarterly' | 'annual';
@@ -57,6 +58,7 @@ interface PractitionerServiceData {
 }
 
 const ServiceBehaviorReport: React.FC = () => {
+  const { currentClinic } = useClinic();
   const [period, setPeriod] = useState<PeriodType>('monthly');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,15 +102,22 @@ const ServiceBehaviorReport: React.FC = () => {
         groupFormat = "EXTRACT(YEAR FROM CheckInTime)::text";
       }
       
+      if (!currentClinic) {
+        setError('No clinic selected. Please select a clinic first.');
+        setLoading(false);
+        return;
+      }
+      
       // SQL for service bookings by month
       const serviceBookingsSQL = `
         SELECT 
           ServiceName AS serviceName,
           ${groupFormat} AS month,
           COUNT(*) AS bookingCount
-        FROM great_time.QueenDataView
+        FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND ServiceName IS NOT NULL
+        AND ClinicCode = '${currentClinic.code}'
         GROUP BY ServiceName, ${groupFormat}
         ORDER BY ServiceName, ${groupFormat} ASC
       `;
@@ -118,9 +127,10 @@ const ServiceBehaviorReport: React.FC = () => {
         SELECT 
           ${groupFormat} AS month,
           COUNT(*) AS totalBookings
-        FROM great_time.QueenDataView
+        FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND ServiceName IS NOT NULL
+        AND ClinicCode = '${currentClinic.code}'
         GROUP BY ${groupFormat}
         ORDER BY ${groupFormat} ASC
       `;
@@ -131,10 +141,11 @@ const ServiceBehaviorReport: React.FC = () => {
           PractitionerName AS practitionerName,
           ServiceName AS serviceName,
           COUNT(*) AS bookingCount
-        FROM great_time.QueenDataView
+        FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND ServiceName IS NOT NULL
         AND PractitionerName IS NOT NULL
+        AND ClinicCode = '${currentClinic.code}'
         GROUP BY PractitionerName, ServiceName
         ORDER BY bookingCount DESC
         LIMIT 100

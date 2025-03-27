@@ -35,6 +35,7 @@ import {
 } from '@mui/icons-material';
 import DataTable from './DataTable';
 import { format } from 'date-fns';
+import { useClinic } from '../contexts/ClinicContext';
 
 // Interface for Payment Records
 interface PaymentRecord {
@@ -62,6 +63,7 @@ const BankingDetails: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
+  const { currentClinic } = useClinic();
   
   // States
   const [loading, setLoading] = useState<boolean>(true);
@@ -84,6 +86,8 @@ const BankingDetails: React.FC = () => {
 
   // Fetch data function
   const fetchData = useCallback(async () => {
+    if (!currentClinic) return;
+    
     setLoading(true);
     setError(null);
 
@@ -149,10 +153,11 @@ const BankingDetails: React.FC = () => {
           WalletTopUp,
           CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal
         FROM 
-          great_time.QueenPaymentView
+          great_time.MainPaymentView
         WHERE 
           ${dateCondition}
           AND PaymentStatus = 'PAID'
+          AND ClinicCode = '${currentClinic.code}'
         ORDER BY 
           OrderCreatedDate DESC, InvoiceNumber
       `;
@@ -191,7 +196,7 @@ const BankingDetails: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate, filterType, selectedPaymentMethods]);
+  }, [selectedDate, filterType, startDate, endDate, currentClinic]);
 
   // Generate summary data from raw data
   const generateSummaryData = (data: PaymentRecord[]) => {
@@ -448,8 +453,10 @@ const BankingDetails: React.FC = () => {
 
   // Fetch data on component mount and when dependencies change
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (currentClinic) {
+      fetchData();
+    }
+  }, [fetchData, currentClinic]);
 
   // Update document title based on time period
   useEffect(() => {

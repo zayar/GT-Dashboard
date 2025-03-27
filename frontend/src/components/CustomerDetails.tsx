@@ -8,6 +8,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Button, Chip } from '@mui/material';
 import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
+import { useClinic } from '../contexts/ClinicContext';
 
 // Types for customer profile and data
 interface CustomerProfile {
@@ -41,6 +42,7 @@ interface CustomerDetailsProps {}
 const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const navigate = useNavigate();
   const { name: phoneNumber } = useParams<{ name: string }>();
+  const { currentClinic } = useClinic();
   const [loading, setLoading] = React.useState(true);
   const [customerData, setCustomerData] = React.useState<any>(null);
   const [error, setError] = React.useState('');
@@ -209,7 +211,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       const recommendationsQuery = `
      WITH CustomerServices AS (
     SELECT DISTINCT ServiceName
-    FROM great_time.QueenDataView
+    FROM great_time.MainDataView
     WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
 ),
 
@@ -218,8 +220,8 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           a.ServiceName AS ServiceA,
           b.ServiceName AS ServiceB,
           COUNT(*) as frequency
-        FROM great_time.QueenDataView a
-        JOIN great_time.QueenDataView b 
+        FROM great_time.MainDataView a
+        JOIN great_time.MainDataView b 
           ON a.BookingID = b.BookingID 
           AND a.ServiceName <> b.ServiceName
         WHERE a.ServiceName IN (SELECT ServiceName FROM CustomerServices)
@@ -242,7 +244,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
         AVG(Price) as average_price,
         MAX(ServiceDescription) as description
       FROM RecommendedServices
-      JOIN great_time.QueenDataView ON ServiceB = ServiceName
+      JOIN great_time.MainnDataView ON ServiceB = ServiceName
       GROUP BY service_name
       LIMIT 5
       `;
@@ -285,17 +287,17 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     setPaymentFetched(false);
     preventFetch.current = false;
     
-    if (phoneNumber) {
+    if (phoneNumber && currentClinic) {
       fetchCustomerData().catch(err => {
         setError(`Failed to fetch customer data: ${err.message}`);
         setLoading(false);
       });
     }
-  }, [phoneNumber, selectedYear]); // Added selectedYear as dependency
+  }, [phoneNumber, currentClinic, selectedYear]); // Added selectedYear as dependency
   
   // Effect for fetching customer payment history
   useEffect(() => {
-    if (phoneNumber && !paymentFetched && !preventFetch.current) {
+    if (phoneNumber && !paymentFetched && !preventFetch.current && currentClinic) {
       try {
         // If we already have customer data, use the phone number from there for better reliability
         const phoneToUse = customerData && customerData.phone ? customerData.phone : phoneNumber;
@@ -339,7 +341,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
         });
       }
     }
-  }, [phoneNumber, paymentFetched, customerData, selectedYear]); // Added customerData as dependency
+  }, [phoneNumber, paymentFetched, customerData, selectedYear, currentClinic]); // Added customerData as dependency
 
   // Add this useMemo for payment chart data
   const paymentChartData = useMemo(() => {
@@ -495,62 +497,73 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
 
   // Add a function to fetch customer payment history
   const fetchCustomerPaymentHistory = async (customerPhoneNumber: string) => {
-    // Return early if we've already fetched payment data
-    if (paymentFetched) {
+    if (!customerPhoneNumber || !currentClinic) {
+      setPaymentError('Customer phone number is required and clinic must be selected');
+      setPaymentLoading(false);
       return;
     }
     
     try {
       setPaymentLoading(true);
-      setPaymentError('');
       
-      // Escape single quotes to prevent SQL injection
-      const escapedPhoneNumber = customerPhoneNumber.replace(/'/g, "''");
+      const decodedPhoneNumber = decodeURIComponent(customerPhoneNumber);
+      const sanitizeForSQL = (input: string): string => {
+        return input.replace(/'/g, "''");
+      };
+      const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
       
-      // Query to get customer's payment history
-      const paymentQuery = `
-      WITH PaymentSummary AS (
-        SELECT 
-          FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) AS Date,
-          InvoiceNumber,
-          CustomerName,
-          CustomerPhoneNumber,
-          ServiceName,
-          ServicePackageName,
-          PaymentMethod,
-          PaymentStatus,
-          CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
-          SellerName,
-          ROW_NUMBER() OVER(PARTITION BY InvoiceNumber ORDER BY OrderCreatedDate) as RowNum
-        FROM 
-          great_time.QueenPaymentView
-        WHERE 
-          REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-          AND PaymentStatus = 'PAID'
-          AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-          AND PaymentMethod != 'PASS'
-      )
-      SELECT
-        Date,
-        InvoiceNumber,
-        CustomerName,
-        ServiceName,
-        ServicePackageName,
-        PaymentMethod,
-        PaymentStatus,
-        InvoiceNetTotal,
-        SellerName
-      FROM 
-        PaymentSummary
-      ORDER BY 
-        Date DESC, InvoiceNumber;
+      // Payment History query
+      const query = `
+-- Get payment data
+WITH CustomerPayments AS (
+  SELECT 
+    OrderCreatedDate,
+    InvoiceNumber,
+    PaymentMethod,
+    NetTotal,
+    PaymentStatus,
+    ServiceName,
+    ServicePackageName,
+    SellerName
+  FROM great_time.MainPaymentView
+  WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
+    AND ClinicCode = '${currentClinic.code}'
+)
+
+-- Select payment history and summary separately
+SELECT
+  InvoiceNumber AS invoiceNumber,
+  FORMAT_TIMESTAMP('%Y-%m-%d', OrderCreatedDate) AS date,
+  PaymentMethod AS method,
+  ServiceName,
+  ServicePackageName,
+  SellerName,
+  CAST(NetTotal AS INT64) AS amount,
+  PaymentStatus AS status
+FROM CustomerPayments
+ORDER BY OrderCreatedDate DESC;
+
+-- Run a separate query for summary data
+-- SELECT
+--   COUNT(DISTINCT InvoiceNumber) AS invoiceCount,
+--   SUM(NetTotal) AS totalSpent
+-- FROM CustomerPayments
+-- WHERE PaymentStatus = 'PAID';
+
+-- SELECT
+--   PaymentMethod AS method,
+--   COUNT(*) AS count,
+--   SUM(NetTotal) AS total
+-- FROM CustomerPayments
+-- WHERE PaymentStatus = 'PAID'
+-- GROUP BY PaymentMethod;
       `;
       
       try {
         console.log('Fetching payment history for customer:', escapedPhoneNumber);
         const response = await axios.post('/api/query',
           { 
-            query: paymentQuery 
+            query: query 
           },
           {
             headers: {
@@ -570,30 +583,30 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
         
         // Filter out records with 0 MMK value
         const filteredPaymentData = paymentData.filter((payment: any) => 
-          payment.InvoiceNetTotal && payment.InvoiceNetTotal > 0
+          payment.amount && payment.amount > 0
         );
         
         console.log(`Filtered out ${paymentData.length - filteredPaymentData.length} zero-value records`);
         setPaymentHistory(filteredPaymentData);
         
-        // Calculate payment summary
+        // Calculate payment summary manually since we simplified the query
         if (filteredPaymentData.length > 0) {
           // Get unique invoice numbers to count actual invoices
-          const uniqueInvoices = [...new Set(filteredPaymentData.map((p: any) => p.InvoiceNumber))];
+          const uniqueInvoices = [...new Set(filteredPaymentData.map((p: any) => p.invoiceNumber))];
           
           // Calculate total spent
           const totalSpent = filteredPaymentData.reduce((sum: number, payment: any) => 
-            sum + (payment.InvoiceNetTotal || 0), 0);
+            sum + (payment.amount || 0), 0);
           
           // Group by payment method
           const methodGroups: Record<string, { count: number; total: number }> = {};
           filteredPaymentData.forEach((payment: any) => {
-            const method = payment.PaymentMethod || 'Unknown';
+            const method = payment.method || 'Unknown';
             if (!methodGroups[method]) {
               methodGroups[method] = { count: 0, total: 0 };
             }
             methodGroups[method].count += 1;
-            methodGroups[method].total += (payment.InvoiceNetTotal || 0);
+            methodGroups[method].total += (payment.amount || 0);
           });
           
           // Format payment methods summary
@@ -653,8 +666,8 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
 
   // Basic fetchCustomerData function that can be called from useEffect
     const fetchCustomerData = async () => {
-    if (!phoneNumber) {
-      setError('Customer phone number is required');
+    if (!phoneNumber || !currentClinic) {
+      setError('Customer phone number is required and clinic must be selected');
         setLoading(false);
         return;
       }
@@ -682,9 +695,10 @@ WITH AllAppointments AS (
   SELECT DISTINCT
     BookingID,
     CheckInTime
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
     AND CheckInTime IS NOT NULL
+    AND ClinicCode = '${currentClinic.code}'
 )
 SELECT
   CustomerName AS name,
@@ -694,8 +708,9 @@ SELECT
   COUNT(DISTINCT ServiceName) AS total_services,
   FORMAT_TIMESTAMP('%d %b, %Y %I:%M %p', MAX(CheckInTime)) AS last_appointment,
   (SELECT COUNT(*) FROM AllAppointments) AS total_appointments
-FROM great_time.QueenDataView
+FROM great_time.MainDataView
 WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
+  AND ClinicCode = '${currentClinic.code}'
 GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
 
       console.log('Executing profile query:', profileQuery);
@@ -735,9 +750,10 @@ WITH MonthlySales AS (
   SELECT
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
     SUM(CAST(Price AS FLOAT64)) AS amount
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
     AND Price IS NOT NULL
+    AND ClinicCode = '${currentClinic.code}'
   GROUP BY month
   ORDER BY month DESC
   LIMIT 6
@@ -751,8 +767,9 @@ PurchasedServices AS (
     RemainingPackageCount AS remainingPackageCount,
     Price as PaymentAmount,
     FORMAT_TIMESTAMP('%d %b, %Y', MAX(CheckInTime)) AS last_used
-FROM great_time.QueenDataView
+FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
+    AND ClinicCode = '${currentClinic.code}'
   GROUP BY service, PackageCount, RemainingPackageCount, Price
 ),
 
@@ -766,9 +783,10 @@ RecentBookings AS (
     Price as price,
     'CONFIRMED' as status,
     'APP' as source
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
     AND CheckInTime IS NOT NULL
+    AND ClinicCode = '${currentClinic.code}'
   ORDER BY CheckInTime DESC
   LIMIT 10
 )
@@ -1230,7 +1248,7 @@ SELECT
           <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', mb: 3, borderRadius: '8px' }}>
             <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: '#f3f4f6' }}>
               <AutoAwesomeIcon sx={{ color: '#3b82f6' }} />
-            Customer Insights
+              Customer Insights
           </Typography>
             <Typography sx={{ color: '#d1d5db', lineHeight: 1.6 }}>{aiSummary}</Typography>
         </Paper>
@@ -1797,7 +1815,7 @@ SELECT
                     </TableHead>
                     <TableBody>
                       {paymentHistory.map((payment, index) => (
-                        <TableRow key={`${payment.InvoiceNumber}-${index}`} sx={{
+                        <TableRow key={`${payment.invoiceNumber}-${index}`} sx={{
                           '&:hover': {
                             bgcolor: '#242f3d',
                           },
@@ -1807,14 +1825,14 @@ SELECT
                           },
                           borderBottom: '1px solid #2d3748'
                         }}>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.Date}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.InvoiceNumber}</TableCell>
+                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.date}</TableCell>
+                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.invoiceNumber}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.ServiceName}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.ServicePackageName || '-'}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.PaymentMethod}</TableCell>
+                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.method}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.SellerName || '-'}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
-                            {Number(payment.InvoiceNetTotal).toLocaleString('en-US', {
+                            {Number(payment.amount).toLocaleString('en-US', {
                               minimumFractionDigits: 0,
                               maximumFractionDigits: 0
                             })} MMK

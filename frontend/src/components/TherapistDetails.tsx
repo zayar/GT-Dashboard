@@ -158,7 +158,7 @@ WITH TherapistStats AS (
     MIN(CheckInTime) as first_service_date,
     MAX(CheckInTime) as last_service_date,
     TIMESTAMP_DIFF(MAX(CheckInTime), MIN(CheckInTime), HOUR) as total_service_hours
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   GROUP BY PractitionerName, PractitionerImage
 )
@@ -195,7 +195,7 @@ WITH ServicesByMonth AS (
     ServiceName as service_name,
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
     COUNT(*) as count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   GROUP BY ServiceName, month
   ORDER BY month DESC, count DESC
@@ -207,7 +207,7 @@ CustomersByMonth AS (
     CustomerPhoneNumber as customer_phone,
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
     COUNT(*) as visit_count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   GROUP BY CustomerName, customer_phone, month
   ORDER BY month DESC, visit_count DESC
@@ -219,7 +219,7 @@ ServiceRecords AS (
     ServiceName as service,
     CustomerName as customer_name,
     CustomerPhoneNumber as customer_phone
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   ORDER BY CheckInTime DESC
 )

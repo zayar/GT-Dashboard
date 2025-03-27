@@ -81,7 +81,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { id: 'service-behavior', label: 'Service Behavior', icon: 'fas fa-spa', path: '/service-behavior-report' },
       ]
     },
-    { id: 'appointments', label: 'Appointments', icon: 'fas fa-calendar-alt', path: '/appointments' },
+    { 
+      id: 'appointments', 
+      label: 'Appointments', 
+      icon: 'fas fa-calendar-alt', 
+      hasSubmenu: true,
+      submenu: [
+        { id: 'appointments-list', label: 'Appointments', icon: 'fas fa-calendar-check', path: '/appointments' },
+        { id: 'checkin-out', label: 'CheckIn/Out', icon: 'fas fa-clipboard-check', path: '/check-in-out' },
+      ]
+    },
     { id: 'conversational-ai', label: 'Conversational AI', icon: 'fas fa-robot', path: '/conversational-ai', isAiFeature: true },
     { 
       id: 'sales', 
@@ -96,7 +105,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     },
     { id: 'customers', label: 'Customers', icon: 'fas fa-users', path: '/customers' },
     { id: 'services', label: 'Services', icon: 'fas fa-spa', path: '/services' },
-    { id: 'therapists', label: 'Therapists', icon: 'fas fa-user-md', path: '/therapists' },
+    { 
+      id: 'therapists', 
+      label: 'Therapists', 
+      icon: 'fas fa-user-md',
+      hasSubmenu: true,
+      submenu: [
+        { id: 'therapist-list', label: 'Therapists', icon: 'fas fa-user-md', path: '/therapists' },
+        { id: 'helper-list', label: 'Helpers', icon: 'fas fa-hands-helping', path: '/helpers' },
+      ]
+    },
     { id: 'commission', label: 'Commission', icon: 'fas fa-percentage', path: '/commission' },
   ];
 

@@ -35,33 +35,33 @@ import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format } from 'date-fns';
 
-interface Therapist {
+interface Helper {
   id: string;
   name: string;
-  image: string;
   bookingCount: number;
 }
 
 // Add a new interface for appointment data
 interface Appointment {
-  therapistName: string;
+  helperId: string;
   helperName: string;
   service: string;
   customer: string;
+  practitioner: string;
   date: string;
   bookingId: string;
 }
 
-const TherapistList: React.FC = () => {
+const HelperList: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
-  const [therapists, setTherapists] = useState<Therapist[]>([]);
+  const [helpers, setHelpers] = useState<Helper[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [rowsPerPage] = useState(10);
-  const [orderBy, setOrderBy] = useState<keyof Therapist>('bookingCount');
+  const [orderBy, setOrderBy] = useState<keyof Helper>('bookingCount');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   
   // Date filter states
@@ -71,7 +71,7 @@ const TherapistList: React.FC = () => {
     new Date(new Date().setDate(new Date().getDate() - 7))
   );
   const [endDate, setEndDate] = useState<Date | null>(new Date());
-
+  
   // Appointment details state
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
@@ -79,21 +79,21 @@ const TherapistList: React.FC = () => {
   const [appointmentPage, setAppointmentPage] = useState(1);
   const [appointmentsPerPage] = useState(10);
   
-  // Selected therapist for filtering
-  const [selectedTherapist, setSelectedTherapist] = useState<string | null>(null);
+  // Selected helper for filtering
+  const [selectedHelper, setSelectedHelper] = useState<string | null>(null);
 
   // Add state for CSV export loading
-  const [exportingTherapists, setExportingTherapists] = useState(false);
+  const [exportingHelpers, setExportingHelpers] = useState(false);
   const [exportingAppointments, setExportingAppointments] = useState(false);
 
   useEffect(() => {
     if (currentClinic) {
-      fetchTherapists();
+      fetchHelpers();
       fetchAppointments();
     }
   }, [currentClinic, filterType, selectedDate, startDate, endDate]);
 
-  const fetchTherapists = async () => {
+  const fetchHelpers = async () => {
     try {
       setLoading(true);
       
@@ -150,19 +150,18 @@ const TherapistList: React.FC = () => {
       
       const query = `
       SELECT 
-        PractitionerName as name,
-        PractitionerImage as image,
+        HelperName as name,
         COUNT(*) as bookingCount
       FROM 
         great_time.MainDataView
       WHERE 
-        PractitionerName IS NOT NULL
-        AND PractitionerName != 'N/A'
-        AND TRIM(PractitionerName) != ''
+        HelperName IS NOT NULL
+        AND HelperName != 'N/A'
+        AND TRIM(HelperName) != ''
         AND ClinicCode = '${currentClinic?.code}'
         AND ${dateCondition}
       GROUP BY 
-        PractitionerName, PractitionerImage
+        HelperName
       ORDER BY 
         bookingCount DESC
       LIMIT 100
@@ -182,24 +181,23 @@ const TherapistList: React.FC = () => {
       );
 
       if (!response.data.success) {
-        throw new Error(response.data.error || 'Failed to fetch employees');
+        throw new Error(response.data.error || 'Failed to fetch helpers');
       }
 
       const data = response.data.data;
       
-      // Map the response data to Therapist interface
-      const formattedTherapists = data.map((therapist: any, index: number) => ({
+      // Map the response data to Helper interface
+      const formattedHelpers = data.map((helper: any, index: number) => ({
         id: index.toString(),
-        name: therapist.name || 'Unknown',
-        image: therapist.image || '',
-        bookingCount: therapist.bookingCount || 0
+        name: helper.name || 'Unknown',
+        bookingCount: helper.bookingCount || 0
       }));
 
-      setTherapists(formattedTherapists);
+      setHelpers(formattedHelpers);
       setLoading(false);
     } catch (err: any) {
-      console.error('Error fetching employees:', err);
-      let errorMessage = 'An error occurred while fetching employee data';
+      console.error('Error fetching helpers:', err);
+      let errorMessage = 'An error occurred while fetching helper data';
       
       if (err.response) {
         if (err.response.data && err.response.data.error) {
@@ -274,17 +272,17 @@ const TherapistList: React.FC = () => {
       const query = `
       SELECT 
         BookingID as bookingId,
-        PractitionerName as therapistName,
         HelperName as helperName,
         ServiceName as service,
         CustomerName as customer,
+        PractitionerName as practitioner,
         FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', CheckInTime) as date
       FROM 
         great_time.MainDataView
       WHERE 
-        PractitionerName IS NOT NULL
-        AND PractitionerName != 'N/A'
-        AND TRIM(PractitionerName) != ''
+        HelperName IS NOT NULL
+        AND HelperName != 'N/A'
+        AND TRIM(HelperName) != ''
         AND ClinicCode = '${currentClinic?.code}'
         AND ${dateCondition}
       ORDER BY 
@@ -313,10 +311,11 @@ const TherapistList: React.FC = () => {
       
       // Map the response data to Appointment interface
       const formattedAppointments = data.map((appointment: any, index: number) => ({
-        therapistName: appointment.therapistName || 'Unknown',
+        helperId: index.toString(),
         helperName: appointment.helperName || 'Unknown',
         service: appointment.service || 'Unknown',
         customer: appointment.customer || 'Unknown',
+        practitioner: appointment.practitioner || 'Unknown',
         date: appointment.date || 'Unknown',
         bookingId: appointment.bookingId || 'Unknown'
       }));
@@ -351,7 +350,7 @@ const TherapistList: React.FC = () => {
     setFilterType(newFilterType);
     
     // Reset data to ensure fetch happens with new filter
-    setTherapists([]);
+    setHelpers([]);
     
     // Handle the case when switching to/from custom date range
     if (newFilterType === 'custom') {
@@ -382,10 +381,10 @@ const TherapistList: React.FC = () => {
     }
   };
 
-  const handleViewTherapist = (therapist: Therapist) => {
-    // Encode therapist name for URL and navigate to details page
-    const encodedName = encodeURIComponent(therapist.name);
-    navigate(`/therapists/${encodedName}`);
+  const handleViewHelper = (helper: Helper) => {
+    // Encode helper name for URL and navigate to details page
+    const encodedName = encodeURIComponent(helper.name);
+    navigate(`/helpers/${encodedName}`);
   };
 
   const handleChangePage = (_event: unknown, newPage: number) => {
@@ -393,14 +392,14 @@ const TherapistList: React.FC = () => {
   };
 
   // Function to handle sorting
-  const handleRequestSort = (property: keyof Therapist) => {
+  const handleRequestSort = (property: keyof Helper) => {
     const isAsc = orderBy === property && order === 'asc';
     setOrder(isAsc ? 'desc' : 'asc');
     setOrderBy(property);
   };
 
   // Sort comparator function
-  const getComparator = <T extends Therapist>(
+  const getComparator = <T extends Helper>(
     order: 'asc' | 'desc',
     orderBy: keyof T
   ): (a: T, b: T) => number => {
@@ -410,7 +409,7 @@ const TherapistList: React.FC = () => {
   };
 
   // Descending comparator function
-  const descendingComparator = <T extends Therapist>(
+  const descendingComparator = <T extends Helper>(
     a: T,
     b: T,
     orderBy: keyof T
@@ -424,54 +423,54 @@ const TherapistList: React.FC = () => {
     return 0;
   };
 
-  const filteredTherapists = therapists.filter(therapist =>
-    therapist.name.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredHelpers = helpers.filter(helper =>
+    helper.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Sort the filtered therapists
-  const sortedTherapists = React.useMemo(
-    () => [...filteredTherapists].sort(getComparator(order, orderBy)),
-    [filteredTherapists, order, orderBy]
+  // Sort the filtered helpers
+  const sortedHelpers = React.useMemo(
+    () => [...filteredHelpers].sort(getComparator(order, orderBy)),
+    [filteredHelpers, order, orderBy]
   );
 
   // Calculate pagination
   const startIndex = (page - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
-  const paginatedTherapists = sortedTherapists.slice(startIndex, endIndex);
+  const paginatedHelpers = sortedHelpers.slice(startIndex, endIndex);
 
-  // Add a new function to handle selecting a therapist for filtering
-  const handleSelectTherapist = (therapist: Therapist) => {
-    if (selectedTherapist === therapist.name) {
-      // If already selected, clear the filter
-      setSelectedTherapist(null);
-    } else {
-      // Set the selected therapist
-      setSelectedTherapist(therapist.name);
-      // Reset appointment pagination when changing filter
-      setAppointmentPage(1);
-    }
-  };
-
-  // Filter appointments by search term and selected therapist
+  // Filter appointments by search term
   const filteredAppointments = appointments.filter(appointment => {
     const matchesSearch = 
-      appointment.therapistName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       appointment.helperName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       appointment.service.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      appointment.customer.toLowerCase().includes(searchTerm.toLowerCase());
+      appointment.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      appointment.practitioner.toLowerCase().includes(searchTerm.toLowerCase());
     
-    // Apply therapist filter if one is selected
-    const matchesTherapist = selectedTherapist 
-      ? appointment.therapistName === selectedTherapist 
+    // Apply helper filter if one is selected
+    const matchesHelper = selectedHelper 
+      ? appointment.helperName === selectedHelper 
       : true;
     
-    return matchesSearch && matchesTherapist;
+    return matchesSearch && matchesHelper;
   });
 
   // Calculate pagination for appointments
   const startAppointmentIndex = (appointmentPage - 1) * appointmentsPerPage;
   const endAppointmentIndex = startAppointmentIndex + appointmentsPerPage;
   const paginatedAppointments = filteredAppointments.slice(startAppointmentIndex, endAppointmentIndex);
+
+  // Add a new function to handle selecting a helper for filtering
+  const handleSelectHelper = (helper: Helper) => {
+    if (selectedHelper === helper.name) {
+      // If already selected, clear the filter
+      setSelectedHelper(null);
+    } else {
+      // Set the selected helper
+      setSelectedHelper(helper.name);
+      // Reset appointment pagination when changing filter
+      setAppointmentPage(1);
+    }
+  };
 
   // Function to convert data to CSV
   const convertToCSV = <T extends Record<string, any>>(data: T[], fields?: { [key: string]: string }): string => {
@@ -518,23 +517,23 @@ const TherapistList: React.FC = () => {
     document.body.removeChild(link);
   };
   
-  // Function to handle therapist export
-  const handleExportTherapists = async () => {
+  // Function to handle helper export
+  const handleExportHelpers = async () => {
     try {
-      setExportingTherapists(true);
+      setExportingHelpers(true);
       
-      // Use existing therapists data if available, or fetch all data if needed
-      let dataToExport = therapists;
+      // Use existing helpers data if available, or fetch all data if needed
+      let dataToExport = helpers;
       
       // If we need to fetch a complete dataset (e.g., if the current data is filtered or incomplete)
-      if (currentClinic && therapists.length === 0) {
-        await fetchTherapists();
-        dataToExport = therapists;
+      if (currentClinic && helpers.length === 0) {
+        await fetchHelpers();
+        dataToExport = helpers;
       }
       
       // Define field mappings for better column names
       const fields = {
-        name: 'Therapist Name',
+        name: 'Helper Name',
         bookingCount: 'Booking Count'
       };
       
@@ -543,14 +542,14 @@ const TherapistList: React.FC = () => {
       // Generate filename with date
       const date = format(new Date(), 'yyyy-MM-dd');
       const clinicCode = currentClinic?.code || 'all';
-      const filename = `therapist_list_${clinicCode}_${date}.csv`;
+      const filename = `helper_list_${clinicCode}_${date}.csv`;
       
       downloadCSV(csvData, filename);
     } catch (error) {
-      console.error('Error exporting therapists:', error);
+      console.error('Error exporting helpers:', error);
       // You could add error handling/notification here
     } finally {
-      setExportingTherapists(false);
+      setExportingHelpers(false);
     }
   };
   
@@ -604,28 +603,28 @@ const TherapistList: React.FC = () => {
         dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
       }
       
-      // Add therapist filter if selected
-      const therapistCondition = selectedTherapist 
-        ? `AND PractitionerName = '${selectedTherapist}'` 
+      // Add helper filter if selected
+      const helperCondition = selectedHelper 
+        ? `AND HelperName = '${selectedHelper}'` 
         : '';
       
       const query = `
       SELECT 
         BookingID as bookingId,
-        PractitionerName as therapistName,
         HelperName as helperName,
         ServiceName as service,
         CustomerName as customer,
+        PractitionerName as practitioner,
         FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', CheckInTime) as date
       FROM 
         great_time.MainDataView
       WHERE 
-        PractitionerName IS NOT NULL
-        AND PractitionerName != 'N/A'
-        AND TRIM(PractitionerName) != ''
+        HelperName IS NOT NULL
+        AND HelperName != 'N/A'
+        AND TRIM(HelperName) != ''
         AND ClinicCode = '${currentClinic?.code}'
         AND ${dateCondition}
-        ${therapistCondition}
+        ${helperCondition}
       ORDER BY 
         CheckInTime DESC
       LIMIT 1000
@@ -647,20 +646,20 @@ const TherapistList: React.FC = () => {
       }
       
       const exportData = response.data.data.map((appointment: any) => ({
-        therapistName: appointment.therapistName || 'Unknown',
         helperName: appointment.helperName || 'Unknown',
         service: appointment.service || 'Unknown',
         customer: appointment.customer || 'Unknown',
+        practitioner: appointment.practitioner || 'Unknown',
         date: appointment.date || 'Unknown',
         bookingId: appointment.bookingId || 'Unknown'
       }));
       
       // Define field mappings for better column names
       const fields = {
-        therapistName: 'Therapist Name',
         helperName: 'Helper Name',
         service: 'Service',
         customer: 'Customer',
+        practitioner: 'Practitioner',
         date: 'Date & Time',
         bookingId: 'Booking ID'
       };
@@ -670,8 +669,8 @@ const TherapistList: React.FC = () => {
       // Generate filename with date
       const date = format(new Date(), 'yyyy-MM-dd');
       const clinicCode = currentClinic?.code || 'all';
-      const therapistSuffix = selectedTherapist ? `_therapist_${selectedTherapist.replace(/\s+/g, '_')}` : '';
-      const filename = `appointments_${clinicCode}${therapistSuffix}_${date}.csv`;
+      const helperSuffix = selectedHelper ? `_helper_${selectedHelper.replace(/\s+/g, '_')}` : '';
+      const filename = `appointments_${clinicCode}${helperSuffix}_${date}.csv`;
       
       downloadCSV(csvData, filename);
     } catch (error) {
@@ -692,7 +691,7 @@ const TherapistList: React.FC = () => {
     >
       <Box className="flex justify-between items-center mb-6">
         <Typography variant="h4" component="h1" className="text-white font-bold">
-          Therapist List
+          Helper List
         </Typography>
         <Box className="flex gap-3">
           <Button
@@ -700,7 +699,7 @@ const TherapistList: React.FC = () => {
             startIcon={<RefreshIcon />}
             className="bg-[#2563eb] hover:bg-blue-700"
             onClick={() => {
-              fetchTherapists();
+              fetchHelpers();
               fetchAppointments();
             }}
           >
@@ -708,7 +707,7 @@ const TherapistList: React.FC = () => {
           </Button>
         </Box>
       </Box>
-      
+
       <Paper 
         elevation={3} 
         className="mb-6 p-4"
@@ -723,7 +722,7 @@ const TherapistList: React.FC = () => {
         >
           <Box className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
             <TextField
-              placeholder="Search employees..."
+              placeholder="Search helpers..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               variant="outlined"
@@ -873,18 +872,18 @@ const TherapistList: React.FC = () => {
           </Box>
         </Box>
       </Paper>
-
+      
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h6" sx={{ color: 'white', fontWeight: 'bold' }}>
-          Therapist Summary
+          Helper Summary
         </Typography>
-        <Tooltip title="Export all therapists to CSV">
+        <Tooltip title="Export all helpers to CSV">
           <Button
             variant="outlined"
             size="small"
-            startIcon={exportingTherapists ? <CircularProgress size={20} sx={{ color: 'white' }} /> : <FileDownloadIcon />}
-            onClick={handleExportTherapists}
-            disabled={exportingTherapists || loading || error !== ''}
+            startIcon={exportingHelpers ? <CircularProgress size={20} color="inherit" /> : <FileDownloadIcon />}
+            onClick={handleExportHelpers}
+            disabled={exportingHelpers || loading || error !== ''}
             sx={{ 
               color: 'white', 
               borderColor: '#3b82f6',
@@ -894,7 +893,7 @@ const TherapistList: React.FC = () => {
               }
             }}
           >
-            {exportingTherapists ? 'Exporting...' : 'Export CSV'}
+            {exportingHelpers ? 'Exporting...' : 'Export CSV'}
           </Button>
         </Tooltip>
       </Box>
@@ -934,9 +933,25 @@ const TherapistList: React.FC = () => {
                         fontWeight: 'bold'
                       }}
                     >
-                      Therapist Name
+                      <TableSortLabel
+                        active={orderBy === 'name'}
+                        direction={orderBy === 'name' ? order : 'asc'}
+                        onClick={() => handleRequestSort('name')}
+                        sx={{
+                          color: 'white !important',
+                          '&.MuiTableSortLabel-active': {
+                            color: '#3b82f6 !important',
+                          },
+                          '& .MuiTableSortLabel-icon': {
+                            color: '#3b82f6 !important',
+                          },
+                        }}
+                      >
+                        Helper Name
+                      </TableSortLabel>
                     </TableCell>
                     <TableCell 
+                      align="center"
                       sx={{ 
                         backgroundColor: '#131b2c', 
                         color: 'white',
@@ -944,7 +959,22 @@ const TherapistList: React.FC = () => {
                         fontWeight: 'bold'
                       }}
                     >
-                      Booking Count
+                      <TableSortLabel
+                        active={orderBy === 'bookingCount'}
+                        direction={orderBy === 'bookingCount' ? order : 'asc'}
+                        onClick={() => handleRequestSort('bookingCount')}
+                        sx={{
+                          color: 'white !important',
+                          '&.MuiTableSortLabel-active': {
+                            color: '#3b82f6 !important',
+                          },
+                          '& .MuiTableSortLabel-icon': {
+                            color: '#3b82f6 !important',
+                          },
+                        }}
+                      >
+                        Booking Count
+                      </TableSortLabel>
                     </TableCell>
                     <TableCell 
                       align="right"
@@ -960,27 +990,27 @@ const TherapistList: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {paginatedTherapists.length === 0 ? (
+                  {paginatedHelpers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} align="center" sx={{ color: 'white' }}>
-                        No therapists found
+                      <TableCell colSpan={3} align="center" sx={{ color: 'white' }}>
+                        No helpers found
                       </TableCell>
                     </TableRow>
                   ) : (
-                    paginatedTherapists.map((therapist) => (
+                    paginatedHelpers.map((helper) => (
                       <TableRow 
-                        key={therapist.id}
+                        key={helper.id}
                         hover
                         sx={{ 
                           '&:hover': { backgroundColor: '#1a2440 !important' },
                           cursor: 'pointer',
-                          // Highlight selected therapist
-                          ...(selectedTherapist === therapist.name && {
+                          // Highlight selected helper
+                          ...(selectedHelper === helper.name && {
                             backgroundColor: '#1e3a8a !important',
                             '&:hover': { backgroundColor: '#1e3a8a !important' },
                           })
                         }}
-                        onClick={() => handleSelectTherapist(therapist)}
+                        onClick={() => handleSelectHelper(helper)}
                       >
                         <TableCell 
                           sx={{ 
@@ -988,15 +1018,36 @@ const TherapistList: React.FC = () => {
                             borderBottom: '1px solid #1e293b'
                           }}
                         >
-                          {therapist.name}
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Avatar 
+                              sx={{ 
+                                width: 40, 
+                                height: 40, 
+                                bgcolor: '#3b82f6',
+                                fontSize: '1rem'
+                              }}
+                            >
+                              {helper.name.charAt(0)}
+                            </Avatar>
+                            <Typography 
+                              className="ml-3 font-medium" 
+                              sx={{ 
+                                color: selectedHelper === helper.name ? '#ffffff' : '#3b82f6',
+                                fontWeight: selectedHelper === helper.name ? 'bold' : 'medium'
+                              }}
+                            >
+                              {helper.name}
+                            </Typography>
+                          </Box>
                         </TableCell>
                         <TableCell 
+                          align="center"
                           sx={{ 
                             color: 'white',
                             borderBottom: '1px solid #1e293b'
                           }}
                         >
-                          {therapist.bookingCount.toLocaleString()}
+                          {helper.bookingCount}
                         </TableCell>
                         <TableCell 
                           align="right" 
@@ -1009,7 +1060,7 @@ const TherapistList: React.FC = () => {
                             size="small"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleViewTherapist(therapist);
+                              handleViewHelper(helper);
                             }}
                             sx={{ 
                               bgcolor: '#0f172a', 
@@ -1037,7 +1088,7 @@ const TherapistList: React.FC = () => {
               }}
             >
               <Pagination
-                count={Math.ceil(filteredTherapists.length / rowsPerPage)}
+                count={Math.ceil(sortedHelpers.length / rowsPerPage)}
                 page={page}
                 onChange={handleChangePage}
                 color="primary"
@@ -1059,16 +1110,16 @@ const TherapistList: React.FC = () => {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 4 }}>
         <Typography variant="h6" sx={{ color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
           Appointment Details
-          {selectedTherapist && (
+          {selectedHelper && (
             <>
               <span style={{ margin: '0 10px', color: '#9ca3af' }}>|</span>
               <span style={{ color: '#3b82f6', fontWeight: 'normal', fontSize: '1rem' }}>
-                Filtered by: {selectedTherapist}
+                Filtered by: {selectedHelper}
               </span>
               <Button 
                 size="small"
                 variant="text"
-                onClick={() => setSelectedTherapist(null)}
+                onClick={() => setSelectedHelper(null)}
                 sx={{ 
                   ml: 2, 
                   color: '#9ca3af',
@@ -1084,7 +1135,7 @@ const TherapistList: React.FC = () => {
           <Button
             variant="outlined"
             size="small"
-            startIcon={exportingAppointments ? <CircularProgress size={20} sx={{ color: 'white' }} /> : <FileDownloadIcon />}
+            startIcon={exportingAppointments ? <CircularProgress size={20} color="inherit" /> : <FileDownloadIcon />}
             onClick={handleExportAppointments}
             disabled={exportingAppointments || appointmentsLoading || appointmentsError !== ''}
             sx={{ 
@@ -1136,16 +1187,6 @@ const TherapistList: React.FC = () => {
                         fontWeight: 'bold'
                       }}
                     >
-                      Therapist Name
-                    </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
-                        fontSize: '0.8rem',
-                        fontWeight: 'bold'
-                      }}
-                    >
                       Helper Name
                     </TableCell>
                     <TableCell 
@@ -1167,6 +1208,16 @@ const TherapistList: React.FC = () => {
                       }}
                     >
                       Customer
+                    </TableCell>
+                    <TableCell 
+                      sx={{ 
+                        backgroundColor: '#131b2c', 
+                        color: 'white',
+                        fontSize: '0.8rem',
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      Practitioner
                     </TableCell>
                     <TableCell 
                       sx={{ 
@@ -1202,14 +1253,6 @@ const TherapistList: React.FC = () => {
                             borderBottom: '1px solid #1e293b'
                           }}
                         >
-                          {appointment.therapistName}
-                        </TableCell>
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
-                          }}
-                        >
                           {appointment.helperName}
                         </TableCell>
                         <TableCell 
@@ -1227,6 +1270,14 @@ const TherapistList: React.FC = () => {
                           }}
                         >
                           {appointment.customer}
+                        </TableCell>
+                        <TableCell 
+                          sx={{ 
+                            color: 'white',
+                            borderBottom: '1px solid #1e293b'
+                          }}
+                        >
+                          {appointment.practitioner}
                         </TableCell>
                         <TableCell 
                           sx={{ 
@@ -1273,4 +1324,4 @@ const TherapistList: React.FC = () => {
   );
 };
 
-export default TherapistList; 
+export default HelperList; 

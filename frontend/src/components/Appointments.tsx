@@ -29,6 +29,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface Appointment {
   bookingid: string;
@@ -40,6 +41,7 @@ interface Appointment {
   PractitionerName: string;
   ClinicName: string;
   ClinicID: string;
+  ClinicCode: string;
   HelperName: string;
   status: string;
   member_note: string;
@@ -47,6 +49,7 @@ interface Appointment {
 
 const Appointments: React.FC = () => {
   const navigate = useNavigate();
+  const { currentClinic } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -58,8 +61,10 @@ const Appointments: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    fetchAppointments();
-  }, []);
+    if (currentClinic) {
+      fetchAppointments();
+    }
+  }, [currentClinic, selectedDate]);
 
   useEffect(() => {
     applyFilters();
@@ -72,6 +77,10 @@ const Appointments: React.FC = () => {
       
       const dateStr = selectedDate ? selectedDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
       
+      console.log('Current Clinic:', currentClinic);
+      console.log('Current Clinic ID:', currentClinic?.id);
+      console.log('Current Clinic Code:', currentClinic?.code);
+      
       const query = `
         SELECT
           bookingid,
@@ -83,13 +92,16 @@ const Appointments: React.FC = () => {
           PractitionerName,
           ClinicName,
           ClinicID,
+          ClinicCode,
           HelperName,
           status,
           member_note
-        FROM great_time.QueenAppointmentView
+        FROM great_time.MainAppointmentView
         WHERE DATE(FromTime) = '${dateStr}'
+        AND ClinicCode = '${currentClinic?.code}'
         ORDER BY FromTime DESC
       `;
+    
 
       console.log('Executing query:', query);
       const response = await axios.post('/api/query', { query });

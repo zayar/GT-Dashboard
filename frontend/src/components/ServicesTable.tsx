@@ -19,6 +19,7 @@ import {
 import { Search as SearchIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface Service {
   id?: string;
@@ -40,12 +41,15 @@ const ServicesTable: React.FC = () => {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const rowsPerPage = 10;
   const navigate = useNavigate();
+  const { currentClinic } = useClinic();
 
   const fetchServices = async () => {
+    if (!currentClinic) return;
+    
     setLoading(true);
     setError(null);
     try {
-      // Use SQL query to get services from QueenDataView
+      // Use SQL query to get services from MainDataView
       const query = `
         SELECT 
           ServiceName AS name,
@@ -55,9 +59,10 @@ const ServicesTable: React.FC = () => {
           COUNT(*) AS count,
           MAX(ServiceImage) AS image
         FROM 
-          great_time.QueenDataView
+          great_time.MainDataView
         WHERE 
           ServiceName IS NOT NULL
+          AND ClinicCode = '${currentClinic.code}'
         GROUP BY 
           ServiceName, ServiceDescription, ServiceDuration
         ORDER BY 
@@ -120,8 +125,10 @@ const ServicesTable: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchServices();
-  }, []);
+    if (currentClinic) {
+      fetchServices();
+    }
+  }, [currentClinic]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);

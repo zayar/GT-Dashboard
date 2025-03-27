@@ -112,6 +112,23 @@ const MainChat = () => {
   const [chartData, setChartData] = useState<any>(null);
 
   const { currentClinic } = useClinic();
+  
+  // Store the previous clinic to detect changes
+  const previousClinicRef = useRef<string | null>(null);
+  
+  // Clear chat history when clinic changes
+  useEffect(() => {
+    // Skip on first render when previousClinicRef is null
+    if (previousClinicRef.current !== null && currentClinic?.code !== previousClinicRef.current) {
+      // Clinic has changed, clear the chat history
+      setMessages([]);
+      sessionStorage.removeItem('chatMessages');
+      console.log('Cleared chat history due to clinic change');
+    }
+    
+    // Update the ref with current clinic code
+    previousClinicRef.current = currentClinic?.code || null;
+  }, [currentClinic?.code]);
 
   const fetchSchema = async () => {
     try {
@@ -1969,7 +1986,16 @@ const AppContent = () => {
   } = useClinic();
   
   const handleClinicChange = (clinic: any) => {
-    setCurrentClinic(clinic);
+    // If clinic is different, update it
+    if (clinic.code !== currentClinic?.code) {
+      setCurrentClinic(clinic);
+      
+      // Store the new clinic selection in localStorage
+      localStorage.setItem('selectedClinicId', clinic.id);
+      
+      // Clear chat history in sessionStorage when changing clinics
+      sessionStorage.removeItem('chatMessages');
+    }
   };
 
   const handleLogout = () => {
@@ -1989,7 +2015,7 @@ const AppContent = () => {
         
         {/* Main content area */}
         <div className="flex-1 overflow-auto">
-      <Routes>
+          <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/conversational-ai" element={<div className="h-full"><MainChat /></div>} />
@@ -2011,7 +2037,7 @@ const AppContent = () => {
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
             <Route path="/check-in-out" element={<CheckInOut />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+          </Routes>
         </div>
       </div>
     </>
