@@ -18,6 +18,7 @@ import { ApexOptions } from 'apexcharts';
 import axios from 'axios';
 import { format, startOfMonth, addDays, subMonths } from 'date-fns';
 import { motion } from 'framer-motion';
+import { useClinic } from '../contexts/ClinicContext';
 
 // Define period types
 type PeriodType = 'monthly' | 'weekly' | 'annual';
@@ -30,6 +31,7 @@ interface ServiceData {
 
 // Dashboard component
 const Dashboard: React.FC = () => {
+  const { currentClinic } = useClinic();
   // State for period selection and UI
   const [period, setPeriod] = useState<PeriodType>('monthly');
   const [loading, setLoading] = useState<boolean>(true);
@@ -139,8 +141,14 @@ const Dashboard: React.FC = () => {
     setUsingFallbackData(true);
   };
 
-  // Fetch data based on selected period
+  // Fetch data based on selected period and current clinic
   useEffect(() => {
+    if (!currentClinic) {
+      setError('No clinic selected. Please select a clinic first.');
+      setLoading(false);
+      return;
+    }
+
     const fetchChartData = async () => {
       setLoading(true);
       setError(null);
@@ -154,11 +162,12 @@ const Dashboard: React.FC = () => {
             FORMAT_DATETIME('%Y-%m-%d', OrderCreatedDate) AS Date,
             CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
             PaymentMethod
-          FROM \`great_time.QueenPaymentView\`
+          FROM \`great_time.MainPaymentView\`
           WHERE PaymentMethod != 'PASS'
             AND PaymentStatus = 'PAID'
             AND CAST(NetTotal AS FLOAT64) != 0
             AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
+            AND ClinicCode = '${currentClinic.code}'
           LIMIT 10
         `;
 
@@ -180,12 +189,12 @@ const Dashboard: React.FC = () => {
         
         // Check if we have data in the table
         if (!responseData.success || !responseData.data || responseData.data.length === 0) {
-          console.warn('No data in the QueenPaymentView table');
+          console.warn('No data in the MainPaymentView table');
           useFallbackData(); // Use fallback data
           return;
         }
         
-        console.log('Found data in QueenPaymentView - First 3 records:', responseData.data.slice(0, 3));
+        console.log('Found data in MainPaymentView - First 3 records:', responseData.data.slice(0, 3));
         
         // Now that we know we have data, run the full query
         // Define time constraints based on the selected period
@@ -214,12 +223,13 @@ const Dashboard: React.FC = () => {
               CustomerName,
               InvoiceNumber,
               CAST(NetTotal AS FLOAT64) as Revenue
-            FROM \`great_time.QueenPaymentView\`
+            FROM \`great_time.MainPaymentView\`
             WHERE ServiceName IS NOT NULL
               AND PaymentMethod != 'PASS'
               AND PaymentStatus = 'PAID'
               AND CAST(NetTotal AS FLOAT64) > 0
               AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
+              AND ClinicCode = '${currentClinic.code}'
           ),
           
           -- Find top 3 services by revenue
@@ -468,7 +478,7 @@ const Dashboard: React.FC = () => {
               COUNT(DISTINCT CustomerName) as current_customers,
               COUNT(DISTINCT BookingID) as current_appointments,
               COUNT(DISTINCT ServiceName) as current_services
-            FROM \`great_time.QueenDataView\`
+            FROM \`great_time.MainDataView\`
             WHERE ${currentPeriodFilter}
           ),
           PreviousPeriodStats AS (
@@ -476,7 +486,7 @@ const Dashboard: React.FC = () => {
               COUNT(DISTINCT CustomerName) as previous_customers,
               COUNT(DISTINCT BookingID) as previous_appointments,
               COUNT(DISTINCT ServiceName) as previous_services
-            FROM \`great_time.QueenDataView\`
+            FROM \`great_time.MainDataView\`
             WHERE ${previousPeriodFilter}
           )
           SELECT
@@ -506,7 +516,7 @@ const Dashboard: React.FC = () => {
         const statsResponseData = await statsResponse.json();
         
         if (!statsResponseData.success || !statsResponseData.data || statsResponseData.data.length === 0) {
-          console.warn('No stats data returned from QueenDataView');
+          console.warn('No stats data returned from DataBase');
           return; // Continue with chart data, just don't update the stats
         }
         
@@ -562,97 +572,95 @@ const Dashboard: React.FC = () => {
     const fetchTopServices = async () => {
       setLoadingTopServices(true);
       try {
-        // Define time periods for current and previous periods
-        let currentPeriodFilter = '';
-        let previousPeriodFilter = '';
+        // Define time constraints based on the selected period
+        let timeConstraint = '';
+        let prevTimeConstraint = '';
         
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
           const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
-          currentPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
-          previousPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${previousMonth}'`;
+          timeConstraint = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
+          prevTimeConstraint = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${previousMonth}'`;
         } else if (period === 'weekly') {
-          currentPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-          previousPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)';
+          timeConstraint = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
+          prevTimeConstraint = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)';
         } else if (period === 'annual') {
           const currentYear = new Date().getFullYear();
-          currentPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
-          previousPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
+          timeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
+          prevTimeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
         }
         
-        const topServicesQuery = `
-          WITH CurrentPeriodServices AS (
+        const servicesQuery = `
+          WITH CurrentBookings AS (
             SELECT
               ServiceName,
-              COUNT(DISTINCT BookingID) AS current_booking_count,
-              COUNT(DISTINCT CustomerName) AS current_customer_count
-            FROM \`great_time.QueenDataView\`
-            WHERE ${currentPeriodFilter}
+              COUNT(DISTINCT BookingID) AS BookingCount,
+              COUNT(DISTINCT CustomerName) AS CustomerCount
+            FROM \`great_time.MainDataView\`
+            WHERE ${timeConstraint}
               AND ServiceName IS NOT NULL
+              AND ClinicCode = '${currentClinic.code}'
             GROUP BY ServiceName
           ),
-          PreviousPeriodServices AS (
+          
+          PreviousBookings AS (
             SELECT
               ServiceName,
-              COUNT(DISTINCT BookingID) AS previous_booking_count,
-              COUNT(DISTINCT CustomerName) AS previous_customer_count
-            FROM \`great_time.QueenDataView\`
-            WHERE ${previousPeriodFilter}
+              COUNT(DISTINCT BookingID) AS BookingCount,
+              COUNT(DISTINCT CustomerName) AS CustomerCount
+            FROM \`great_time.MainDataView\`
+            WHERE ${prevTimeConstraint}
               AND ServiceName IS NOT NULL
+              AND ClinicCode = '${currentClinic.code}'
             GROUP BY ServiceName
           )
+          
           SELECT
-            c.ServiceName,
-            c.current_booking_count,
-            c.current_customer_count,
-            p.previous_booking_count,
-            p.previous_customer_count
-          FROM CurrentPeriodServices c
-          LEFT JOIN PreviousPeriodServices p ON c.ServiceName = p.ServiceName
-          ORDER BY c.current_booking_count DESC
+            cb.ServiceName as serviceName,
+            cb.BookingCount as bookingCount,
+            cb.CustomerCount as customerCount,
+            CASE 
+              WHEN pb.BookingCount IS NULL OR pb.BookingCount = 0 THEN 100
+              ELSE ROUND(((cb.BookingCount - pb.BookingCount) / pb.BookingCount) * 100, 1)
+            END as bookingChange,
+            CASE 
+              WHEN pb.CustomerCount IS NULL OR pb.CustomerCount = 0 THEN 100
+              ELSE ROUND(((cb.CustomerCount - pb.CustomerCount) / pb.CustomerCount) * 100, 1)
+            END as customerChange
+          FROM CurrentBookings cb
+          LEFT JOIN PreviousBookings pb ON cb.ServiceName = pb.ServiceName
+          ORDER BY cb.BookingCount DESC
           LIMIT 10
         `;
-        
-        console.log('Executing top services query:', topServicesQuery);
-        
-        const topServicesResponse = await fetch('/api/query', {
+
+        // Execute the query
+        const servicesResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ query: topServicesQuery }),
+          body: JSON.stringify({ query: servicesQuery }),
         });
         
-        if (!topServicesResponse.ok) {
-          throw new Error(`Failed to fetch top services data (Status: ${topServicesResponse.status})`);
+        if (!servicesResponse.ok) {
+          throw new Error(`Failed to fetch top services data (Status: ${servicesResponse.status})`);
         }
         
-        const topServicesResponseData = await topServicesResponse.json();
+        const servicesResponseData = await servicesResponse.json();
         
-        if (!topServicesResponseData.success || !topServicesResponseData.data || topServicesResponseData.data.length === 0) {
-          console.warn('No top services data returned from QueenDataView');
+        if (!servicesResponseData.success || !servicesResponseData.data || servicesResponseData.data.length === 0) {
+          console.warn('No top services data returned from DataBase');
           setTopServices([]);
           return;
         }
         
-        // Calculate percentage changes and format data
-        const calculatePercentageChange = (current: number, previous: number): number => {
-          if (previous === 0 || previous === null || previous === undefined) return 0;
-          return ((current - previous) / previous) * 100;
-        };
-        
-        const formattedTopServices = topServicesResponseData.data.map((service: any) => ({
-          serviceName: service.ServiceName,
-          bookingCount: Number(service.current_booking_count) || 0,
-          customerCount: Number(service.current_customer_count) || 0,
-          bookingChange: calculatePercentageChange(
-            Number(service.current_booking_count) || 0, 
-            Number(service.previous_booking_count) || 0
-          ),
-          customerChange: calculatePercentageChange(
-            Number(service.current_customer_count) || 0, 
-            Number(service.previous_customer_count) || 0
-          )
+        // Format the top services data
+        const formattedTopServices = servicesResponseData.data.map((service: any) => ({
+          serviceName: service.serviceName,
+          bookingCount: Number(service.bookingCount) || 0,
+          customerCount: Number(service.customerCount) || 0,
+          bookingChange: Number(service.bookingChange) || 0,
+          customerChange: Number(service.customerChange) || 0
         }));
         
         setTopServices(formattedTopServices);
@@ -668,7 +676,7 @@ const Dashboard: React.FC = () => {
     const fetchPaymentMethods = async () => {
       setLoadingPaymentMethods(true);
       try {
-        // Define time period filter based on the selected period
+        // Define time constraints based on the selected period
         let timeConstraint = '';
         
         if (period === 'monthly') {
@@ -684,30 +692,37 @@ const Dashboard: React.FC = () => {
         const paymentMethodsQuery = `
           WITH PaymentMethodCounts AS (
             SELECT
-              PaymentMethod,
-              COUNT(*) as count
-            FROM \`great_time.QueenPaymentView\`
+              CASE 
+                WHEN PaymentMethod = 'CASH' THEN 'Cash'
+                WHEN PaymentMethod = 'BANK_TRANSFER' THEN 'Bank Transfer'
+                WHEN PaymentMethod = 'CARD' THEN 'Card'
+                WHEN PaymentMethod = 'MIXED' THEN 'Mixed'
+                ELSE PaymentMethod
+              END as Method,
+              COUNT(*) as Count
+            FROM \`great_time.MainPaymentView\`
             WHERE ${timeConstraint}
-              AND PaymentStatus = 'PAID'
               AND PaymentMethod IS NOT NULL
-              AND PaymentMethod != ''
-              AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
+              AND PaymentMethod != 'PASS'
+              AND PaymentStatus = 'PAID'
+              AND ClinicCode = '${currentClinic.code}'
             GROUP BY PaymentMethod
           ),
+          
           TotalCount AS (
-            SELECT SUM(count) as total_count FROM PaymentMethodCounts
+            SELECT SUM(Count) as Total FROM PaymentMethodCounts
           )
+          
           SELECT
-            pmc.PaymentMethod,
-            pmc.count,
-            ROUND((pmc.count / tc.total_count) * 100, 1) as percentage
+            pmc.Method as method,
+            pmc.Count as count,
+            ROUND((pmc.Count / tc.Total) * 100, 1) as percentage
           FROM PaymentMethodCounts pmc, TotalCount tc
-          ORDER BY pmc.count DESC
+          ORDER BY pmc.Count DESC
         `;
-        
-        console.log('Executing payment methods query:', paymentMethodsQuery);
-        
-        const paymentMethodsResponse = await fetch('/api/query', {
+
+        // Execute the query
+        const methodsResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -715,21 +730,21 @@ const Dashboard: React.FC = () => {
           body: JSON.stringify({ query: paymentMethodsQuery }),
         });
         
-        if (!paymentMethodsResponse.ok) {
-          throw new Error(`Failed to fetch payment methods data (Status: ${paymentMethodsResponse.status})`);
+        if (!methodsResponse.ok) {
+          throw new Error(`Failed to fetch payment methods data (Status: ${methodsResponse.status})`);
         }
         
-        const paymentMethodsResponseData = await paymentMethodsResponse.json();
+        const methodsResponseData = await methodsResponse.json();
         
-        if (!paymentMethodsResponseData.success || !paymentMethodsResponseData.data || paymentMethodsResponseData.data.length === 0) {
-          console.warn('No payment methods data returned from QueenPaymentView');
+        if (!methodsResponseData.success || !methodsResponseData.data || methodsResponseData.data.length === 0) {
+          console.warn('No payment methods data returned from MainPaymentView');
           setPaymentMethods([]);
           return;
         }
         
         // Format the payment methods data
-        const formattedPaymentMethods = paymentMethodsResponseData.data.map((method: any) => ({
-          method: method.PaymentMethod,
+        const formattedPaymentMethods = methodsResponseData.data.map((method: any) => ({
+          method: method.method,
           count: Number(method.count) || 0,
           percentage: Number(method.percentage) || 0
         }));
@@ -747,52 +762,49 @@ const Dashboard: React.FC = () => {
     const fetchTopTherapists = async () => {
       setLoadingTherapists(true);
       try {
-        // Define time periods for current period
-        let currentPeriodFilter = '';
+        // Define time constraints based on the selected period
+        let timeConstraint = '';
         
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
-          currentPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
+          timeConstraint = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
         } else if (period === 'weekly') {
-          currentPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
+          timeConstraint = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
         } else if (period === 'annual') {
           const currentYear = new Date().getFullYear();
-          currentPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
+          timeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
         }
         
         const therapistsQuery = `
-          WITH TherapistData AS (
-            SELECT 
+          WITH TherapistBookings AS (
+            SELECT
               PractitionerName as name,
               PractitionerImage as image,
-              COUNT(*) as bookingCount
-            FROM 
-              \`great_time.QueenDataView\`
-            WHERE 
-              ${currentPeriodFilter}
+              COUNT(DISTINCT BookingID) as bookingCount
+            FROM \`great_time.MainDataView\`
+            WHERE ${timeConstraint}
               AND PractitionerName IS NOT NULL
-              AND PractitionerName != 'N/A'
-              AND TRIM(PractitionerName) != ''
-            GROUP BY 
-              PractitionerName, PractitionerImage
+              AND PractitionerName != ''
+              AND ClinicCode = '${currentClinic.code}'
+            GROUP BY PractitionerName, PractitionerImage
+            ORDER BY bookingCount DESC
+            LIMIT 10
           ),
+          
           TotalBookings AS (
-            SELECT SUM(bookingCount) as total FROM TherapistData
+            SELECT SUM(bookingCount) as total FROM TherapistBookings
           )
-          SELECT 
-            td.name,
-            td.image,
-            td.bookingCount,
-            ROUND((td.bookingCount / tb.total) * 100, 1) as percentage
-          FROM 
-            TherapistData td, TotalBookings tb
-          ORDER BY 
-            td.bookingCount DESC
-          LIMIT 10
+          
+          SELECT
+            tb.name,
+            tb.image,
+            tb.bookingCount,
+            ROUND((tb.bookingCount / tbt.total) * 100, 1) as percentage
+          FROM TherapistBookings tb, TotalBookings tbt
+          ORDER BY tb.bookingCount DESC
         `;
-        
-        console.log('Executing therapists query:', therapistsQuery);
-        
+
+        // Execute the query
         const therapistsResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
@@ -808,7 +820,7 @@ const Dashboard: React.FC = () => {
         const therapistsResponseData = await therapistsResponse.json();
         
         if (!therapistsResponseData.success || !therapistsResponseData.data || therapistsResponseData.data.length === 0) {
-          console.warn('No therapists data returned from QueenDataView');
+          console.warn('No therapists data returned from Database');
           setTopTherapists([]);
           return;
         }
@@ -834,7 +846,7 @@ const Dashboard: React.FC = () => {
     fetchTopServices();
     fetchPaymentMethods();
     fetchTopTherapists();
-  }, [period]);
+  }, [period, currentClinic]);
   
   // Format currency
   const formatCurrency = (value: number): string => {
@@ -1328,7 +1340,7 @@ const Dashboard: React.FC = () => {
               }}
             >
               <Typography variant="h5" sx={{ color: 'white', fontWeight: 600 }}>
-                Top services
+                Top 10 services
               </Typography>
             </Box>
             
@@ -1476,7 +1488,7 @@ const Dashboard: React.FC = () => {
               }}
             >
               <Typography variant="h5" sx={{ color: 'white', fontWeight: 600 }}>
-                Top therapists
+                Top 10 therapists
               </Typography>
             </Box>
             

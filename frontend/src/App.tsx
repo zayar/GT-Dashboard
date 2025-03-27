@@ -14,11 +14,14 @@ import ServiceDetails from './components/ServiceDetails';
 import ServicesTable from './components/ServicesTable';
 import TherapistDetails from './components/TherapistDetails';
 import TherapistList from './components/TherapistList';
+import HelperList from './components/HelperList';
+import HelperDetails from './components/HelperDetails';
 import CommissionPage from './components/CommissionPage';
 import DailyTreatmentReport from './components/DailyTreatmentReport';
 import PaymentDetails from './components/PaymentDetails';
 import BankingDetails from './components/BankingDetails';
 import Appointments from './components/Appointments';
+import CheckInOut from './components/CheckInOut';
 import { v4 as uuidv4 } from 'uuid';
 import Sidebar from './components/Sidebar';
 import CustomersTable from './components/CustomersTable';
@@ -107,6 +110,8 @@ const MainChat = () => {
   const [_error, setError] = useState('');
   const [chartData, setChartData] = useState<any>(null);
 
+  const { currentClinic } = useClinic();
+
   const fetchSchema = async () => {
     try {
       setSchemaLoading(true);
@@ -179,26 +184,48 @@ const MainChat = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || loading) return;
-
-    setLoading(true);
-    setError('');
-
-    const newUserMessage: Message = {
-        id: Date.now().toString(),
-        type: 'user',
-      content: inputMessage,
-    };
-
-    setMessages(prev => [...prev, newUserMessage]);
+    if (!inputMessage.trim()) return;
     
-    // Save the input before clearing it
-    const currentInputMessage = inputMessage;
-      setInputMessage('');
+    const currentInputMessage = inputMessage.trim();
+    
+    // Check if user is asking about reminders
+    if (checkForReminderKeywords(currentInputMessage)) {
+      // ... existing code for reminders ...
+    }
+    
+    // Check if user is asking about payments
+    if (checkForPaymentKeywords(currentInputMessage)) {
+      // ... existing code for payments ...
+    }
+    
+    // Check if user is asking about banking info
+    if (checkForBankingKeywords(currentInputMessage)) {
+      // ... existing code for banking ...
+    }
+    
+    // Add user message to chat
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: currentInputMessage
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage('');
 
     try {
       // Import OpenAI configs
       const { OPENAI_SQL_CONFIG, OPENAI_INSIGHTS_CONFIG } = await import('./config/openai');
+      
+      // Check if currentClinic exists
+      if (!currentClinic || !currentClinic.code) {
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          type: 'assistant',
+          content: 'Please select a clinic first before asking questions. This ensures your data is properly filtered.'
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        return;
+      }
       
       // Define axios config for API requests
       const axiosConfig = {
@@ -208,7 +235,7 @@ const MainChat = () => {
           'Content-Type': 'application/json'
         }
       };
-  
+
       // Get schema for context
       const schemaContext = schema && schema.fields 
         ? schema.fields.map((field: { name: string; type: string }) => `${field.name} (${field.type})`).join('\n')
@@ -268,10 +295,11 @@ WITH HourlyBookings AS (
     CAST(FORMAT_DATE('%A', DATE(CheckInTime)) AS STRING) as day_of_week,
     CAST(EXTRACT(HOUR FROM CheckInTime) AS STRING) as hour_of_day,
     COUNT(*) as booking_count
-  FROM great_time.LemonDataView
+  FROM great_time.MainDataView
   WHERE 
     CheckInTime IS NOT NULL
     AND EXTRACT(HOUR FROM CheckInTime) BETWEEN 9 AND 19
+    AND ClinicCode = '${currentClinic.code}'
   GROUP BY day_of_week, hour_of_day
 )
 SELECT
@@ -295,7 +323,7 @@ ORDER BY
         const translationResponse = await axios.post(OPENAI_SQL_CONFIG.apiEndpoint, {
           model: OPENAI_SQL_CONFIG.model,
           messages: [
-            ...OPENAI_SQL_CONFIG.formatMessages(schemaContext, currentInputMessage),
+            ...OPENAI_SQL_CONFIG.formatMessages(schemaContext, currentInputMessage, currentClinic.code),
             {
               role: "system",
               content: `When generating SQL queries:
@@ -345,7 +373,11 @@ ORDER BY
               9. For therapist/practitioner/employee-related queries:
                  - Always include PractitionerName/practitioner_name/therapist_name, count/services/treatments in the SELECT clause
                  - Order by count/services/treatments DESC
-                 - Use LIMIT to restrict to top N results`
+                 - Use LIMIT to restrict to top N results
+               
+              10. ALWAYS include this filter in your WHERE clause: AND ClinicCode = '${currentClinic.code}'
+                  - This is mandatory for security and data isolation
+                  - Never omit this filter from any query`
             }
           ]
         }, axiosConfig);
@@ -361,7 +393,20 @@ ORDER BY
           throw new Error('Invalid response format: Missing SQL query. Please try rephrasing your question.');
         }
   
-        sqlQuery = sqlMatch[1].trim().replace(/FROM\s+LemonDataView/g, 'FROM great_time.LemonDataView');
+        sqlQuery = sqlMatch[1].trim()
+          .replace(/FROM\s+QueenDataView/gi, 'FROM great_time.MainDataView')
+          .replace(/FROM\s+LemonDataView/gi, 'FROM great_time.MainDataView')
+          .replace(/FROM\s+great_time\.QueenDataView/gi, 'FROM great_time.MainDataView');
+        
+        // Ensure the clinic code filter is present in all queries
+        if (!sqlQuery.includes(`ClinicCode = '${currentClinic.code}'`)) {
+          if (sqlQuery.includes('WHERE')) {
+            sqlQuery = sqlQuery.replace(/WHERE/i, `WHERE ClinicCode = '${currentClinic.code}' AND`);
+          } else {
+            // If there's no WHERE clause, add one
+            sqlQuery = sqlQuery + ` WHERE ClinicCode = '${currentClinic.code}'`;
+          }
+        }
       }
   
         const queryResponse = await axios.post('http://localhost:3000/api/query', { query: sqlQuery }, axiosConfig);
@@ -1824,13 +1869,11 @@ const AppContent = () => {
     <>
       <Sidebar onLogout={handleLogout} />
       <div className="flex-1 h-full overflow-auto">
-        {/* Clinic selector hidden for now
         <div className="bg-[#101729] border-b border-gray-800 px-4 py-2">
           <ClinicSelector 
             onClinicChange={handleClinicChange} 
           />
         </div>
-        */}
         
         {/* Main content area */}
         <div className="flex-1 overflow-auto">
@@ -1844,14 +1887,17 @@ const AppContent = () => {
             <Route path="/services/:name" element={<ServiceDetails />} />
             <Route path="/therapists" element={<TherapistList />} />
             <Route path="/therapists/:name" element={<TherapistDetails />} />
-        <Route path="/commission" element={<Commission />} />
-        <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
-        <Route path="/payment-details" element={<PaymentDetails />} />
-        <Route path="/banking-details" element={<BankingDetails />} />
-        <Route path="/appointments" element={<Appointments />} />
-        <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
+            <Route path="/helpers" element={<HelperList />} />
+            <Route path="/helpers/:name" element={<HelperDetails />} />
+            <Route path="/commission" element={<Commission />} />
+            <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
+            <Route path="/payment-details" element={<PaymentDetails />} />
+            <Route path="/banking-details" element={<BankingDetails />} />
+            <Route path="/appointments" element={<Appointments />} />
+            <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
+            <Route path="/check-in-out" element={<CheckInOut />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
         </div>
