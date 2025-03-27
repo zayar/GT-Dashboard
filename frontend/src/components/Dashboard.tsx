@@ -140,6 +140,14 @@ const Dashboard: React.FC = () => {
     setUsingFallbackData(true);
   };
 
+  // Format currency
+  const formatCurrency = (value: number): string => {
+    return value.toLocaleString('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }) + " MMK";
+  };
+  
   // Fetch data based on selected period and current clinic
   useEffect(() => {
     if (!currentClinic) {
@@ -151,392 +159,6 @@ const Dashboard: React.FC = () => {
     const fetchChartData = async () => {
       setLoading(true);
       setError(null);
-      try {
-        // Simplified query to just check if we have any data
-        const query = `
-          -- Simple query to check if we have any data
-          SELECT 
-            ServiceName,
-            CustomerName,
-            FORMAT_DATETIME('%Y-%m-%d', OrderCreatedDate) AS Date,
-            CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
-            PaymentMethod
-          FROM \`great_time.MainPaymentView\`
-          WHERE PaymentMethod != 'PASS'
-            AND PaymentStatus = 'PAID'
-            AND CAST(NetTotal AS FLOAT64) != 0
-            AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-            AND ClinicCode = '${currentClinic.code}'
-          LIMIT 10
-        `;
-
-        // API endpoint to execute the query
-        const response = await fetch('/api/query', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch data (Status: ${response.status})`);
-        }
-
-        const responseData = await response.json();
-        
-        // Check if we have data in the table
-        if (!responseData.success || !responseData.data || responseData.data.length === 0) {
-          useFallbackData(); // Use fallback data
-          return;
-        }
-        
-        // Now that we know we have data, run the full query
-        // Define time constraints based on the selected period
-        let timeConstraint = '';
-        let prevTimeConstraint = '';
-        
-        if (period === 'monthly') {
-          const currentMonth = format(new Date(), 'yyyy-MM');
-          const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
-          timeConstraint = `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = '${currentMonth}'`;
-          prevTimeConstraint = `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = '${previousMonth}'`;
-        } else if (period === 'weekly') {
-          timeConstraint = 'DATE(OrderCreatedDate) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-          prevTimeConstraint = 'DATE(OrderCreatedDate) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)';
-        } else if (period === 'annual') {
-          const currentYear = new Date().getFullYear();
-          timeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear}`;
-          prevTimeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear - 1}`;
-        }
-        
-        const fullQuery = `
-          WITH PaymentData AS (
-            SELECT 
-              OrderCreatedDate,
-              ServiceName,
-              CustomerName,
-              InvoiceNumber,
-              CAST(NetTotal AS FLOAT64) as Revenue
-            FROM \`great_time.MainPaymentView\`
-            WHERE ServiceName IS NOT NULL
-              AND PaymentMethod != 'PASS'
-              AND PaymentStatus = 'PAID'
-              AND CAST(NetTotal AS FLOAT64) > 0
-              AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-              AND ClinicCode = '${currentClinic.code}'
-          ),
-          
-          -- Find top 3 services by revenue
-          TopServices AS (
-            SELECT 
-              ServiceName,
-              SUM(Revenue) as TotalRevenue,
-              COUNT(*) as ServiceCount
-            FROM PaymentData
-            GROUP BY ServiceName
-            ORDER BY TotalRevenue DESC
-            LIMIT 3
-          ),
-          
-          -- Get daily revenue for the current period
-          CurrentMonthData AS (
-            SELECT 
-              ServiceName,
-              FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Day,
-              SUM(Revenue) as DailyRevenue
-            FROM PaymentData
-            WHERE ${timeConstraint}
-              AND ServiceName IN (SELECT ServiceName FROM TopServices)
-            GROUP BY ServiceName, Day
-            ORDER BY Day
-          ),
-          
-          -- Current period stats
-          CurrentStats AS (
-            SELECT
-              COUNT(DISTINCT CustomerName) as total_customers,
-              COUNT(DISTINCT InvoiceNumber) as total_invoices,
-              COUNT(DISTINCT ServiceName) as total_services,
-              SUM(Revenue) as total_revenue
-            FROM PaymentData
-            WHERE ${timeConstraint}
-          ),
-          
-          -- Previous period stats for comparison
-          PreviousStats AS (
-            SELECT
-              COUNT(DISTINCT CustomerName) as prev_month_customers,
-              COUNT(DISTINCT InvoiceNumber) as prev_month_invoices,
-              COUNT(DISTINCT ServiceName) as prev_month_services,
-              SUM(Revenue) as prev_month_revenue
-            FROM PaymentData
-            WHERE ${prevTimeConstraint}
-          )
-          
-          -- Final result combining all data
-          SELECT 
-            ts.ServiceName,
-            ts.TotalRevenue,
-            ts.ServiceCount,
-            cd.Day,
-            cd.DailyRevenue,
-            cs.total_customers,
-            cs.total_invoices,
-            cs.total_services,
-            cs.total_revenue,
-            ps.prev_month_customers,
-            ps.prev_month_invoices,
-            ps.prev_month_services,
-            ps.prev_month_revenue
-          FROM TopServices ts
-          LEFT JOIN CurrentMonthData cd ON ts.ServiceName = cd.ServiceName
-          CROSS JOIN CurrentStats cs
-          CROSS JOIN PreviousStats ps
-          ORDER BY ts.TotalRevenue DESC, cd.Day
-        `;
-        
-        const fullResponse = await fetch('/api/query', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: fullQuery }),
-        });
-        
-        if (!fullResponse.ok) {
-          throw new Error(`Failed to fetch data (Status: ${fullResponse.status})`);
-        }
-        
-        const fullResponseData = await fullResponse.json();
-        
-        if (!fullResponseData.success) {
-          useFallbackData();
-          return;
-        }
-        
-        const data = fullResponseData.data || [];
-        
-        if (data.length === 0) {
-          useFallbackData(); // Use fallback data instead of showing error
-          return;
-        }
-        
-        // Process the data for charts and statistics
-        // Extract unique dates for x-axis
-        // Safely parse and format dates without risking invalid Date objects
-        const uniqueDates = [...new Set(data
-          .filter((item: any) => item.Day)
-          .map((item: any) => {
-            try {
-              // Check if Day is already a formatted date string like "2023-04-15"
-              if (typeof item.Day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.Day)) {
-                const parts = item.Day.split('-');
-                // Create a date in a safe way
-                const date = new Date(
-                  parseInt(parts[0], 10), 
-                  parseInt(parts[1], 10) - 1, // Month is 0-indexed
-                  parseInt(parts[2], 10)
-                );
-                return format(date, 'MMM dd');
-              }
-              // Handle if it's a timestamp or other format
-              return format(new Date(item.Day), 'MMM dd');
-            } catch (e) {
-              // Use the raw date string as fallback
-              return String(item.Day).substring(0, 10);
-            }
-          })
-        )].sort();
-        
-        // Process data for each service
-        const serviceNames = [...new Set(data.map((item: any) => item.ServiceName))];
-        
-        if (serviceNames.length === 0) {
-          useFallbackData();
-          return;
-        }
-
-        const serviceDataSeries = serviceNames.map(serviceName => {
-          const serviceData = data.filter((item: any) => item.ServiceName === serviceName);
-          
-          // Create data points for each day
-          const dataPoints = uniqueDates.map(formattedDate => {
-            const dayData = serviceData.find((item: any) => {
-              if (!item.Day) return false;
-              
-              try {
-                // Try to match the date using the same formatting strategy
-                if (typeof item.Day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.Day)) {
-                  const parts = item.Day.split('-');
-                  const date = new Date(
-                    parseInt(parts[0], 10), 
-                    parseInt(parts[1], 10) - 1, 
-                    parseInt(parts[2], 10)
-                  );
-                  return format(date, 'MMM dd') === formattedDate;
-                }
-                return format(new Date(item.Day), 'MMM dd') === formattedDate;
-              } catch (e) {
-                return String(item.Day).substring(0, 10) === formattedDate;
-              }
-            });
-            
-            return dayData ? Number(dayData.DailyRevenue || 0) : 0;
-          });
-          
-          return {
-            name: serviceName as string,
-            data: dataPoints
-          };
-        }) as ServiceData[];
-        
-        // Calculate statistics from the data
-        // Use the first row for statistics since they are the same for all rows with CROSS JOIN
-        const statsRow = data[0];
-        
-        const totalIncomeValue = Number(statsRow.total_revenue) || 0;
-        const prevMonthIncome = Number(statsRow.prev_month_revenue) || 0;
-        
-        // Calculate percentage changes
-        const calculatePercentageChange = (current: number, previous: number): number => {
-          if (previous === 0) return current > 0 ? 100 : 0;
-          return ((current - previous) / previous) * 100;
-        };
-        
-        const incomeChangePercentage = calculatePercentageChange(totalIncomeValue, prevMonthIncome);
-        
-        // Update state with the processed data for chart
-        setDateLabels(uniqueDates as string[]);
-        setServicesData(serviceDataSeries);
-        setTotalIncome(totalIncomeValue);
-        setIncomeChange(incomeChangePercentage);
-        
-        // Fetch statistics from QueenDataView for cards
-        await fetchStatsData();
-        
-      } catch (err) {
-        useFallbackData(); // Use fallback data on error
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // Fetch statistics data from QueenDataView
-    const fetchStatsData = async () => {
-      try {
-        // Define time periods for current and previous periods
-        let currentPeriodFilter = '';
-        let previousPeriodFilter = '';
-        
-        if (period === 'monthly') {
-          const currentMonth = format(new Date(), 'yyyy-MM');
-          const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
-          currentPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
-          previousPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${previousMonth}'`;
-        } else if (period === 'weekly') {
-          currentPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-          previousPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)';
-        } else if (period === 'annual') {
-          const currentYear = new Date().getFullYear();
-          currentPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
-          previousPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
-        }
-        
-        const statsQuery = `
-          WITH CurrentPeriodStats AS (
-            SELECT
-              COUNT(DISTINCT CustomerName) as current_customers,
-              COUNT(DISTINCT BookingID) as current_appointments,
-              COUNT(DISTINCT ServiceName) as current_services
-            FROM \`great_time.MainDataView\`
-            WHERE ${currentPeriodFilter}
-          ),
-          PreviousPeriodStats AS (
-            SELECT
-              COUNT(DISTINCT CustomerName) as previous_customers,
-              COUNT(DISTINCT BookingID) as previous_appointments,
-              COUNT(DISTINCT ServiceName) as previous_services
-            FROM \`great_time.MainDataView\`
-            WHERE ${previousPeriodFilter}
-          )
-          SELECT
-            cp.current_customers,
-            cp.current_appointments,
-            cp.current_services,
-            pp.previous_customers,
-            pp.previous_appointments,
-            pp.previous_services
-          FROM CurrentPeriodStats cp, PreviousPeriodStats pp
-        `;
-        
-        const statsResponse = await fetch('/api/query', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: statsQuery }),
-        });
-        
-        if (!statsResponse.ok) {
-          throw new Error(`Failed to fetch stats data (Status: ${statsResponse.status})`);
-        }
-        
-        const statsResponseData = await statsResponse.json();
-        
-        if (!statsResponseData.success || !statsResponseData.data || statsResponseData.data.length === 0) {
-          return; // Continue with chart data, just don't update the stats
-        }
-        
-        const statsData = statsResponseData.data[0];
-        
-        // Calculate percentage changes
-        const calculatePercentageChange = (current: number, previous: number): number => {
-          if (previous === 0) return current > 0 ? 100 : 0;
-          return ((current - previous) / previous) * 100;
-        };
-        
-        const currentCustomers = Number(statsData.current_customers) || 0;
-        const previousCustomers = Number(statsData.previous_customers) || 0;
-        const customerChangePercentage = calculatePercentageChange(currentCustomers, previousCustomers);
-        
-        const currentAppointments = Number(statsData.current_appointments) || 0;
-        const previousAppointments = Number(statsData.previous_appointments) || 0;
-        
-        // Calculate appointment rate (appointments per customer)
-        const appointmentRateValue = 
-          currentCustomers > 0 ? 
-          (currentAppointments / currentCustomers) * 100 : 0;
-        
-        const prevAppointmentRate = 
-          previousCustomers > 0 ? 
-          (previousAppointments / previousCustomers) * 100 : 0;
-        
-        const appointmentChangePercentage = calculatePercentageChange(appointmentRateValue, prevAppointmentRate);
-        
-        const currentServices = Number(statsData.current_services) || 0;
-        const previousServices = Number(statsData.previous_services) || 0;
-        const serviceChangePercentage = calculatePercentageChange(currentServices, previousServices);
-        
-        // Update state with stats data
-        setCustomerCount(currentCustomers);
-        setCustomerChange(customerChangePercentage);
-        setAppointmentRate(appointmentRateValue);
-        setAppointmentChange(appointmentChangePercentage);
-        setServiceCount(currentServices);
-        setServiceChange(serviceChangePercentage);
-        
-        setUsingFallbackData(false); // Ensure we're not showing the fallback data notice
-        
-      } catch (err) {
-        // Don't use fallback data here, just log the error
-        // The chart data will still be displayed
-      }
-    };
-    
-    // Fetch top services data
-    const fetchTopServices = async () => {
-      setLoadingTopServices(true);
       try {
         // Define time constraints based on the selected period
         let timeConstraint = '';
@@ -556,265 +178,297 @@ const Dashboard: React.FC = () => {
           prevTimeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
         }
         
-        const servicesQuery = `
-          WITH CurrentBookings AS (
-            SELECT
+        // Query to get appointment data for chart
+        const query = `
+          WITH PopularServices AS (
+            SELECT 
               ServiceName,
-              COUNT(DISTINCT BookingID) AS BookingCount,
-              COUNT(DISTINCT CustomerName) AS CustomerCount
+              COUNT(DISTINCT BookingID) as BookingCount
             FROM \`great_time.MainDataView\`
-            WHERE ${timeConstraint}
-              AND ServiceName IS NOT NULL
+            WHERE ServiceName IS NOT NULL
               AND ClinicCode = '${currentClinic.code}'
             GROUP BY ServiceName
+            ORDER BY BookingCount DESC
+            LIMIT 3
           ),
           
-          PreviousBookings AS (
-            SELECT
+          DailyAppointments AS (
+            SELECT 
               ServiceName,
-              COUNT(DISTINCT BookingID) AS BookingCount,
-              COUNT(DISTINCT CustomerName) AS CustomerCount
+              FORMAT_DATE('%Y-%m-%d', DATE(CheckInTime)) as Day,
+              COUNT(DISTINCT BookingID) as DailyCount
+            FROM \`great_time.MainDataView\`
+            WHERE ${timeConstraint}
+              AND ServiceName IN (SELECT ServiceName FROM PopularServices)
+              AND ClinicCode = '${currentClinic.code}'
+            GROUP BY ServiceName, Day
+            ORDER BY Day
+          )
+          
+          SELECT 
+            ps.ServiceName,
+            ps.BookingCount,
+            da.Day,
+            da.DailyCount
+          FROM PopularServices ps
+          LEFT JOIN DailyAppointments da ON ps.ServiceName = da.ServiceName
+          ORDER BY ps.BookingCount DESC, da.Day
+        `;
+        
+        const response = await fetch('/api/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ query }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch data (Status: ${response.status})`);
+        }
+        
+        const responseData = await response.json();
+        
+        if (!responseData.success || !responseData.data || responseData.data.length === 0) {
+          useFallbackData(); // Use fallback data
+          return;
+        }
+        
+        const data = responseData.data || [];
+        
+        // Process the data for the chart
+        const uniqueDates = [...new Set(data
+          .filter((item: any) => item.Day)
+          .map((item: any) => {
+            try {
+              if (typeof item.Day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.Day)) {
+                const parts = item.Day.split('-');
+                const date = new Date(
+                  parseInt(parts[0], 10), 
+                  parseInt(parts[1], 10) - 1,
+                  parseInt(parts[2], 10)
+                );
+                return format(date, 'MMM dd');
+              }
+              return format(new Date(item.Day), 'MMM dd');
+            } catch (e) {
+              return String(item.Day).substring(0, 10);
+            }
+          })
+        )].sort();
+        
+        const serviceNames = [...new Set(data.map((item: any) => item.ServiceName))];
+        
+        if (serviceNames.length === 0) {
+          useFallbackData();
+          return;
+        }
+
+        const serviceDataSeries = serviceNames.map(serviceName => {
+          const serviceData = data.filter((item: any) => item.ServiceName === serviceName);
+          
+          const dataPoints = uniqueDates.map(formattedDate => {
+            const dayData = serviceData.find((item: any) => {
+              if (!item.Day) return false;
+              
+              try {
+                if (typeof item.Day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.Day)) {
+                  const parts = item.Day.split('-');
+                  const date = new Date(
+                    parseInt(parts[0], 10), 
+                    parseInt(parts[1], 10) - 1, 
+                    parseInt(parts[2], 10)
+                  );
+                  return format(date, 'MMM dd') === formattedDate;
+                }
+                return format(new Date(item.Day), 'MMM dd') === formattedDate;
+              } catch (e) {
+                return String(item.Day).substring(0, 10) === formattedDate;
+              }
+            });
+            
+            return dayData ? Number(dayData.DailyCount || 0) : 0;
+          });
+          
+          return {
+            name: serviceName as string,
+            data: dataPoints
+          };
+        }) as ServiceData[];
+        
+        // Update chart data
+        setDateLabels(uniqueDates as string[]);
+        setServicesData(serviceDataSeries);
+        
+        // Fetch statistics separately
+        await fetchStats(timeConstraint, prevTimeConstraint);
+        
+      } catch (err) {
+        useFallbackData(); // Use fallback data on error
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Helper function to calculate percentage change
+    const calculatePercentageChange = (current: number, previous: number): number => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return ((current - previous) / previous) * 100;
+    };
+    
+    // Fetch appointment and revenue statistics
+    const fetchStats = async (timeConstraint: string, prevTimeConstraint: string) => {
+      try {
+        // Get appointment statistics from MainDataView
+        const statsQuery = `
+          WITH CurrentStats AS (
+            SELECT
+              COUNT(DISTINCT CustomerName) as total_customers,
+              COUNT(DISTINCT BookingID) as total_appointments,
+              COUNT(DISTINCT ServiceName) as total_services
+            FROM \`great_time.MainDataView\`
+            WHERE ${timeConstraint}
+              AND ClinicCode = '${currentClinic.code}'
+          ),
+          
+          PreviousStats AS (
+            SELECT
+              COUNT(DISTINCT CustomerName) as prev_customers,
+              COUNT(DISTINCT BookingID) as prev_appointments,
+              COUNT(DISTINCT ServiceName) as prev_services
             FROM \`great_time.MainDataView\`
             WHERE ${prevTimeConstraint}
-              AND ServiceName IS NOT NULL
               AND ClinicCode = '${currentClinic.code}'
-            GROUP BY ServiceName
           )
           
-          SELECT
-            cb.ServiceName as serviceName,
-            cb.BookingCount as bookingCount,
-            cb.CustomerCount as customerCount,
-            CASE 
-              WHEN pb.BookingCount IS NULL OR pb.BookingCount = 0 THEN 100
-              ELSE ROUND(((cb.BookingCount - pb.BookingCount) / pb.BookingCount) * 100, 1)
-            END as bookingChange,
-            CASE 
-              WHEN pb.CustomerCount IS NULL OR pb.CustomerCount = 0 THEN 100
-              ELSE ROUND(((cb.CustomerCount - pb.CustomerCount) / pb.CustomerCount) * 100, 1)
-            END as customerChange
-          FROM CurrentBookings cb
-          LEFT JOIN PreviousBookings pb ON cb.ServiceName = pb.ServiceName
-          ORDER BY cb.BookingCount DESC
-          LIMIT 10
+          SELECT 
+            cs.total_customers,
+            cs.total_appointments,
+            cs.total_services,
+            ps.prev_customers,
+            ps.prev_appointments,
+            ps.prev_services
+          FROM CurrentStats cs
+          CROSS JOIN PreviousStats ps
         `;
-
-        // Execute the query
-        const servicesResponse = await fetch('/api/query', {
+        
+        const statsResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ query: servicesQuery }),
+          body: JSON.stringify({ query: statsQuery }),
         });
         
-        if (!servicesResponse.ok) {
-          throw new Error(`Failed to fetch top services data (Status: ${servicesResponse.status})`);
+        if (statsResponse.ok) {
+          const statsData = await statsResponse.json();
+          
+          if (statsData.success && statsData.data && statsData.data.length > 0) {
+            const statsRow = statsData.data[0];
+            
+            // Process appointment and customer statistics
+            const currentCustomers = Number(statsRow.total_customers) || 0;
+            const previousCustomers = Number(statsRow.prev_customers) || 0;
+            const customerChangePercentage = calculatePercentageChange(currentCustomers, previousCustomers);
+            
+            const currentAppointments = Number(statsRow.total_appointments) || 0;
+            const previousAppointments = Number(statsRow.prev_appointments) || 0;
+            
+            // Calculate appointment rate (appointments per customer)
+            const appointmentRateValue = 
+              currentCustomers > 0 ? 
+              (currentAppointments / currentCustomers) * 100 : 0;
+            
+            const prevAppointmentRate = 
+              previousCustomers > 0 ? 
+              (previousAppointments / previousCustomers) * 100 : 0;
+            
+            const appointmentChangePercentage = calculatePercentageChange(appointmentRateValue, prevAppointmentRate);
+            
+            const currentServices = Number(statsRow.total_services) || 0;
+            const previousServices = Number(statsRow.prev_services) || 0;
+            const serviceChangePercentage = calculatePercentageChange(currentServices, previousServices);
+            
+            // Update state with stats data
+            setCustomerCount(currentCustomers);
+            setCustomerChange(customerChangePercentage);
+            setAppointmentRate(appointmentRateValue);
+            setAppointmentChange(appointmentChangePercentage);
+            setServiceCount(currentServices);
+            setServiceChange(serviceChangePercentage);
+          }
         }
         
-        const servicesResponseData = await servicesResponse.json();
-        
-        if (!servicesResponseData.success || !servicesResponseData.data || servicesResponseData.data.length === 0) {
-          setTopServices([]);
-          return;
-        }
-        
-        // Format the top services data
-        const formattedTopServices = servicesResponseData.data.map((service: any) => ({
-          serviceName: service.serviceName,
-          bookingCount: Number(service.bookingCount) || 0,
-          customerCount: Number(service.customerCount) || 0,
-          bookingChange: Number(service.bookingChange) || 0,
-          customerChange: Number(service.customerChange) || 0
-        }));
-        
-        setTopServices(formattedTopServices);
-      } catch (err) {
-        setTopServices([]);
-      } finally {
-        setLoadingTopServices(false);
-      }
-    };
-    
-    // Fetch payment methods data
-    const fetchPaymentMethods = async () => {
-      setLoadingPaymentMethods(true);
-      try {
-        // Define time constraints based on the selected period
-        let timeConstraint = '';
-        
-        if (period === 'monthly') {
-          const currentMonth = format(new Date(), 'yyyy-MM');
-          timeConstraint = `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = '${currentMonth}'`;
-        } else if (period === 'weekly') {
-          timeConstraint = 'DATE(OrderCreatedDate) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-        } else if (period === 'annual') {
-          const currentYear = new Date().getFullYear();
-          timeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear}`;
-        }
-        
-        const paymentMethodsQuery = `
-          WITH PaymentMethodCounts AS (
-            SELECT
-              CASE 
-                WHEN PaymentMethod = 'CASH' THEN 'Cash'
-                WHEN PaymentMethod = 'BANK_TRANSFER' THEN 'Bank Transfer'
-                WHEN PaymentMethod = 'CARD' THEN 'Card'
-                WHEN PaymentMethod = 'MIXED' THEN 'Mixed'
-                ELSE PaymentMethod
-              END as Method,
-              COUNT(*) as Count
+        // Get revenue data from MainPaymentView
+        const revenueQuery = `
+          WITH PaymentData AS (
+            SELECT 
+              OrderCreatedDate,
+              CustomerName,
+              InvoiceNumber,
+              CAST(NetTotal AS FLOAT64) as Revenue
             FROM \`great_time.MainPaymentView\`
-            WHERE ${timeConstraint}
-              AND PaymentMethod IS NOT NULL
+            WHERE ServiceName IS NOT NULL
               AND PaymentMethod != 'PASS'
               AND PaymentStatus = 'PAID'
+              AND CAST(NetTotal AS FLOAT64) > 0
+              AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
               AND ClinicCode = '${currentClinic.code}'
-            GROUP BY PaymentMethod
           ),
           
-          TotalCount AS (
-            SELECT SUM(Count) as Total FROM PaymentMethodCounts
-          )
-          
-          SELECT
-            pmc.Method as method,
-            pmc.Count as count,
-            ROUND((pmc.Count / tc.Total) * 100, 1) as percentage
-          FROM PaymentMethodCounts pmc, TotalCount tc
-          ORDER BY pmc.Count DESC
-        `;
-
-        // Execute the query
-        const methodsResponse = await fetch('/api/query', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: paymentMethodsQuery }),
-        });
-        
-        if (!methodsResponse.ok) {
-          throw new Error(`Failed to fetch payment methods data (Status: ${methodsResponse.status})`);
-        }
-        
-        const methodsResponseData = await methodsResponse.json();
-        
-        if (!methodsResponseData.success || !methodsResponseData.data || methodsResponseData.data.length === 0) {
-          setPaymentMethods([]);
-          return;
-        }
-        
-        // Format the payment methods data
-        const formattedPaymentMethods = methodsResponseData.data.map((method: any) => ({
-          method: method.method,
-          count: Number(method.count) || 0,
-          percentage: Number(method.percentage) || 0
-        }));
-        
-        setPaymentMethods(formattedPaymentMethods);
-      } catch (err) {
-        setPaymentMethods([]);
-      } finally {
-        setLoadingPaymentMethods(false);
-      }
-    };
-    
-    // Fetch top therapists data
-    const fetchTopTherapists = async () => {
-      setLoadingTherapists(true);
-      try {
-        // Define time constraints based on the selected period
-        let timeConstraint = '';
-        
-        if (period === 'monthly') {
-          const currentMonth = format(new Date(), 'yyyy-MM');
-          timeConstraint = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
-        } else if (period === 'weekly') {
-          timeConstraint = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-        } else if (period === 'annual') {
-          const currentYear = new Date().getFullYear();
-          timeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
-        }
-        
-        const therapistsQuery = `
-          WITH TherapistBookings AS (
+          CurrentStats AS (
             SELECT
-              PractitionerName as name,
-              PractitionerImage as image,
-              COUNT(DISTINCT BookingID) as bookingCount
-            FROM \`great_time.MainDataView\`
+              SUM(Revenue) as total_revenue
+            FROM PaymentData
             WHERE ${timeConstraint}
-              AND PractitionerName IS NOT NULL
-              AND PractitionerName != ''
-              AND ClinicCode = '${currentClinic.code}'
-            GROUP BY PractitionerName, PractitionerImage
-            ORDER BY bookingCount DESC
-            LIMIT 10
           ),
           
-          TotalBookings AS (
-            SELECT SUM(bookingCount) as total FROM TherapistBookings
+          PreviousStats AS (
+            SELECT
+              SUM(Revenue) as prev_revenue
+            FROM PaymentData
+            WHERE ${prevTimeConstraint}
           )
           
           SELECT
-            tb.name,
-            tb.image,
-            tb.bookingCount,
-            ROUND((tb.bookingCount / tbt.total) * 100, 1) as percentage
-          FROM TherapistBookings tb, TotalBookings tbt
-          ORDER BY tb.bookingCount DESC
+            cs.total_revenue,
+            ps.prev_revenue
+          FROM CurrentStats cs
+          CROSS JOIN PreviousStats ps
         `;
-
-        // Execute the query
-        const therapistsResponse = await fetch('/api/query', {
+        
+        const revenueResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ query: therapistsQuery }),
+          body: JSON.stringify({ query: revenueQuery }),
         });
         
-        if (!therapistsResponse.ok) {
-          throw new Error(`Failed to fetch therapists data (Status: ${therapistsResponse.status})`);
+        if (revenueResponse.ok) {
+          const revenueData = await revenueResponse.json();
+          
+          if (revenueData.success && revenueData.data && revenueData.data.length > 0) {
+            const revenueRow = revenueData.data[0];
+            
+            const totalIncomeValue = Number(revenueRow.total_revenue) || 0;
+            const prevMonthIncome = Number(revenueRow.prev_revenue) || 0;
+            
+            const incomeChangePercentage = calculatePercentageChange(totalIncomeValue, prevMonthIncome);
+            
+            // Update state with revenue data
+            setTotalIncome(totalIncomeValue);
+            setIncomeChange(incomeChangePercentage);
+          }
         }
         
-        const therapistsResponseData = await therapistsResponse.json();
-        
-        if (!therapistsResponseData.success || !therapistsResponseData.data || therapistsResponseData.data.length === 0) {
-          setTopTherapists([]);
-          return;
-        }
-        
-        // Format the therapists data
-        const formattedTherapists = therapistsResponseData.data.map((therapist: any) => ({
-          name: therapist.name || 'Unknown',
-          image: therapist.image || '',
-          bookingCount: Number(therapist.bookingCount) || 0,
-          percentage: Number(therapist.percentage) || 0
-        }));
-        
-        setTopTherapists(formattedTherapists);
       } catch (err) {
-        setTopTherapists([]);
-      } finally {
-        setLoadingTherapists(false);
+        // Skip errors without affecting the chart display
       }
     };
     
     fetchChartData();
-    fetchTopServices();
-    fetchPaymentMethods();
-    fetchTopTherapists();
   }, [period, currentClinic]);
-  
-  // Format currency
-  const formatCurrency = (value: number): string => {
-    return value.toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }) + " MMK";
-  };
   
   // Chart series data
   const chartSeries = useMemo(() => servicesData, [servicesData]);
@@ -911,7 +565,7 @@ const Dashboard: React.FC = () => {
         show: true
       },
       y: {
-        formatter: (value) => formatCurrency(value)
+        formatter: (value) => `${value} appointments`
       }
     },
     markers: {
