@@ -203,16 +203,18 @@ const Dashboard: React.FC = () => {
               AND ClinicCode = '${currentClinic.code}'
             GROUP BY ServiceName, Day
             ORDER BY Day
+            LIMIT 100
           )
           
           SELECT 
             ps.ServiceName,
             ps.BookingCount,
             da.Day,
-            da.DailyCount
+            IFNULL(da.DailyCount, 0) as DailyCount
           FROM PopularServices ps
           LEFT JOIN DailyAppointments da ON ps.ServiceName = da.ServiceName
           ORDER BY ps.BookingCount DESC, da.Day
+          LIMIT 100
         `;
         
         const response = await fetch('/api/query', {
@@ -329,6 +331,7 @@ const Dashboard: React.FC = () => {
             FROM \`great_time.MainDataView\`
             WHERE ${timeConstraint}
               AND ClinicCode = '${currentClinic.code}'
+            LIMIT 5000
           ),
           
           PreviousStats AS (
@@ -339,15 +342,16 @@ const Dashboard: React.FC = () => {
             FROM \`great_time.MainDataView\`
             WHERE ${prevTimeConstraint}
               AND ClinicCode = '${currentClinic.code}'
+            LIMIT 5000
           )
           
           SELECT 
-            cs.total_customers,
-            cs.total_appointments,
-            cs.total_services,
-            ps.prev_customers,
-            ps.prev_appointments,
-            ps.prev_services
+            IFNULL(cs.total_customers, 0) as total_customers,
+            IFNULL(cs.total_appointments, 0) as total_appointments,
+            IFNULL(cs.total_services, 0) as total_services,
+            IFNULL(ps.prev_customers, 0) as prev_customers,
+            IFNULL(ps.prev_appointments, 0) as prev_appointments,
+            IFNULL(ps.prev_services, 0) as prev_services
           FROM CurrentStats cs
           CROSS JOIN PreviousStats ps
         `;
@@ -414,6 +418,7 @@ const Dashboard: React.FC = () => {
               AND CAST(NetTotal AS FLOAT64) > 0
               AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
               AND ClinicCode = '${currentClinic.code}'
+              LIMIT 10000
           ),
           
           CurrentStats AS (
@@ -421,6 +426,7 @@ const Dashboard: React.FC = () => {
               SUM(Revenue) as total_revenue
             FROM PaymentData
             WHERE ${timeConstraint}
+            LIMIT 5000
           ),
           
           PreviousStats AS (
@@ -428,11 +434,12 @@ const Dashboard: React.FC = () => {
               SUM(Revenue) as prev_revenue
             FROM PaymentData
             WHERE ${prevTimeConstraint}
+            LIMIT 5000
           )
           
           SELECT
-            cs.total_revenue,
-            ps.prev_revenue
+            IFNULL(cs.total_revenue, 0) as total_revenue,
+            IFNULL(ps.prev_revenue, 0) as prev_revenue
           FROM CurrentStats cs
           CROSS JOIN PreviousStats ps
         `;
