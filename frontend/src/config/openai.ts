@@ -43,6 +43,13 @@ Rules:
    - ALWAYS include CustomerName and CustomerPhoneNumber in the SELECT clause
    - Use appropriate aliases for clarity (e.g., CustomerName as name, CustomerPhoneNumber as phone)
    - Ensure these fields are included in GROUP BY if using aggregations
+9. For appointment-related queries (today, this week, this month):
+   - Always include CustomerName, ServiceName, CheckInTime, and PractitionerName in the SELECT clause
+   - For "today" appointments: WHERE DATE(CheckInTime) = CURRENT_DATE()
+   - For "this week" appointments: WHERE DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL EXTRACT(DAYOFWEEK FROM CURRENT_DATE())-1 DAY) AND DATE_ADD(CURRENT_DATE(), INTERVAL 7-EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) DAY)
+   - For "this month" appointments: WHERE EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM CURRENT_DATE()) AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_DATE())
+   - Order results by CheckInTime ASC for chronological display
+   - Include any other relevant appointment details in SELECT
 
 IMPORTANT: You MUST strictly follow this response format:
 [SQL Query]
@@ -60,6 +67,7 @@ Notes:
 - For counting queries, ensure to include both item names and their counts in results.
 - For customer-specific queries, always show service frequency.
 - For customer-related queries, always include phone numbers for future reference.
+- For appointment queries, focus on providing complete appointment details with customer names and services.
 - ALWAYS use MainDataView instead of QueenDataView in all queries.
 - ALWAYS filter by clinic code from ClinicContext (ClinicCode = '{clinicCode}').`,
   
@@ -95,6 +103,12 @@ Rules:
    - Use bar charts for comparing quantities
    - Use line charts for trends over time
    - Use pie charts for proportions
+8. For appointment data:
+   - Highlight the total number of appointments
+   - Mention popular services and their frequency
+   - Identify key clients with multiple appointments
+   - Note any patterns in scheduling
+   - Keep insights focused on actionable business intelligence
 
 IMPORTANT: You MUST strictly follow this response format:
 [Response]

@@ -34,6 +34,7 @@ import { ClinicProvider, useClinic, Clinic } from './contexts/ClinicContext';
 import SalesBySalesPerson from './components/SalesBySalesPerson';
 import Login from './components/Login';
 import Commission from './components/Commission';
+import { format } from 'date-fns';
 
 ChartJS.register(
   CategoryScale,
@@ -72,7 +73,7 @@ interface MessageData {
   tableData?: {
     headers: string[];
     rows: any[][];
-    type?: 'customer' | 'service' | 'therapist';
+    type?: 'customer' | 'service' | 'therapist' | 'appointment';
   };
   entities?: {
     type: string;
@@ -255,7 +256,7 @@ const MainChat = () => {
                             currentInputMessage.toLowerCase().includes('popular') ||
                             currentInputMessage.toLowerCase().includes('frequent'));
       
-      // NEW: Check if this is a therapist/practitioner/employee query that should display results as a table
+      // Check if this is a therapist/practitioner/employee query that should display results as a table
       const isTherapistQuery = (currentInputMessage.toLowerCase().includes('therapist') || 
                               currentInputMessage.toLowerCase().includes('practitioner') || 
                               currentInputMessage.toLowerCase().includes('employee') ||
@@ -276,6 +277,18 @@ const MainChat = () => {
                               currentInputMessage.toLowerCase().includes('who') ||
                               currentInputMessage.toLowerCase().includes('this month') ||
                               currentInputMessage.toLowerCase().includes('month'));
+      
+      // Check if this is an appointment query that should display results as a table
+      const isAppointmentQuery = currentInputMessage.toLowerCase().includes('appointment') &&
+                              (currentInputMessage.toLowerCase().includes('today') ||
+                               currentInputMessage.toLowerCase().includes('this week') ||
+                               currentInputMessage.toLowerCase().includes('week') ||
+                               currentInputMessage.toLowerCase().includes('this month') ||
+                               currentInputMessage.toLowerCase().includes('month') ||
+                               currentInputMessage.toLowerCase().includes('tomorrow') ||
+                               currentInputMessage.toLowerCase().includes('schedule') ||
+                               currentInputMessage.toLowerCase().includes('upcoming') ||
+                               currentInputMessage.toLowerCase().includes('list'));
       
       let queryResults = [];
       
@@ -661,6 +674,80 @@ ORDER BY
             }
           } catch (error) {
             console.error('Error formatting therapist data:', error);
+            // Fall back to normal response handling
+          }
+        }
+
+        // Try to format appointment data as table
+        if (isAppointmentQuery && queryResults.length > 0) {
+          try {
+            // Find relevant fields from various possible column names
+            const customerField = Object.keys(queryResults[0]).find(key => 
+              ['customer_name', 'CustomerName', 'name', 'customer'].includes(key));
+            
+            const serviceField = Object.keys(queryResults[0]).find(key => 
+              ['service_name', 'ServiceName', 'service', 'treatment'].includes(key));
+            
+            const timeField = Object.keys(queryResults[0]).find(key => 
+              ['check_in_time', 'CheckInTime', 'appointment_time', 'time', 'date', 'schedule_time'].includes(key));
+            
+            const therapistField = Object.keys(queryResults[0]).find(key => 
+              ['practitioner_name', 'PractitionerName', 'therapist_name', 'therapist', 'staff'].includes(key));
+            
+            if (customerField && serviceField) {
+              // Create headers based on available fields
+              const headers = ['#', 'Customer Name', 'Service'];
+              if (timeField) headers.push('Time');
+              if (therapistField) headers.push('Therapist');
+              
+              // Create rows with available data
+              const rows = queryResults.map((item: any, index: number) => {
+                const row = [
+                  index + 1, 
+                  item[customerField],
+                  item[serviceField]
+                ];
+                
+                // Add time if available, with formatting
+                if (timeField) {
+                  try {
+                    const date = new Date(item[timeField]);
+                    row.push(format(date, 'MMM dd, yyyy h:mm a'));
+                  } catch (e) {
+                    row.push(item[timeField] || 'N/A');
+                  }
+                }
+                
+                // Add therapist if available
+                if (therapistField) row.push(item[therapistField] || 'N/A');
+                
+                return row;
+              });
+              
+              // Set the table data for the response
+              const tableData = { headers, rows };
+              
+              // Create the assistant message with structured data
+              const assistantMessage: Message = {
+                id: Date.now().toString(),
+                type: 'assistant',
+                content: responseContent,
+                data: {
+                  sql: sqlQuery,
+                  results: queryResults,
+                  showTable: true,
+                  tableData: {
+                    ...tableData,
+                    type: 'appointment'
+                  }
+                }
+              };
+              
+              setMessages(prev => [...prev, assistantMessage]);
+              return;
+            }
+          } catch (error) {
+            console.error('Error formatting appointment data:', error);
             // Fall back to normal response handling
           }
         }
