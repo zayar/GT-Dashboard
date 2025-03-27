@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Typography, Avatar, Menu, MenuItem, IconButton } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import axios from 'axios';
 
 // Interface for clinic data
 interface Clinic {
@@ -208,27 +209,11 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
         ORDER BY name ASC
       `;
       
-      console.log('Fetching clinics with query:', query);
-      
-      const response = await fetch('/api/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query }),
-        signal: controller.signal
-      });
+      const response = await axios.post('/api/query', { query });
       
       clearTimeout(timeoutId);
       
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('API response error:', response.status, errorData);
-        throw new Error(`Failed to fetch clinics: ${response.status} ${errorData ? JSON.stringify(errorData) : ''}`);
-      }
-      
-      const data = await response.json();
-      console.log('Clinics API response:', data);
+      const { data } = response.data;
       
       // Handle different response formats based on backend implementation
       let clinicsData = [];

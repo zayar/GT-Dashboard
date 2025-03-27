@@ -64,7 +64,7 @@ const Appointments: React.FC = () => {
     if (currentClinic) {
       fetchAppointments();
     }
-  }, [currentClinic, selectedDate]);
+  }, [currentClinic]);
 
   useEffect(() => {
     applyFilters();
@@ -76,10 +76,6 @@ const Appointments: React.FC = () => {
       setError(null);
       
       const dateStr = selectedDate ? selectedDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-      
-      console.log('Current Clinic:', currentClinic);
-      console.log('Current Clinic ID:', currentClinic?.id);
-      console.log('Current Clinic Code:', currentClinic?.code);
       
       const query = `
         SELECT
@@ -102,8 +98,6 @@ const Appointments: React.FC = () => {
         ORDER BY FromTime DESC
       `;
     
-
-      console.log('Executing query:', query);
       const response = await axios.post('/api/query', { query });
       
       if (!response.data.success) {

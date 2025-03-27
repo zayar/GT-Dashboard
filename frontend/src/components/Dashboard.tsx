@@ -125,7 +125,6 @@ const Dashboard: React.FC = () => {
   
   // Use fallback data if no real data is available
   const useFallbackData = () => {
-    console.log('Using fallback data');
     setDateLabels(FALLBACK_DATA.dateLabels);
     setServicesData(FALLBACK_DATA.servicesData);
     setTotalIncome(FALLBACK_DATA.stats.totalIncome);
@@ -172,7 +171,6 @@ const Dashboard: React.FC = () => {
         `;
 
         // API endpoint to execute the query
-        console.log('Executing query:', query);
         const response = await fetch('/api/query', {
           method: 'POST',
           headers: {
@@ -189,12 +187,9 @@ const Dashboard: React.FC = () => {
         
         // Check if we have data in the table
         if (!responseData.success || !responseData.data || responseData.data.length === 0) {
-          console.warn('No data in the MainPaymentView table');
           useFallbackData(); // Use fallback data
           return;
         }
-        
-        console.log('Found data in MainPaymentView - First 3 records:', responseData.data.slice(0, 3));
         
         // Now that we know we have data, run the full query
         // Define time constraints based on the selected period
@@ -301,8 +296,6 @@ const Dashboard: React.FC = () => {
           ORDER BY ts.TotalRevenue DESC, cd.Day
         `;
         
-        console.log('Executing full query:', fullQuery);
-        
         const fullResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
@@ -317,16 +310,7 @@ const Dashboard: React.FC = () => {
         
         const fullResponseData = await fullResponse.json();
         
-        console.log('Full API Response Structure:', {
-          status: fullResponse.status,
-          hasData: Boolean(fullResponseData.data),
-          hasSuccess: Boolean(fullResponseData.success),
-          dataLength: fullResponseData.data?.length, 
-          firstRecord: fullResponseData.data?.[0]
-        });
-        
         if (!fullResponseData.success) {
-          console.warn('API error or invalid response');
           useFallbackData();
           return;
         }
@@ -334,14 +318,11 @@ const Dashboard: React.FC = () => {
         const data = fullResponseData.data || [];
         
         if (data.length === 0) {
-          console.warn('No data returned from full query');
           useFallbackData(); // Use fallback data instead of showing error
           return;
         }
         
         // Process the data for charts and statistics
-        console.log('Raw data sample from API (first 3 records):', data.slice(0, 3));
-        
         // Extract unique dates for x-axis
         // Safely parse and format dates without risking invalid Date objects
         const uniqueDates = [...new Set(data
@@ -362,28 +343,22 @@ const Dashboard: React.FC = () => {
               // Handle if it's a timestamp or other format
               return format(new Date(item.Day), 'MMM dd');
             } catch (e) {
-              console.warn(`Failed to parse date: ${item.Day}`, e);
               // Use the raw date string as fallback
               return String(item.Day).substring(0, 10);
             }
           })
         )].sort();
         
-        console.log('Unique dates found:', uniqueDates);
-        
         // Process data for each service
         const serviceNames = [...new Set(data.map((item: any) => item.ServiceName))];
-        console.log('Service names found:', serviceNames);
         
         if (serviceNames.length === 0) {
-          console.warn('No service names found in the data');
           useFallbackData();
           return;
         }
 
         const serviceDataSeries = serviceNames.map(serviceName => {
           const serviceData = data.filter((item: any) => item.ServiceName === serviceName);
-          console.log(`Processing service ${serviceName} with ${serviceData.length} data points`);
           
           // Create data points for each day
           const dataPoints = uniqueDates.map(formattedDate => {
@@ -416,9 +391,6 @@ const Dashboard: React.FC = () => {
           };
         }) as ServiceData[];
         
-        // Log the final processed data to verify it's correct
-        console.log('Final service data series:', JSON.stringify(serviceDataSeries));
-        
         // Calculate statistics from the data
         // Use the first row for statistics since they are the same for all rows with CROSS JOIN
         const statsRow = data[0];
@@ -444,7 +416,6 @@ const Dashboard: React.FC = () => {
         await fetchStatsData();
         
       } catch (err) {
-        console.error('Error fetching chart data:', err);
         useFallbackData(); // Use fallback data on error
       } finally {
         setLoading(false);
@@ -499,8 +470,6 @@ const Dashboard: React.FC = () => {
           FROM CurrentPeriodStats cp, PreviousPeriodStats pp
         `;
         
-        console.log('Executing stats query:', statsQuery);
-        
         const statsResponse = await fetch('/api/query', {
           method: 'POST',
           headers: {
@@ -516,12 +485,10 @@ const Dashboard: React.FC = () => {
         const statsResponseData = await statsResponse.json();
         
         if (!statsResponseData.success || !statsResponseData.data || statsResponseData.data.length === 0) {
-          console.warn('No stats data returned from DataBase');
           return; // Continue with chart data, just don't update the stats
         }
         
         const statsData = statsResponseData.data[0];
-        console.log('Stats data:', statsData);
         
         // Calculate percentage changes
         const calculatePercentageChange = (current: number, previous: number): number => {
@@ -562,7 +529,6 @@ const Dashboard: React.FC = () => {
         setUsingFallbackData(false); // Ensure we're not showing the fallback data notice
         
       } catch (err) {
-        console.error('Error fetching stats data:', err);
         // Don't use fallback data here, just log the error
         // The chart data will still be displayed
       }
@@ -649,7 +615,6 @@ const Dashboard: React.FC = () => {
         const servicesResponseData = await servicesResponse.json();
         
         if (!servicesResponseData.success || !servicesResponseData.data || servicesResponseData.data.length === 0) {
-          console.warn('No top services data returned from DataBase');
           setTopServices([]);
           return;
         }
@@ -665,7 +630,6 @@ const Dashboard: React.FC = () => {
         
         setTopServices(formattedTopServices);
       } catch (err) {
-        console.error('Error fetching top services data:', err);
         setTopServices([]);
       } finally {
         setLoadingTopServices(false);
@@ -737,7 +701,6 @@ const Dashboard: React.FC = () => {
         const methodsResponseData = await methodsResponse.json();
         
         if (!methodsResponseData.success || !methodsResponseData.data || methodsResponseData.data.length === 0) {
-          console.warn('No payment methods data returned from MainPaymentView');
           setPaymentMethods([]);
           return;
         }
@@ -751,7 +714,6 @@ const Dashboard: React.FC = () => {
         
         setPaymentMethods(formattedPaymentMethods);
       } catch (err) {
-        console.error('Error fetching payment methods data:', err);
         setPaymentMethods([]);
       } finally {
         setLoadingPaymentMethods(false);
@@ -820,7 +782,6 @@ const Dashboard: React.FC = () => {
         const therapistsResponseData = await therapistsResponse.json();
         
         if (!therapistsResponseData.success || !therapistsResponseData.data || therapistsResponseData.data.length === 0) {
-          console.warn('No therapists data returned from Database');
           setTopTherapists([]);
           return;
         }
@@ -835,7 +796,6 @@ const Dashboard: React.FC = () => {
         
         setTopTherapists(formattedTherapists);
       } catch (err) {
-        console.error('Error fetching therapists data:', err);
         setTopTherapists([]);
       } finally {
         setLoadingTherapists(false);

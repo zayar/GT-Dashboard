@@ -123,7 +123,6 @@ const MainChat = () => {
       // Clinic has changed, clear the chat history
       setMessages([]);
       sessionStorage.removeItem('chatMessages');
-      console.log('Cleared chat history due to clinic change');
     }
     
     // Update the ref with current clinic code
