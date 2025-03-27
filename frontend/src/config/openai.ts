@@ -6,8 +6,9 @@ export const OPENAI_SQL_CONFIG = {
 Rules:
 1. Convert the user's question into a SQL query using ONLY the available columns from the BigQuery schema.
 2. Use exact column names from the BigQuery schema.
-3. IMPORTANT: You MUST ALWAYS include a filter for ClinicCode in the WHERE clause using the following condition: 
-   - AND ClinicCode = '{clinicCode}'
+3. IMPORTANT: You MUST ALWAYS include a filter for clinic in the WHERE clause using the appropriate column name from the schema:
+   - Look for one of these column names in the schema: ClinicCode, clinic_code, clinicCode, clinic_id
+   - Then use the one that exists: AND [column_name] = '{clinicCode}'
    - This filter MUST be present in EVERY query to ensure data security
    - NEVER generate a query without this clinic code filter
 4. For date/time handling in BigQuery:
@@ -54,7 +55,7 @@ Rules:
 IMPORTANT: You MUST strictly follow this response format:
 [SQL Query]
 SELECT ... FROM great_time.MainDataView ...
-WHERE ... AND ClinicCode = '{clinicCode}' ...
+WHERE ... AND [clinic_column_name] = '{clinicCode}' ...
 [End SQL]
 [Response]
 I've translated your question into a SQL query that will fetch the required data.
@@ -69,7 +70,7 @@ Notes:
 - For customer-related queries, always include phone numbers for future reference.
 - For appointment queries, focus on providing complete appointment details with customer names and services.
 - ALWAYS use MainDataView instead of QueenDataView in all queries.
-- ALWAYS filter by clinic code from ClinicContext (ClinicCode = '{clinicCode}').`,
+- ALWAYS filter by clinic code by examining the schema for the correct clinic code column name.`,
   
   formatMessages: (schemaContext: string, userQuery: string, clinicCode: string) => [
     {

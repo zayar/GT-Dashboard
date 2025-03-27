@@ -412,12 +412,31 @@ ORDER BY
           .replace(/FROM\s+great_time\.QueenDataView/gi, 'FROM great_time.MainDataView');
         
         // Ensure the clinic code filter is present in all queries
-        if (!sqlQuery.includes(`ClinicCode = '${currentClinic.code}'`)) {
+        if (!sqlQuery.includes(`ClinicCode = '${currentClinic.code}'`) && !sqlQuery.includes(`clinic_code = '${currentClinic.code}'`) && !sqlQuery.includes(`clinicCode = '${currentClinic.code}'`)) {
+          // First, try to determine the correct column name to use
+          let clinicColumnName = 'ClinicCode';
+          
+          // Check if the query is using the MainDataView
+          if (sqlQuery.includes('great_time.MainDataView')) {
+            // For MainDataView, check if the query schema includes alternate column names
+            if (schema && schema.fields) {
+              // Look for possible clinic code column variants in the schema
+              const possibleColumns = ['ClinicCode', 'clinic_code', 'clinicCode', 'clinic_id', 'clinicId'];
+              for (const col of possibleColumns) {
+                if (schema.fields.some((field: any) => field.name === col)) {
+                  clinicColumnName = col;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Now use the determined column name for filtering
           if (sqlQuery.includes('WHERE')) {
-            sqlQuery = sqlQuery.replace(/WHERE/i, `WHERE ClinicCode = '${currentClinic.code}' AND`);
+            sqlQuery = sqlQuery.replace(/WHERE/i, `WHERE ${clinicColumnName} = '${currentClinic.code}' AND`);
           } else {
             // If there's no WHERE clause, add one
-            sqlQuery = sqlQuery + ` WHERE ClinicCode = '${currentClinic.code}'`;
+            sqlQuery = sqlQuery + ` WHERE ${clinicColumnName} = '${currentClinic.code}'`;
           }
         }
       }
