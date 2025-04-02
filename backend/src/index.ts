@@ -5,15 +5,14 @@ import dotenv from 'dotenv';
 import NodeCache from 'node-cache';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
+import walletRoutes from './routes/walletRoutes';
 
 dotenv.config();
 
 console.log('Starting server...');
 console.log('GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
-export const app = express();
-app.use(cors());
-app.use(express.json());
+const PORT = process.env.PORT || 3001;
 
 // Initialize cache with 5 minutes TTL
 const cache = new NodeCache({ stdTTL: 300 });
@@ -24,27 +23,60 @@ const limiter = rateLimit({
   max: 100 // limit each IP to 100 requests per windowMs
 });
 
+export const app = express();
+app.use(cors());
+app.use(express.json());
+
 app.use(compression());
 app.use(limiter);
 
 // Initialize BigQuery with credentials
-const bigquery = new BigQuery({
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-  scopes: [
-    'https://www.googleapis.com/auth/bigquery',
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/drive.readonly'
-  ]
+const defaultBigQuery = new BigQuery();
+const pitiPassBigQuery = new BigQuery({
+  projectId: 'piti-pass',
+  location: 'us-central1'
 });
 
 // Test BigQuery connection
 async function testBigQueryConnection() {
   try {
-    console.log('Testing BigQuery connection...');
-    const [datasets] = await bigquery.getDatasets();
-    console.log('BigQuery connection successful. Available datasets:', datasets.map(dataset => dataset.id));
+    // Test connection to the default project (pitistartup)
+    console.log('Testing BigQuery connection to default project...');
+    const [defaultDatasets] = await defaultBigQuery.getDatasets();
+    console.log('BigQuery connection successful. Available datasets in default project:', 
+      defaultDatasets.map(dataset => dataset.id));
+    
+    // Test connection to piti-pass project
+    try {
+      console.log('Testing BigQuery connection to piti-pass project...');
+      const [pitiPassDatasets] = await pitiPassBigQuery.getDatasets();
+      console.log('BigQuery connection successful. Available datasets in piti-pass project:',
+        pitiPassDatasets.map(dataset => dataset.id));
+      
+      // Try a simple count query on wallettransaction
+      try {
+        const countQuery = `
+          SELECT COUNT(*) as count
+          FROM \`piti-pass.passdb_prod.wallettransaction\`
+        `;
+        
+        const [rows] = await pitiPassBigQuery.query({
+          query: countQuery,
+          location: 'us-central1',
+        });
+        
+        console.log('Successfully queried wallettransaction table. Row count:', rows[0].count);
+      } catch (tableError: any) {
+        console.error('Error querying wallettransaction table:', tableError.message);
+        // Continue execution even if table query fails
+      }
+    } catch (pitiPassError: any) {
+      console.error('Error connecting to piti-pass project:', pitiPassError.message);
+      console.log('Will continue with default project access only.');
+      // Continue execution even if piti-pass access fails
+    }
   } catch (error) {
-    console.error('BigQuery connection error:', error);
+    console.error('BigQuery connection error to default project:', error);
     throw error;
   }
 }
@@ -52,7 +84,7 @@ async function testBigQueryConnection() {
 app.get('/api/schema', async (_req, res) => {
   try {
     console.log('Fetching schema for great_time.QueenDataView...');
-    const [metadata] = await bigquery.dataset('great_time').table('QueenDataView').getMetadata();
+    const [metadata] = await defaultBigQuery.dataset('great_time').table('QueenDataView').getMetadata();
     console.log('Schema fetched successfully');
     res.json({ success: true, data: metadata.schema });
   } catch (error: any) {
@@ -74,7 +106,7 @@ app.post('/api/query', async (req: express.Request<any, any, { query: string }>,
       // Fix common syntax errors related to AT TIME ZONE before executing query
       const fixedQuery = fixTimezoneSyntax(query);
       
-      const [job] = await bigquery.createQueryJob({ query: fixedQuery });
+      const [job] = await defaultBigQuery.createQueryJob({ query: fixedQuery });
       const [rows] = await job.getQueryResults();
       
       console.log('Query executed successfully, rows:', rows.length);
@@ -195,7 +227,7 @@ app.post('/api/queencommission', (async (req: express.Request, res: express.Resp
         (SELECT ARRAY_AGG(practitioner) FROM PractitionersList) as practitioners;
     `;
 
-    const [job] = await bigquery.createQueryJob({ query });
+    const [job] = await defaultBigQuery.createQueryJob({ query });
     const [rows] = await job.getQueryResults();
 
     const result = {
@@ -217,7 +249,8 @@ app.post('/api/queencommission', (async (req: express.Request, res: express.Resp
   }
 }) as express.RequestHandler);
 
-const PORT = process.env.PORT || 3001;
+app.use('/api/wallet', walletRoutes);
+
 if (process.env.NODE_ENV !== 'test') {
   testBigQueryConnection()
     .then(() => {

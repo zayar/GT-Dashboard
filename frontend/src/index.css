@@ -3,6 +3,15 @@
 @tailwind utilities;
 
 :root {
+  --primary-color: #101729;
+  --primary-light: #2a3550;
+  --primary-dark: #080f1d;
+  --secondary-color: #3b82f6;
+  --text-primary: #f3f4f6;
+  --text-secondary: #cbd5e1;
+  --background-default: #101729;
+  --background-paper: #151f38;
+  --divider-color: rgba(148, 163, 184, 0.12);
   font-family: 'Poppins', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -38,6 +47,10 @@ html, body {
 
 body {
   overflow-y: auto;
+  background-color: var(--background-default);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
 }
 
 #root {
@@ -85,9 +98,10 @@ button {
   font-size: 0.9em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a2235;
+  background-color: var(--primary-color);
   cursor: pointer;
   transition: border-color 0.25s, background-color 0.25s;
+  color: var(--text-primary);
 }
 button:hover {
   border-color: #6d8fff;
@@ -109,4 +123,50 @@ button:focus-visible {
   button {
     background-color: #1a2235;
   }
+}
+
+/* Set scrollbar styles for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--primary-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-light);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--secondary-color);
+}
+
+/* Dark theme styles for form elements */
+input, select, textarea {
+  background-color: var(--primary-dark);
+  color: var(--text-primary);
+  border-color: var(--divider-color);
+}
+
+/* Dark theme styles for MUI components */
+.MuiPaper-root {
+  background-color: var(--background-paper) !important;
+  color: var(--text-primary) !important;
+}
+
+.MuiTableCell-root {
+  color: var(--text-primary) !important;
+  border-bottom-color: var(--divider-color) !important;
+}
+
+.MuiTableRow-root:hover {
+  background-color: rgba(42, 53, 80, 0.3) !important;
+}
+
+.MuiTableHead-root .MuiTableCell-root {
+  background-color: var(--primary-color) !important;
+  color: var(--text-primary) !important;
 }

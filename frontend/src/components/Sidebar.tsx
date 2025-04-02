@@ -1,18 +1,63 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from '@mui/icons-material';
-import LogoutIcon from '@mui/icons-material/Logout';
+import { Link, useLocation } from 'react-router-dom';
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  Logout as LogoutIcon, 
+  AccountBalanceWallet as AccountBalanceWalletIcon,
+  Payments as PaymentsIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon
+} from '@mui/icons-material';
+import { 
+  ListSubheader, 
+  ListItem, 
+  ListItemButton, 
+  ListItemIcon, 
+  ListItemText,
+  Box,
+  Paper,
+  IconButton,
+  Tooltip,
+  useTheme,
+  alpha,
+  Divider,
+  Button,
+  Typography
+} from '@mui/material';
 
 // Interface for menu items
-interface MenuItem {
+interface BaseMenuItem {
   id: string;
   label: string;
   icon: string;
-  path?: string;
-  submenu?: MenuItem[];
-  hasSubmenu?: boolean;
   isAiFeature?: boolean;
 }
+
+interface RegularMenuItem extends BaseMenuItem {
+  type?: undefined;
+  path: string;
+  hasSubmenu?: false;
+}
+
+interface SubmenuMenuItem extends BaseMenuItem {
+  type?: undefined;
+  hasSubmenu: true;
+  submenu: RegularMenuItem[];
+}
+
+interface MenuGroup {
+  type: 'group';
+  group: string;
+  items: {
+    text: string;
+    icon: React.ReactNode;
+    path: string;
+  }[];
+}
+
+type MenuItem = RegularMenuItem | SubmenuMenuItem;
+type MenuItemOrGroup = MenuItem | MenuGroup;
 
 interface SidebarProps {
   onLogout: () => void;
@@ -26,6 +71,9 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     return savedState ? JSON.parse(savedState) : false;
   });
   const [expandedMenus, setExpandedMenus] = useState<string[]>([]);
+  const location = useLocation();
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
 
   // Save minimized state to localStorage when it changes
   useEffect(() => {
@@ -69,7 +117,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
   };
 
   // Menu items data
-  const menuItems: MenuItem[] = [
+  const menuItems: MenuItemOrGroup[] = [
     { 
       id: 'dashboard', 
       label: 'Dashboard', 
@@ -116,18 +164,366 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
       ]
     },
     { id: 'commission', label: 'Commission', icon: 'fas fa-percentage', path: '/commission' },
+    {
+      type: 'group',
+      group: 'Wallet',
+      items: [
+        {
+          text: 'Transactions',
+          icon: <PaymentsIcon />,
+          path: '/transactions'
+        },
+        {
+          text: 'Wallet Accounts',
+          icon: <AccountBalanceWalletIcon />,
+          path: '/wallet'
+        }
+      ]
+    },
   ];
 
-  // AI Feature section
-  const aiFeatures: MenuItem[] = [];
+  // Check if a path is active or part of active submenu
+  const isActive = (path: string): boolean => {
+    return location.pathname === path;
+  };
+
+  // Check if a submenu contains the active path
+  const hasActivePath = (submenu: RegularMenuItem[]): boolean => {
+    return submenu.some(item => isActive(item.path));
+  };
+
+  const renderMenuItem = (item: MenuItemOrGroup) => {
+    // Styles for menu items
+    const activeItemStyle = { 
+      backgroundColor: isDarkMode 
+        ? alpha(theme.palette.primary.main, 0.2)  // Slightly higher opacity for better visibility
+        : alpha(theme.palette.primary.main, 0.1),
+      color: isDarkMode 
+        ? '#ffffff'  // Pure white for maximum contrast when active
+        : theme.palette.primary.main,
+      borderRight: `3px solid ${theme.palette.primary.main}`,
+      '&::before': {
+        content: '""',
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: '3px',
+        backgroundColor: theme.palette.primary.main,
+      },
+    };
+    
+    const itemTextColor = isDarkMode 
+      ? alpha(theme.palette.common.white, 0.85)  // Slightly higher base text contrast
+      : theme.palette.text.primary;
+    
+    const iconColor = isDarkMode 
+      ? alpha(theme.palette.common.white, 0.7)
+      : theme.palette.primary.main;
+    
+    const hoverStyle = isDarkMode 
+      ? alpha(theme.palette.primary.main, 0.15)  // More noticeable hover
+      : alpha(theme.palette.primary.light, 0.2);
+
+    if (item.type === 'group') {
+      return (
+        <Box key={item.group} sx={{ mt: 2 }}>
+          <ListSubheader
+            sx={{
+              background: 'transparent',
+              color: isDarkMode ? alpha(theme.palette.primary.light, 0.9) : theme.palette.primary.dark,
+              fontSize: '0.75rem',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              pb: 1,
+              pl: 3
+            }}
+          >
+            {item.group}
+          </ListSubheader>
+          <Divider 
+            sx={{ 
+              mb: 1, 
+              opacity: 0.2,
+              borderColor: isDarkMode ? alpha(theme.palette.divider, 0.3) : undefined 
+            }} 
+          />
+          {item.items.map((subItem) => {
+            const isItemActive = isActive(subItem.path);
+            
+            return (
+              <ListItem 
+                key={subItem.path} 
+                disablePadding
+                sx={{ mb: 0.5 }}
+              >
+                <ListItemButton 
+                  component={Link} 
+                  to={subItem.path}
+                  sx={{
+                    py: 1.5,
+                    px: 2,
+                    ...(isItemActive ? activeItemStyle : {}),
+                    '&:hover': {
+                      backgroundColor: hoverStyle,
+                    },
+                    position: 'relative',
+                    overflow: 'hidden',
+                    borderRadius: isItemActive ? '0 8px 8px 0' : 0,
+                    transition: 'all 0.2s ease-in-out',
+                    minHeight: '48px',
+                  }}
+                >
+                  <ListItemIcon 
+                    sx={{ 
+                      minWidth: isMinimized ? 0 : 40, 
+                      color: isItemActive 
+                        ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                        : iconColor,
+                      transition: 'color 0.2s ease-in-out'
+                    }}
+                  >
+                    {subItem.icon}
+                  </ListItemIcon>
+                  
+                  {!isMinimized && (
+                    <ListItemText 
+                      primary={subItem.text} 
+                      primaryTypographyProps={{
+                        fontSize: '0.9rem',
+                        fontWeight: isItemActive ? 600 : 400,
+                        color: isItemActive 
+                          ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                          : itemTextColor,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    />
+                  )}
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
+        </Box>
+      );
+    }
+
+    // For items with a submenu (dropdown)
+    if (item.hasSubmenu) {
+      const isExpanded = expandedMenus.includes(item.id);
+      const hasActive = hasActivePath(item.submenu);
+      
+      return (
+        <Box key={item.id} sx={{ mb: 0.5 }}>
+          <ListItemButton
+            onClick={() => toggleSubmenu(item.id)}
+            sx={{
+              py: 1.5,
+              px: 2,
+              color: itemTextColor,
+              ...(hasActive ? activeItemStyle : {}),
+              '&:hover': {
+                backgroundColor: hoverStyle,
+              },
+              borderRadius: hasActive ? '0 8px 8px 0' : 0,
+            }}
+          >
+            <ListItemIcon 
+              sx={{ 
+                minWidth: isMinimized ? 0 : 40, 
+                color: hasActive 
+                  ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                  : iconColor
+              }}
+            >
+              <i className={`${item.icon}`} style={{ fontSize: '1.1rem' }} />
+            </ListItemIcon>
+            
+            {!isMinimized && (
+              <>
+                <ListItemText 
+                  primary={item.label} 
+                  primaryTypographyProps={{
+                    fontSize: '0.9rem',
+                    fontWeight: hasActive ? 600 : 400,
+                    color: hasActive 
+                      ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                      : itemTextColor,
+                  }}
+                />
+                {isExpanded ? (
+                  <ExpandLessIcon 
+                    fontSize="small" 
+                    sx={{ 
+                      color: hasActive 
+                        ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                        : iconColor 
+                    }} 
+                  />
+                ) : (
+                  <ExpandMoreIcon 
+                    fontSize="small" 
+                    sx={{ 
+                      color: hasActive 
+                        ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                        : iconColor 
+                    }} 
+                  />
+                )}
+              </>
+            )}
+          </ListItemButton>
+          
+          {/* Collapsible submenu */}
+          {isExpanded && !isMinimized && (
+            <Box 
+              sx={{ 
+                pl: 2,
+                overflow: 'hidden',
+                transition: 'max-height 0.3s ease',
+                maxHeight: isExpanded ? '500px' : '0',
+              }}
+            >
+              {item.submenu.map(subItem => {
+                const isSubItemActive = isActive(subItem.path);
+                
+                return (
+                  <ListItemButton
+                    key={subItem.id}
+                    component={Link}
+                    to={subItem.path}
+                    sx={{
+                      pl: 4,
+                      py: 1.2,
+                      borderLeft: `1px solid ${isDarkMode 
+                        ? alpha(theme.palette.divider, 0.2) 
+                        : alpha(theme.palette.divider, 0.5)
+                      }`,
+                      ...(isSubItemActive ? {
+                        backgroundColor: isDarkMode 
+                          ? alpha(theme.palette.primary.main, 0.25)
+                          : alpha(theme.palette.primary.light, 0.2),
+                        borderLeft: `2px solid ${theme.palette.primary.main}`,
+                        pl: 'calc(1rem - 1px)',
+                      } : {}),
+                      '&:hover': {
+                        backgroundColor: hoverStyle,
+                      },
+                      borderRadius: '0 8px 8px 0',
+                    }}
+                  >
+                    <ListItemIcon 
+                      sx={{ 
+                        minWidth: 32, 
+                        color: isSubItemActive 
+                          ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                          : iconColor
+                      }}
+                    >
+                      <i className={`${subItem.icon}`} style={{ fontSize: '0.9rem' }} />
+                    </ListItemIcon>
+                    
+                    <ListItemText 
+                      primary={subItem.label} 
+                      primaryTypographyProps={{
+                        fontSize: '0.85rem',
+                        fontWeight: isSubItemActive ? 600 : 400,
+                        color: isSubItemActive 
+                          ? (isDarkMode ? '#ffffff' : theme.palette.primary.main) 
+                          : itemTextColor,
+                      }}
+                    />
+                  </ListItemButton>
+                );
+              })}
+            </Box>
+          )}
+        </Box>
+      );
+    }
+    
+    // Regular menu item without submenu
+    const isItemActive = isActive((item as RegularMenuItem).path);
+    
+    return (
+      <ListItem 
+        key={item.id} 
+        disablePadding
+        sx={{ mb: 0.5 }}
+      >
+        <ListItemButton
+          component={Link}
+          to={(item as RegularMenuItem).path}
+          sx={{
+            py: 1.5,
+            px: 2,
+            ...(isItemActive ? activeItemStyle : {}),
+            '&:hover': {
+              backgroundColor: hoverStyle,
+            },
+            position: 'relative',
+            borderRadius: isItemActive ? '0 8px 8px 0' : 0,
+            '&::before': isItemActive ? {
+              content: '""',
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: '3px',
+              backgroundColor: theme.palette.primary.main,
+            } : {},
+          }}
+        >
+          <ListItemIcon 
+            sx={{ 
+              minWidth: isMinimized ? 0 : 40, 
+              color: isItemActive 
+                ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                : iconColor 
+            }}
+          >
+            <i className={`${item.icon}`} style={{ fontSize: '1.1rem' }} />
+          </ListItemIcon>
+          
+          {!isMinimized && (
+            <ListItemText 
+              primary={item.label} 
+              primaryTypographyProps={{
+                fontSize: '0.9rem',
+                fontWeight: isItemActive ? 600 : 400,
+                color: isItemActive 
+                  ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
+                  : itemTextColor,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            />
+          )}
+        </ListItemButton>
+      </ListItem>
+    );
+  };
 
   return (
     <>
       {/* Mobile hamburger menu */}
       <div className="lg:hidden fixed top-4 left-4 z-50">
-        <button onClick={toggleSidebar} className="text-white p-2 rounded-md bg-gray-800 hover:bg-gray-700">
+        <IconButton 
+          onClick={toggleSidebar} 
+          sx={{ 
+            color: theme.palette.common.white,
+            backgroundColor: isDarkMode 
+              ? alpha(theme.palette.primary.dark, 0.7)
+              : alpha(theme.palette.primary.main, 0.9),
+            '&:hover': {
+              backgroundColor: theme.palette.primary.main,
+            }
+          }}
+        >
           <i className="fas fa-bars"></i>
-        </button>
+        </IconButton>
       </div>
 
       {/* Overlay for mobile */}
@@ -139,150 +535,190 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
       )}
 
       {/* Sidebar */}
-      <div 
-        className={`fixed inset-y-0 left-0 z-50 bg-gradient-to-b from-[#151d30] to-[#0c1424] transform transition-all duration-300 ease-in-out 
-          ${isOpen ? 'translate-x-0' : '-translate-x-full'} 
-          ${isMinimized ? 'lg:w-16' : 'lg:w-64'} 
-          w-[250px] lg:translate-x-0 lg:static lg:inset-0 shadow-xl`}
+      <Box
+        component="aside"
+        sx={{
+          position: {
+            xs: 'fixed',
+            lg: 'static'
+          },
+          insetY: 0,
+          left: 0,
+          zIndex: 50,
+          background: isDarkMode 
+            ? 'linear-gradient(180deg, #151d30 0%, #0c1424 100%)' 
+            : 'linear-gradient(180deg, #f0f5ff 0%, #edf2fc 100%)',
+          transform: {
+            xs: isOpen ? 'translateX(0)' : 'translateX(-100%)',
+            lg: 'none'
+          },
+          width: {
+            xs: '250px',
+            lg: isMinimized ? '70px' : '260px'
+          },
+          transition: 'all 0.3s ease-in-out',
+          boxShadow: '0 0 20px rgba(0,0,0,0.2)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          borderRight: isDarkMode 
+            ? `1px solid ${alpha(theme.palette.divider, 0.1)}`
+            : `1px solid ${alpha(theme.palette.divider, 0.2)}`,
+        }}
       >
-        <div className="flex flex-col h-full">
           {/* Top section with logo and title */}
-          <div className="flex items-center justify-between p-4 border-b border-gray-700/50 bg-gradient-to-r from-[#1a2438] to-[#172033]">
-            <div className="flex items-center">
-              <div className="text-blue-400 text-xl mr-2">
-                <img src="/gtlogo.svg" alt="GreatTime Logo" className="w-6 h-6 drop-shadow-md" />
-              </div>
-              {!isMinimized && (
-                <h1 className="text-white font-semibold text-base drop-shadow-sm">GreatTime Admin</h1>
-              )}
-            </div>
-            
-            {/* Close button for mobile */}
-            <button 
-              onClick={toggleSidebar}
-              className="lg:hidden text-gray-400 hover:text-white p-1.5 rounded-full bg-gray-800/50 hover:bg-gray-700/70 transition-colors"
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 2,
+            borderBottom: `1px solid ${
+              isDarkMode 
+                ? alpha(theme.palette.divider, 0.1) 
+                : alpha(theme.palette.divider, 0.2)
+            }`,
+            background: isDarkMode 
+              ? 'linear-gradient(90deg, #1a2438 0%, #172033 100%)' 
+              : 'linear-gradient(90deg, #ffffff 0%, #f8f9ff 100%)',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Box
+              sx={{
+                width: isMinimized ? '30px' : '40px',
+                height: isMinimized ? '30px' : '40px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '8px',
+                background: isDarkMode 
+                  ? 'linear-gradient(135deg, #2c3e67 0%, #1e2b4e 100%)' 
+                  : 'linear-gradient(135deg, #e1e9ff 0%, #d4deff 100%)',
+                boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+                color: theme.palette.primary.main,
+                fontWeight: 'bold',
+                fontSize: isMinimized ? '1rem' : '1.2rem',
+              }}
             >
-              <i className="fas fa-times text-xs"></i>
-            </button>
+              GT
+            </Box>
             
-            {/* Minimize/Expand button - visible only on desktop */}
-            <button 
-              onClick={toggleMinimized} 
-              className="hidden lg:flex text-gray-400 hover:text-white p-1.5 rounded-full bg-gray-800/50 hover:bg-gray-700/70 transition-colors"
-            >
-              {isMinimized ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronLeft className="w-4 h-4" />
-              )}
-            </button>
-          </div>
+            {!isMinimized && (
+              <Box 
+                component="h1" 
+                sx={{
+                  ml: 2,
+                  fontSize: '1.1rem',
+                  fontWeight: 'bold',
+                  color: isDarkMode ? theme.palette.common.white : theme.palette.text.primary,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                GreatTime Admin
+              </Box>
+            )}
+          </Box>
+          
+          <IconButton
+            onClick={toggleMinimized}
+            sx={{
+              display: { xs: 'none', lg: 'flex' },
+              color: isDarkMode ? theme.palette.common.white : theme.palette.primary.main,
+              '&:hover': {
+                backgroundColor: isDarkMode 
+                  ? alpha(theme.palette.common.white, 0.1) 
+                  : alpha(theme.palette.primary.main, 0.1),
+              }
+            }}
+          >
+            {isMinimized ? <ChevronRight /> : <ChevronLeft />}
+          </IconButton>
+        </Box>
 
-          {/* Menu items */}
-          <nav className="flex-1 overflow-y-auto py-3">
-            <ul className="space-y-1 px-3">
-              {menuItems.map((item) => (
-                <li key={item.id}>
-                  {item.hasSubmenu ? (
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => toggleSubmenu(item.id)}
-                        className={`w-full flex items-center justify-between p-2.5 text-left text-gray-300 hover:bg-[#1e2a40] hover:text-white rounded-md transition-all ${expandedMenus.includes(item.id) ? 'bg-[#1a2438]' : ''} ${isMinimized ? 'justify-center' : ''}`}
-                      >
-                        <div className={`flex items-center ${isMinimized ? 'justify-center w-full' : ''}`}>
-                          <i className={`${item.icon} w-4 h-4 ${isMinimized ? '' : 'mr-3'} ${expandedMenus.includes(item.id) ? 'text-blue-400' : 'text-gray-400'}`}></i>
-                          {!isMinimized && (
-                            <span className="text-sm">{item.label}</span>
-                          )}
-                        </div>
-                        {!isMinimized && (
-                          <i className={`fas fa-chevron-right text-gray-400 text-xs transition-transform duration-200 ${expandedMenus.includes(item.id) ? 'transform rotate-90 text-blue-400' : ''}`}></i>
-                        )}
-                      </button>
-                      
-                      {/* Submenu - only show when not minimized or as a popup when minimized and hovered */}
-                      {expandedMenus.includes(item.id) && item.submenu && !isMinimized && (
-                        <ul className="pl-8 space-y-0.5 mt-1 bg-[#131b2d]/50 rounded-md py-1.5 mx-1">
-                          {item.submenu.map((subItem) => (
-                            <li key={subItem.id}>
-                              <Link
-                                to={subItem.path || '#'}
-                                className="flex items-center p-2 text-gray-300 hover:bg-[#1e2a40] hover:text-white rounded-md transition-all"
-                                onClick={() => window.innerWidth < 1024 && setIsOpen(false)}
-                              >
-                                <i className={`${subItem.icon} w-4 h-4 mr-2.5 text-gray-500`}></i>
-                                <span className="text-xs">{subItem.label}</span>
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      
-                      {/* Popup submenu for minimized state */}
-                      {isMinimized && item.submenu && (
-                        <div className="group relative">
-                          <div className="absolute left-full top-0 ml-2 w-48 bg-[#1a2438] rounded-md shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 border border-gray-700/50">
-                            <div className="py-1.5 px-1 bg-gradient-to-b from-[#1e2a40] to-[#1a2438] rounded-t-md border-b border-gray-700/50">
-                              <div className="text-sm font-medium text-white px-3 py-1.5">{item.label}</div>
-                            </div>
-                            <ul className="py-1.5">
-                              {item.submenu.map((subItem) => (
-                                <li key={subItem.id}>
-                                  <Link
-                                    to={subItem.path || '#'}
-                                    className="flex items-center px-4 py-2 text-gray-300 hover:bg-[#242f3d] hover:text-white transition-colors"
-                                  >
-                                    <i className={`${subItem.icon} w-4 h-4 mr-2.5 text-gray-400`}></i>
-                                    <span className="text-xs">{subItem.label}</span>
-                                  </Link>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="relative group">
-                      <Link
-                        to={item.path || '#'}
-                        className={`flex items-center p-2.5 text-gray-300 hover:bg-[#1e2a40] hover:text-white rounded-md transition-all ${
-                          item.isAiFeature ? 'bg-gradient-to-r from-blue-900/70 to-blue-800/50 text-blue-100' : ''
-                        } ${isMinimized ? 'justify-center' : ''}`}
-                        title={isMinimized ? item.label : ''}
-                        onClick={() => window.innerWidth < 1024 && setIsOpen(false)}
-                      >
-                        <i className={`${item.icon} w-4 h-4 ${isMinimized ? '' : 'mr-3'} ${item.isAiFeature ? 'text-blue-400' : 'text-gray-400'}`}></i>
-                        {!isMinimized && (
-                          <span className={`text-sm ${item.isAiFeature ? 'font-medium' : ''}`}>{item.label}</span>
-                        )}
-                      </Link>
-                      
-                      {/* Tooltip for minimized state */}
-                      {isMinimized && (
-                        <div className="absolute left-full top-0 ml-2 px-3 py-1.5 bg-[#1a2438] text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50 shadow-lg border border-gray-700/50">
-                          {item.label}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </nav>
+        {/* Menu items */}
+        <Box 
+          component="nav"
+          sx={{
+            flexGrow: 1,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            px: 1,
+            py: 2,
+            '&::-webkit-scrollbar': {
+              width: '4px',
+            },
+            '&::-webkit-scrollbar-track': {
+              background: 'transparent',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              background: isDarkMode 
+                ? alpha(theme.palette.primary.dark, 0.5) 
+                : alpha(theme.palette.primary.light, 0.5),
+              borderRadius: '10px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              background: theme.palette.primary.main,
+            },
+          }}
+        >
+          {menuItems.map(renderMenuItem)}
+        </Box>
 
-          {/* Add logout button at the bottom */}
-          <div className="mt-auto border-t border-gray-800/30 bg-[#111827]/60">
-            <button
+        {/* Logout section */}
+        <Box
+          sx={{
+            borderTop: `1px solid ${
+              isDarkMode 
+                ? alpha(theme.palette.divider, 0.1) 
+                : alpha(theme.palette.divider, 0.2)
+            }`,
+            p: 2,
+            display: 'flex',
+            justifyContent: isMinimized ? 'center' : 'flex-start',
+          }}
+        >
+          <Tooltip title={isMinimized ? "Logout" : ""}>
+            <Button
               onClick={onLogout}
-              className={`flex items-center text-gray-400 hover:text-white w-full px-4 py-3 transition-colors hover:bg-red-900/20 ${isMinimized ? 'justify-center' : ''}`}
+              sx={{
+                color: isDarkMode ? theme.palette.error.light : theme.palette.error.main,
+                backgroundColor: isDarkMode 
+                  ? alpha(theme.palette.error.dark, 0.1) 
+                  : alpha(theme.palette.error.light, 0.1),
+                borderRadius: '8px',
+                py: 1,
+                px: isMinimized ? 1 : 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isMinimized ? 'center' : 'flex-start',
+                width: isMinimized ? '40px' : '100%',
+                minWidth: isMinimized ? '40px' : 'auto',
+                '&:hover': {
+                  backgroundColor: isDarkMode 
+                    ? alpha(theme.palette.error.dark, 0.2) 
+                    : alpha(theme.palette.error.light, 0.2),
+                }
+              }}
             >
-              <LogoutIcon className="h-5 w-5 text-red-300/70" />
-              {!isMinimized && <span className="ml-2 text-sm">Logout</span>}
-            </button>
-          </div>
-        </div>
-      </div>
+              <LogoutIcon sx={{ fontSize: isMinimized ? '1.2rem' : '1rem' }} />
+              {!isMinimized && (
+                <Typography 
+                  sx={{ 
+                    ml: 1, 
+                    fontSize: '0.9rem',
+                    fontWeight: 'medium',
+                  }}
+                >
+                  Logout
+                </Typography>
+              )}
+            </Button>
+          </Tooltip>
+        </Box>
+      </Box>
     </>
   );
 };

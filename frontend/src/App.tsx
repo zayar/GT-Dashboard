@@ -35,6 +35,9 @@ import SalesBySalesPerson from './components/SalesBySalesPerson';
 import Login from './components/Login';
 import Commission from './components/Commission';
 import { format } from 'date-fns';
+import Transaction from './components/Transaction';
+import Wallet from './components/Wallet';
+import WalletTransactionDetails from './components/WalletTransactionDetails';
 
 ChartJS.register(
   CategoryScale,
@@ -1959,12 +1962,18 @@ const App = () => {
 
   return (
     <ClinicProvider>
-    <Router>
-        <Toaster position="top-right" />
+      <Router>
+        <Toaster position="top-right" toastOptions={{
+          style: {
+            background: '#151f38',
+            color: '#f3f4f6',
+            border: '1px solid rgba(148, 163, 184, 0.12)'
+          },
+        }} />
         {!isAuthenticated ? (
           <Login onLogin={handleLogin} />
         ) : (
-          <div className="flex h-screen bg-[#111923] text-white">
+          <div className="flex h-screen bg-[#101729] text-[#f3f4f6]">
             <AppContent />
           </div>
         )}
@@ -2006,14 +2015,14 @@ const AppContent = () => {
     <>
       <Sidebar onLogout={handleLogout} />
       <div className="flex-1 h-full overflow-auto">
-        <div className="bg-[#101729] border-b border-gray-800 px-4 py-2">
+        <div className="bg-[#101729] border-b border-[rgba(148,163,184,0.12)] px-4 py-2">
           <ClinicSelector 
             onClinicChange={handleClinicChange} 
           />
         </div>
         
         {/* Main content area */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto bg-[#101729]">
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
@@ -2035,6 +2044,9 @@ const AppContent = () => {
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
             <Route path="/check-in-out" element={<CheckInOut />} />
+            <Route path="/transactions" element={<Transaction />} />
+            <Route path="/wallet" element={<Wallet />} />
+            <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>
