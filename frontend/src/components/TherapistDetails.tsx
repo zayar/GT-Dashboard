@@ -1,8 +1,12 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Avatar, Box, Button, CircularProgress, Grid, MenuItem, Pagination, Paper, Select, SelectChangeEvent, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, useTheme } from '@mui/material';
+import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Container, TextField, useTheme, Button } from '@mui/material';
 import axios from 'axios';
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { SelectChangeEvent } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 
 interface TherapistDetailsProps {}
 
@@ -110,12 +114,12 @@ const TherapistDetails: React.FC<TherapistDetailsProps> = (): JSX.Element => {
       }
     });
     
-    const visitData: { [key: string]: { [key: string]: number, phone?: string } } = {};
+    const visitData: { [key: string]: { [key: string]: number, } } = {};
     customers.forEach(customer => {
       visitData[customer] = {
         ...months.reduce((obj, month) => ({ ...obj, [month]: 0 }), {}),
         phone: phoneNumberMap[customer] // Store the phone number for each customer
-      };
+      } as any;
     });
 
     data.forEach(visit => {
@@ -154,7 +158,7 @@ WITH TherapistStats AS (
     MIN(CheckInTime) as first_service_date,
     MAX(CheckInTime) as last_service_date,
     TIMESTAMP_DIFF(MAX(CheckInTime), MIN(CheckInTime), HOUR) as total_service_hours
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   GROUP BY PractitionerName, PractitionerImage
 )
@@ -191,7 +195,7 @@ WITH ServicesByMonth AS (
     ServiceName as service_name,
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
     COUNT(*) as count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   GROUP BY ServiceName, month
   ORDER BY month DESC, count DESC
@@ -203,7 +207,7 @@ CustomersByMonth AS (
     CustomerPhoneNumber as customer_phone,
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
     COUNT(*) as visit_count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   GROUP BY CustomerName, customer_phone, month
   ORDER BY month DESC, visit_count DESC
@@ -215,7 +219,7 @@ ServiceRecords AS (
     ServiceName as service,
     CustomerName as customer_name,
     CustomerPhoneNumber as customer_phone
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE PractitionerName = '${decodedTherapistName}'
   ORDER BY CheckInTime DESC
 )

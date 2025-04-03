@@ -26,6 +26,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface Customer {
   id: string;
@@ -50,12 +51,17 @@ const CustomersTable: React.FC = () => {
   const [orderBy, setOrderBy] = useState<keyof Customer>('totalSpend');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const navigate = useNavigate();
+  const { currentClinic } = useClinic();
 
   useEffect(() => {
-    fetchCustomers();
-  }, []);
+    if (currentClinic) {
+      fetchCustomers();
+    }
+  }, [currentClinic]);
 
   const fetchCustomers = async () => {
+    if (!currentClinic) return;
+    
     try {
       setLoading(true);
       
@@ -69,13 +75,14 @@ const CustomersTable: React.FC = () => {
           PaymentStatus,
           CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal
         FROM 
-          great_time.QueenPaymentView
+          great_time.MainPaymentView
         WHERE 
           CustomerName IS NOT NULL 
           AND CustomerPhoneNumber IS NOT NULL
           AND PaymentStatus = 'PAID'
           AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
           AND PaymentMethod != 'PASS'
+          AND ClinicCode = '${currentClinic.code}'
       ),
       CustomerSpend AS (
         SELECT
@@ -98,10 +105,11 @@ const CustomersTable: React.FC = () => {
           ARRAY_AGG(q.PractitionerName ORDER BY q.CheckOutTime DESC LIMIT 1)[OFFSET(0)] AS Therapist,
           'Myanmar' AS Location
         FROM 
-          great_time.QueenDataView q
+          great_time.MainDataView q
         WHERE 
           q.CustomerName IS NOT NULL 
           AND q.CustomerPhoneNumber IS NOT NULL
+          AND q.ClinicCode = '${currentClinic.code}'
         GROUP BY 
           q.CustomerName, q.CustomerPhoneNumber, q.DateOfBirth
       )

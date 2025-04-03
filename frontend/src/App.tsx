@@ -9,12 +9,16 @@ import { Toaster } from 'react-hot-toast';
 import { Link, Navigate, Route, BrowserRouter as Router, Routes, useNavigate } from 'react-router-dom';
 import Appointments from './components/Appointments';
 import BankingDetails from './components/BankingDetails';
+import CheckInOut from './components/CheckInOut';
+import ClinicSelector from './components/ClinicSelector';
 import Commission from './components/Commission';
 import CustomerBehaviorReport from './components/CustomerBehaviorReport';
 import CustomerDetails from './components/CustomerDetails';
 import CustomersTable from './components/CustomersTable';
 import DailyTreatmentReport from './components/DailyTreatmentReport';
 import Dashboard from './components/Dashboard';
+import HelperDetails from './components/HelperDetails';
+import HelperList from './components/HelperList';
 import Login from './components/Login';
 import PaymentDetails from './components/PaymentDetails';
 import SalesBySalesPerson from './components/SalesBySalesPerson';
@@ -24,6 +28,9 @@ import ServicesTable from './components/ServicesTable';
 import Sidebar from './components/Sidebar';
 import TherapistDetails from './components/TherapistDetails';
 import TherapistList from './components/TherapistList';
+import Transaction from './components/Transaction';
+import Wallet from './components/Wallet';
+import WalletTransactionDetails from './components/WalletTransactionDetails';
 import { ClinicProvider, useClinic } from './contexts/ClinicContext';
 
 ChartJS.register(
@@ -63,7 +70,7 @@ interface MessageData {
   tableData?: {
     headers: string[];
     rows: any[][];
-    type?: 'customer' | 'service' | 'therapist';
+    type?: 'customer' | 'service' | 'therapist' | 'appointment';
   };
   entities?: {
     type: string;
@@ -100,7 +107,7 @@ const MainChat = () => {
   const [schemaLoading, setSchemaLoading] = useState(true);
   const [_error, setError] = useState('');
   const [chartData, setChartData] = useState<any>(null);
-
+  const { currentClinic } = useClinic();
   const fetchSchema = async () => {
     try {
       setSchemaLoading(true);
@@ -138,7 +145,7 @@ const MainChat = () => {
   // Add payment keywords detection
   const checkForPaymentKeywords = (message: string) => {
     const paymentKeywords = [
-      'payment record', 'payment records', 
+      'payment record', 'payment records',
       'payment report', 'payment details',
       'payment', 'invoice', 'invoices',
       'payment history', 'financial record',
@@ -147,19 +154,19 @@ const MainChat = () => {
     ];
     // Only match 'bank' or 'transaction' if the message doesn't contain banking keywords
     const secondaryKeywords = ['bank', 'transaction', 'transactions'];
-    
+
     const normalizedMessage = message.toLowerCase();
-    
+
     // First check if it contains any banking keywords to avoid conflict
     const hasBankingKeyword = checkForBankingKeywords(normalizedMessage);
     if (hasBankingKeyword) return false;
-    
+
     // Then check for primary payment keywords
     const hasPrimaryKeyword = paymentKeywords.some(keyword => normalizedMessage.includes(keyword));
-    
+
     // Only check secondary keywords if no banking keyword is found
     const hasSecondaryKeyword = secondaryKeywords.some(keyword => normalizedMessage.includes(keyword));
-    
+
     return hasPrimaryKeyword || hasSecondaryKeyword;
   };
 
@@ -178,27 +185,49 @@ const MainChat = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || loading) return;
+    if (!inputMessage.trim()) return;
 
-    setLoading(true);
-    setError('');
+    const currentInputMessage = inputMessage.trim();
 
-    const newUserMessage: Message = {
-        id: Date.now().toString(),
-        type: 'user',
-      content: inputMessage,
+    // Check if user is asking about reminders
+    if (checkForReminderKeywords(currentInputMessage)) {
+      // ... existing code for reminders ...
+    }
+
+    // Check if user is asking about payments
+    if (checkForPaymentKeywords(currentInputMessage)) {
+      // ... existing code for payments ...
+    }
+
+    // Check if user is asking about banking info
+    if (checkForBankingKeywords(currentInputMessage)) {
+      // ... existing code for banking ...
+    }
+
+    // Add user message to chat
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: currentInputMessage
     };
-
-    setMessages(prev => [...prev, newUserMessage]);
-    
-    // Save the input before clearing it
-    const currentInputMessage = inputMessage;
-      setInputMessage('');
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage('');
 
     try {
       // Import OpenAI configs
       const { OPENAI_SQL_CONFIG, OPENAI_INSIGHTS_CONFIG } = await import('./config/openai');
-      
+
+      // Check if currentClinic exists
+      if (!currentClinic || !currentClinic.code) {
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          type: 'assistant',
+          content: 'Please select a clinic first before asking questions. This ensures your data is properly filtered.'
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        return;
+      }
+
       // Define axios config for API requests
       const axiosConfig = {
         timeout: 30000,
@@ -207,58 +236,70 @@ const MainChat = () => {
           'Content-Type': 'application/json'
         }
       };
-  
+
       // Get schema for context
-      const schemaContext = schema && schema.fields 
+      const schemaContext = schema && schema.fields
         ? schema.fields.map((field: { name: string; type: string }) => `${field.name} (${field.type})`).join('\n')
         : '';
-        
+
       // Check if this is a customer query that should display results as a table
-      const isCustomerQuery = currentInputMessage.toLowerCase().includes('customer') && 
-                            (currentInputMessage.toLowerCase().includes('top') || 
-                             currentInputMessage.toLowerCase().includes('most') ||
-                             currentInputMessage.toLowerCase().includes('frequent') ||
-                             currentInputMessage.toLowerCase().includes('loyal'));
-                             
+      const isCustomerQuery = currentInputMessage.toLowerCase().includes('customer') &&
+        (currentInputMessage.toLowerCase().includes('top') ||
+          currentInputMessage.toLowerCase().includes('most') ||
+          currentInputMessage.toLowerCase().includes('frequent') ||
+          currentInputMessage.toLowerCase().includes('loyal'));
+
       // Check if this is a service query that should display results as a table
-      const isServiceQuery = currentInputMessage.toLowerCase().includes('service') && 
-                           (currentInputMessage.toLowerCase().includes('top') || 
-                            currentInputMessage.toLowerCase().includes('most') ||
-                            currentInputMessage.toLowerCase().includes('popular') ||
-                            currentInputMessage.toLowerCase().includes('frequent'));
-      
-      // NEW: Check if this is a therapist/practitioner/employee query that should display results as a table
-      const isTherapistQuery = (currentInputMessage.toLowerCase().includes('therapist') || 
-                              currentInputMessage.toLowerCase().includes('practitioner') || 
-                              currentInputMessage.toLowerCase().includes('employee') ||
-                              currentInputMessage.toLowerCase().includes('staff') ||
-                              currentInputMessage.toLowerCase().includes('theripish') || // Handle common typo
-                              currentInputMessage.toLowerCase().includes('therapis') ||  // Handle partial word
-                              currentInputMessage.toLowerCase().includes('thera')) &&    // Handle abbreviated form
-                             (currentInputMessage.toLowerCase().includes('top') || 
-                              currentInputMessage.toLowerCase().includes('most') ||
-                              currentInputMessage.toLowerCase().includes('busy') ||
-                              currentInputMessage.toLowerCase().includes('active') ||
-                              currentInputMessage.toLowerCase().includes('productive') ||
-                              currentInputMessage.toLowerCase().includes('popular') ||
-                              currentInputMessage.toLowerCase().includes('service') ||
-                              currentInputMessage.toLowerCase().includes('treatment') ||
-                              currentInputMessage.toLowerCase().includes('list') ||
-                              currentInputMessage.toLowerCase().includes('show') ||
-                              currentInputMessage.toLowerCase().includes('who') ||
-                              currentInputMessage.toLowerCase().includes('this month') ||
-                              currentInputMessage.toLowerCase().includes('month'));
-      
+      const isServiceQuery = currentInputMessage.toLowerCase().includes('service') &&
+        (currentInputMessage.toLowerCase().includes('top') ||
+          currentInputMessage.toLowerCase().includes('most') ||
+          currentInputMessage.toLowerCase().includes('popular') ||
+          currentInputMessage.toLowerCase().includes('frequent'));
+
+      // Check if this is a therapist/practitioner/employee query that should display results as a table
+      const isTherapistQuery = (currentInputMessage.toLowerCase().includes('therapist') ||
+        currentInputMessage.toLowerCase().includes('practitioner') ||
+        currentInputMessage.toLowerCase().includes('employee') ||
+        currentInputMessage.toLowerCase().includes('staff') ||
+        currentInputMessage.toLowerCase().includes('theripish') || // Handle common typo
+        currentInputMessage.toLowerCase().includes('therapis') ||  // Handle partial word
+        currentInputMessage.toLowerCase().includes('thera')) &&    // Handle abbreviated form
+        (currentInputMessage.toLowerCase().includes('top') ||
+          currentInputMessage.toLowerCase().includes('most') ||
+          currentInputMessage.toLowerCase().includes('busy') ||
+          currentInputMessage.toLowerCase().includes('active') ||
+          currentInputMessage.toLowerCase().includes('productive') ||
+          currentInputMessage.toLowerCase().includes('popular') ||
+          currentInputMessage.toLowerCase().includes('service') ||
+          currentInputMessage.toLowerCase().includes('treatment') ||
+          currentInputMessage.toLowerCase().includes('list') ||
+          currentInputMessage.toLowerCase().includes('show') ||
+          currentInputMessage.toLowerCase().includes('who') ||
+          currentInputMessage.toLowerCase().includes('this month') ||
+          currentInputMessage.toLowerCase().includes('month'));
+
+      // Check if this is an appointment query that should display results as a table
+      const isAppointmentQuery = currentInputMessage.toLowerCase().includes('appointment') &&
+        (currentInputMessage.toLowerCase().includes('today') ||
+          currentInputMessage.toLowerCase().includes('this week') ||
+          currentInputMessage.toLowerCase().includes('week') ||
+          currentInputMessage.toLowerCase().includes('this month') ||
+          currentInputMessage.toLowerCase().includes('month') ||
+          currentInputMessage.toLowerCase().includes('tomorrow') ||
+          currentInputMessage.toLowerCase().includes('schedule') ||
+          currentInputMessage.toLowerCase().includes('upcoming') ||
+          currentInputMessage.toLowerCase().includes('list'));
+
       let queryResults = [];
-      
+
       // Check if user is asking about busiest time
-      const isBusiestTimeQuery = currentInputMessage.toLowerCase().includes("busiest") || 
-                              currentInputMessage.toLowerCase().includes("busy times") || 
-                              currentInputMessage.toLowerCase().includes("when are you busy") ||
-                              currentInputMessage.toLowerCase().includes("peak hours");
-      
+      const isBusiestTimeQuery = currentInputMessage.toLowerCase().includes("busiest") ||
+        currentInputMessage.toLowerCase().includes("busy times") ||
+        currentInputMessage.toLowerCase().includes("when are you busy") ||
+        currentInputMessage.toLowerCase().includes("peak hours");
+
       let sqlQuery = '';
-  
+
       if (isBusiestTimeQuery) {
         // Use a specific SQL query for busiest time slots with Myanmar time
         sqlQuery = `
@@ -267,10 +308,11 @@ WITH HourlyBookings AS (
     CAST(FORMAT_DATE('%A', DATE(CheckInTime)) AS STRING) as day_of_week,
     CAST(EXTRACT(HOUR FROM CheckInTime) AS STRING) as hour_of_day,
     COUNT(*) as booking_count
-  FROM great_time.LemonDataView
+  FROM great_time.MainDataView
   WHERE 
     CheckInTime IS NOT NULL
     AND EXTRACT(HOUR FROM CheckInTime) BETWEEN 9 AND 19
+    AND ClinicCode = '${currentClinic.code}'
   GROUP BY day_of_week, hour_of_day
 )
 SELECT
@@ -294,7 +336,7 @@ ORDER BY
         const translationResponse = await axios.post(OPENAI_SQL_CONFIG.apiEndpoint, {
           model: OPENAI_SQL_CONFIG.model,
           messages: [
-            ...OPENAI_SQL_CONFIG.formatMessages(schemaContext, currentInputMessage),
+            ...OPENAI_SQL_CONFIG.formatMessages(schemaContext, currentInputMessage, currentClinic.code),
             {
               role: "system",
               content: `When generating SQL queries:
@@ -344,31 +386,67 @@ ORDER BY
               9. For therapist/practitioner/employee-related queries:
                  - Always include PractitionerName/practitioner_name/therapist_name, count/services/treatments in the SELECT clause
                  - Order by count/services/treatments DESC
-                 - Use LIMIT to restrict to top N results`
+                 - Use LIMIT to restrict to top N results
+               
+              10. ALWAYS include this filter in your WHERE clause: AND ClinicCode = '${currentClinic.code}'
+                  - This is mandatory for security and data isolation
+                  - Never omit this filter from any query`
             }
           ]
         }, axiosConfig);
-  
+
         if (!translationResponse.data.choices?.[0]?.message?.content) {
           throw new Error('No response received from OpenAI API. Please try again.');
         }
-  
+
         const response = translationResponse.data.choices[0].message.content;
         const sqlMatch = response.match(/\[SQL Query\]([\s\S]*?)\[End SQL\]/i);
-  
+
         if (!sqlMatch) {
           throw new Error('Invalid response format: Missing SQL query. Please try rephrasing your question.');
         }
-  
-        sqlQuery = sqlMatch[1].trim().replace(/FROM\s+LemonDataView/g, 'FROM great_time.LemonDataView');
-      }
-  
-        const queryResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query: sqlQuery }, axiosConfig);
-        if (!queryResponse.data.success) {
-          throw new Error(queryResponse.data.error || 'Failed to execute SQL query');
+
+        sqlQuery = sqlMatch[1].trim()
+          .replace(/FROM\s+QueenDataView/gi, 'FROM great_time.MainDataView')
+          .replace(/FROM\s+LemonDataView/gi, 'FROM great_time.MainDataView')
+          .replace(/FROM\s+great_time\.QueenDataView/gi, 'FROM great_time.MainDataView');
+
+        // Ensure the clinic code filter is present in all queries
+        if (!sqlQuery.includes(`ClinicCode = '${currentClinic.code}'`) && !sqlQuery.includes(`clinic_code = '${currentClinic.code}'`) && !sqlQuery.includes(`clinicCode = '${currentClinic.code}'`)) {
+          // First, try to determine the correct column name to use
+          let clinicColumnName = 'ClinicCode';
+
+          // Check if the query is using the MainDataView
+          if (sqlQuery.includes('great_time.MainDataView')) {
+            // For MainDataView, check if the query schema includes alternate column names
+            if (schema && schema.fields) {
+              // Look for possible clinic code column variants in the schema
+              const possibleColumns = ['ClinicCode', 'clinic_code', 'clinicCode', 'clinic_id', 'clinicId'];
+              for (const col of possibleColumns) {
+                if (schema.fields.some((field: any) => field.name === col)) {
+                  clinicColumnName = col;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Now use the determined column name for filtering
+          if (sqlQuery.includes('WHERE')) {
+            sqlQuery = sqlQuery.replace(/WHERE/i, `WHERE ${clinicColumnName} = '${currentClinic.code}' AND`);
+          } else {
+            // If there's no WHERE clause, add one
+            sqlQuery = sqlQuery + ` WHERE ${clinicColumnName} = '${currentClinic.code}'`;
+          }
         }
-        queryResults = queryResponse.data.data;
-  
+      }
+
+      const queryResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query: sqlQuery }, axiosConfig);
+      if (!queryResponse.data.success) {
+        throw new Error(queryResponse.data.error || 'Failed to execute SQL query');
+      }
+      queryResults = queryResponse.data.data;
+
       // Check if this is a response with rich data (e.g. customer interactions data)
       if (queryResponse.data.richData) {
         const assistantMessage: Message = {
@@ -384,7 +462,7 @@ ORDER BY
         setMessages(prev => [...prev, assistantMessage]);
         return;
       }
-  
+
       // Prepare heatmap data for busiest time slots query
       if (isBusiestTimeQuery) {
         const heatmapData = prepareHeatmapData(queryResults);
@@ -403,85 +481,85 @@ ORDER BY
         setMessages(prev => [...prev, assistantMessage]);
       } else {
         // Handle other queries with special case for customer and service queries
-        const showGraph = currentInputMessage.toLowerCase().includes('chart') || 
-                        currentInputMessage.toLowerCase().includes('graph') || 
-                        currentInputMessage.toLowerCase().includes('show me with chart') || 
-                        currentInputMessage.includes('visualize') ||
-                        isCustomerQuery || // Always show chart for customer queries
-                        isServiceQuery ||  // Always show chart for service queries
-                        isTherapistQuery;  // Always show chart for therapist queries
-  
-      const chartData = showGraph ? {
-        ...prepareChartData(queryResults),
-        datasets: prepareChartData(queryResults).datasets.map(dataset => ({
-          ...dataset,
-          backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e', '#6366f1', '#14b8a6', '#d946ef', '#84cc16'],
-          borderColor: '#3b82f6'
-        }))
-      } : null;
-  
+        const showGraph = currentInputMessage.toLowerCase().includes('chart') ||
+          currentInputMessage.toLowerCase().includes('graph') ||
+          currentInputMessage.toLowerCase().includes('show me with chart') ||
+          currentInputMessage.includes('visualize') ||
+          isCustomerQuery || // Always show chart for customer queries
+          isServiceQuery ||  // Always show chart for service queries
+          isTherapistQuery;  // Always show chart for therapist queries
+
+        const chartData = showGraph ? {
+          ...prepareChartData(queryResults),
+          datasets: prepareChartData(queryResults).datasets.map(dataset => ({
+            ...dataset,
+            backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e', '#6366f1', '#14b8a6', '#d946ef', '#84cc16'],
+            borderColor: '#3b82f6'
+          }))
+        } : null;
+
         const insightsResponse = await axios.post(OPENAI_INSIGHTS_CONFIG.apiEndpoint, {
-        model: OPENAI_INSIGHTS_CONFIG.model,
+          model: OPENAI_INSIGHTS_CONFIG.model,
           messages: OPENAI_INSIGHTS_CONFIG.formatMessages(JSON.stringify(queryResults), currentInputMessage)
-      }, axiosConfig);
-  
-      if (!insightsResponse.data.choices?.[0]?.message?.content) {
-        throw new Error('No insights received from OpenAI API. Please try again.');
-      }
-  
-      const insightsContent = insightsResponse.data.choices[0].message.content;
-      const businessInsightsMatch = insightsContent.match(/\[Response\]([\s\S]*?)\[End Response\]/i);
-      
-      if (!businessInsightsMatch) {
-        throw new Error('Invalid insights format. Please try again.');
-      }
-  
-      const responseContent = businessInsightsMatch[1].trim();
-  
+        }, axiosConfig);
+
+        if (!insightsResponse.data.choices?.[0]?.message?.content) {
+          throw new Error('No insights received from OpenAI API. Please try again.');
+        }
+
+        const insightsContent = insightsResponse.data.choices[0].message.content;
+        const businessInsightsMatch = insightsContent.match(/\[Response\]([\s\S]*?)\[End Response\]/i);
+
+        if (!businessInsightsMatch) {
+          throw new Error('Invalid insights format. Please try again.');
+        }
+
+        const responseContent = businessInsightsMatch[1].trim();
+
         // For customer or service queries, attempt to structure the data for table display
         let tableData = undefined;
-        
+
         // Try to format customer data as table regardless of backend rich data
         if (isCustomerQuery && queryResults.length > 0) {
           try {
             // Find name field from various possible column names
-            const nameField = Object.keys(queryResults[0]).find(key => 
+            const nameField = Object.keys(queryResults[0]).find(key =>
               ['customer_name', 'name', 'customer', 'CustomerName'].includes(key));
-              
+
             // Find count field from various possible column names
-            const countField = Object.keys(queryResults[0]).find(key => 
-              ['count', 'interactions', 'booking_count', 'frequency', 'CountBooking'].includes(key) || 
+            const countField = Object.keys(queryResults[0]).find(key =>
+              ['count', 'interactions', 'booking_count', 'frequency', 'CountBooking'].includes(key) ||
               typeof queryResults[0][key] === 'number');
-              
+
             // Find phone field if available
-            const phoneField = Object.keys(queryResults[0]).find(key => 
+            const phoneField = Object.keys(queryResults[0]).find(key =>
               ['phone', 'phoneNumber', 'PhoneNumber', 'phone_number', 'CustomerPhoneNumber'].includes(key));
-            
+
             if (nameField && countField) {
               // Set up headers based on available fields
               const headers = ['Rank', 'Customer Name', 'Interactions'];
               if (phoneField) headers.push('Phone Number');
-              
+
               // Create rows with available data
               const rows = queryResults.map((item: any, index: number) => {
                 const row = [
-                  index + 1, 
+                  index + 1,
                   item[nameField],
                   item[countField]
                 ];
                 if (phoneField) row.push(item[phoneField] || 'N/A');
                 return row;
               });
-              
+
               // Set the table data for the response
               tableData = { headers, rows };
-              
+
               // Set up customer interactions data for charts
               const customerInteractions = {
                 names: queryResults.map((item: any) => item[nameField]),
                 values: queryResults.map((item: any) => item[countField])
               };
-              
+
               // Create the assistant message with structured data
               const assistantMessage: Message = {
                 id: Date.now().toString(),
@@ -500,7 +578,7 @@ ORDER BY
                   customerInteractions: customerInteractions
                 }
               };
-              
+
               setMessages(prev => [...prev, assistantMessage]);
               return;
             }
@@ -509,31 +587,31 @@ ORDER BY
             // Fall back to normal response handling
           }
         }
-        
+
         // Try to format service data as table
         if (isServiceQuery && queryResults.length > 0) {
           try {
             // Find name field from various possible column names
-            const nameField = Object.keys(queryResults[0]).find(key => 
+            const nameField = Object.keys(queryResults[0]).find(key =>
               ['service_name', 'name', 'service', 'ServiceName'].includes(key));
-              
+
             // Find count field from various possible column names
-            const countField = Object.keys(queryResults[0]).find(key => 
-              ['count', 'instances', 'booking_count', 'frequency'].includes(key) || 
+            const countField = Object.keys(queryResults[0]).find(key =>
+              ['count', 'instances', 'booking_count', 'frequency'].includes(key) ||
               typeof queryResults[0][key] === 'number');
-            
+
             if (nameField && countField) {
               // Create headers and rows for service data
               const headers = ['Rank', 'Service Name', 'Instances'];
               const rows = queryResults.map((item: any, index: number) => [
-                index + 1, 
+                index + 1,
                 item[nameField],
                 item[countField]
               ]);
-              
+
               // Set the table data for the response
               tableData = { headers, rows };
-              
+
               // Create the assistant message with structured data
               const assistantMessage: Message = {
                 id: Date.now().toString(),
@@ -551,7 +629,7 @@ ORDER BY
                   }
                 }
               };
-              
+
               setMessages(prev => [...prev, assistantMessage]);
               return;
             }
@@ -565,32 +643,32 @@ ORDER BY
         if (isTherapistQuery && queryResults.length > 0) {
           try {
             // Find name field from various possible column names
-            const nameField = Object.keys(queryResults[0]).find(key => 
+            const nameField = Object.keys(queryResults[0]).find(key =>
               ['practitioner_name', 'therapist_name', 'name', 'practitioner', 'therapist', 'PractitionerName'].includes(key));
-              
+
             // Find count field from various possible column names
-            const countField = Object.keys(queryResults[0]).find(key => 
-              ['count', 'services', 'appointments', 'treatments', 'sessions', 'service_count'].includes(key) || 
+            const countField = Object.keys(queryResults[0]).find(key =>
+              ['count', 'services', 'appointments', 'treatments', 'sessions', 'service_count'].includes(key) ||
               typeof queryResults[0][key] === 'number');
-            
+
             if (nameField && countField) {
               // Create headers and rows for therapist data
               const headers = ['Rank', 'Therapist Name', 'Services Performed'];
               const rows = queryResults.map((item: any, index: number) => [
-                index + 1, 
+                index + 1,
                 item[nameField],
                 item[countField]
               ]);
-              
+
               // Set the table data for the response
               tableData = { headers, rows };
-              
+
               // Set up chart data for visualizing therapist performance
               const therapistPerformance = {
                 names: queryResults.map((item: any) => item[nameField]),
                 values: queryResults.map((item: any) => item[countField])
               };
-              
+
               // Create the assistant message with structured data
               const assistantMessage: Message = {
                 id: Date.now().toString(),
@@ -609,7 +687,7 @@ ORDER BY
                   customerInteractions: therapistPerformance // Reuse the existing structure
                 }
               };
-              
+
               setMessages(prev => [...prev, assistantMessage]);
               return;
             }
@@ -619,26 +697,102 @@ ORDER BY
           }
         }
 
-        // Default response handling for other queries
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        type: 'assistant',
-        content: responseContent,
-        data: {
-          sql: sqlQuery,
-          results: queryResults,
-          chartData: showGraph ? chartData : undefined,
-          chartType: showGraph ? 'bar' : undefined,
-          showTable: true
+        // Try to format appointment data as table
+        if (isAppointmentQuery && queryResults.length > 0) {
+          try {
+            // Find relevant fields from various possible column names
+            const customerField = Object.keys(queryResults[0]).find(key =>
+              ['customer_name', 'CustomerName', 'name', 'customer'].includes(key));
+
+            const serviceField = Object.keys(queryResults[0]).find(key =>
+              ['service_name', 'ServiceName', 'service', 'treatment'].includes(key));
+
+            // Remove time field handling since it's causing display issues
+            // const timeField = Object.keys(queryResults[0]).find(key => 
+            //   ['check_in_time', 'CheckInTime', 'appointment_time', 'time', 'date', 'schedule_time'].includes(key));
+
+            const therapistField = Object.keys(queryResults[0]).find(key =>
+              ['practitioner_name', 'PractitionerName', 'therapist_name', 'therapist', 'staff'].includes(key));
+
+            if (customerField && serviceField) {
+              // Create headers based on available fields - exclude Time
+              const headers = ['#', 'Customer Name', 'Service'];
+              // Don't include the time field that causes issues
+              // if (timeField) headers.push('Time');
+              if (therapistField) headers.push('Therapist');
+
+              // Create rows with available data
+              const rows = queryResults.map((item: any, index: number) => {
+                const row = [
+                  index + 1,
+                  item[customerField],
+                  item[serviceField]
+                ];
+
+                // Skip time field that causes issues
+                // if (timeField) {
+                //   try {
+                //     const date = new Date(item[timeField]);
+                //     row.push(format(date, 'MMM dd, yyyy h:mm a'));
+                //   } catch (e) {
+                //     row.push(item[timeField]?.toString() || 'N/A');
+                //   }
+                // }
+
+                // Add therapist if available
+                if (therapistField) row.push(item[therapistField]?.toString() || 'N/A');
+
+                return row;
+              });
+
+              // Set the table data for the response
+              const tableData = { headers, rows };
+
+              // Create the assistant message with structured data
+              const assistantMessage: Message = {
+                id: Date.now().toString(),
+                type: 'assistant',
+                content: responseContent,
+                data: {
+                  sql: sqlQuery,
+                  results: queryResults,
+                  showTable: true,
+                  tableData: {
+                    ...tableData,
+                    type: 'appointment'
+                  }
+                }
+              };
+
+              setMessages(prev => [...prev, assistantMessage]);
+              return;
+            }
+          } catch (error) {
+            console.error('Error formatting appointment data:', error);
+            // Fall back to normal response handling
+          }
         }
-      };
-  
-      setMessages(prev => [...prev, assistantMessage]);
+
+        // Default response handling for other queries
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          type: 'assistant',
+          content: responseContent,
+          data: {
+            sql: sqlQuery,
+            results: queryResults,
+            chartData: showGraph ? chartData : undefined,
+            chartType: showGraph ? 'bar' : undefined,
+            showTable: true
+          }
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
       }
     } catch (err: any) {
       console.error('Error:', err);
       let errorMessage = '';
-      
+
       if (err.response?.status === 404) {
         errorMessage = 'OpenAI API endpoint not found. Please check your API configuration.';
       } else if (err.response?.status === 401) {
@@ -653,15 +807,15 @@ ORDER BY
           || err.message
           || 'Unknown error occurred';
       }
-      
+
       setError(errorMessage);
-  
+
       const errorAssistantMessage: Message = {
         id: Date.now().toString(),
         type: 'assistant',
         content: `Error: ${errorMessage}`
       };
-  
+
       setMessages(prev => [...prev, errorAssistantMessage]);
     } finally {
       setLoading(false);
@@ -696,7 +850,7 @@ ORDER BY
   const prepareHeatmapData = (data: any[]) => {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const hours = Array.from({ length: 11 }, (_, i) => (i + 9).toString()); // 9:00 to 19:00
-    
+
     // Initialize the heatmap data structure
     const heatmapData = {
       days,
@@ -743,25 +897,25 @@ ORDER BY
   };
 
   // Function to parse structured text into table data
-  const parseStructuredTextToTable = (content: string): { 
-    headers: string[], 
-    rows: any[][], 
-    type?: 'customer' | 'service' | 'therapist' 
+  const parseStructuredTextToTable = (content: string): {
+    headers: string[],
+    rows: any[][],
+    type?: 'customer' | 'service' | 'therapist'
   } | null => {
     // Determine if this is about customers or services
-    const isCustomerData = content.toLowerCase().includes('customer') && 
-                          (content.toLowerCase().includes('interaction') || content.toLowerCase().includes('engagement'));
-    const isServiceData = content.toLowerCase().includes('service') && 
-                         (content.toLowerCase().includes('instances') || content.toLowerCase().includes('performed'));
+    const isCustomerData = content.toLowerCase().includes('customer') &&
+      (content.toLowerCase().includes('interaction') || content.toLowerCase().includes('engagement'));
+    const isServiceData = content.toLowerCase().includes('service') &&
+      (content.toLowerCase().includes('instances') || content.toLowerCase().includes('performed'));
     // Improve therapist data detection
-    const isTherapistData = (content.toLowerCase().includes('therapist') || 
-                            content.toLowerCase().includes('practitioner') || 
-                            content.toLowerCase().includes('employee')) && 
-                            (content.toLowerCase().includes('services') || 
-                             content.toLowerCase().includes('treatments') || 
-                             content.toLowerCase().includes('appointments') ||
-                             content.toLowerCase().includes('performed'));
-    
+    const isTherapistData = (content.toLowerCase().includes('therapist') ||
+      content.toLowerCase().includes('practitioner') ||
+      content.toLowerCase().includes('employee')) &&
+      (content.toLowerCase().includes('services') ||
+        content.toLowerCase().includes('treatments') ||
+        content.toLowerCase().includes('appointments') ||
+        content.toLowerCase().includes('performed'));
+
     // If neither customer nor service data, try a generic approach
     if (!isCustomerData && !isServiceData && !isTherapistData) {
       // Check if it's a numbered list with values
@@ -769,14 +923,14 @@ ORDER BY
       const itemPattern = /(\d+)\.\s+\*\*([^:]+)\*\*:?\s+(\d+)\s+(\w+)/;
       const items: any[][] = [];
       let headers: string[] = ['#', 'Item', 'Count', 'Unit'];
-      
+
       lines.forEach(line => {
         const match = line.match(itemPattern);
         if (match) {
           // Try to determine type based on content
           const itemText = line.toLowerCase();
           let type: 'customer' | 'service' | 'therapist' | undefined = undefined;
-          
+
           if (itemText.includes('customer') || itemText.includes('client')) {
             type = 'customer';
           } else if (itemText.includes('service') || itemText.includes('treatment')) {
@@ -784,7 +938,7 @@ ORDER BY
           } else if (itemText.includes('therapist') || itemText.includes('practitioner') || itemText.includes('employee')) {
             type = 'therapist';
           }
-          
+
           items.push([
             parseInt(match[1]), // Item number
             match[2].trim(),    // Item name
@@ -794,23 +948,23 @@ ORDER BY
           ]);
         }
       });
-      
+
       if (items.length > 0) {
         // Try to determine overall type if items have consistent types
         const types = items.map(item => item[4]).filter(Boolean);
         let overallType = undefined;
-        
+
         if (types.length > 0) {
           // Use the most common type
           const typeCounts: Record<string, number> = {};
           types.forEach(type => {
             typeCounts[type as string] = (typeCounts[type as string] || 0) + 1;
           });
-          
+
           overallType = Object.entries(typeCounts)
             .sort((a, b) => b[1] - a[1])[0][0] as 'customer' | 'service' | 'therapist';
         }
-        
+
         return {
           headers: headers.slice(0, 3), // Remove Unit column
           rows: items.map(item => item.slice(0, 3)), // Remove Unit and type
@@ -818,10 +972,10 @@ ORDER BY
         };
       }
     }
-    
+
     // Define headers based on data type
     let headers: string[];
-    
+
     if (isCustomerData) {
       headers = ['#', 'Customer', 'Interactions'];
     } else if (isServiceData) {
@@ -830,15 +984,15 @@ ORDER BY
       // Must be therapist data
       headers = ['#', 'Therapist', 'Services'];
     }
-    
+
     // Parse the text to extract data rows
     const rows: any[][] = [];
-    
+
     if (isCustomerData) {
       // Example: "1. **Soe Moe Thu (C)** - 15 interactions 2. **Khaing Khaing Win** - 10 interactions"
       const customerDataRegex = /(\d+)\.\s+\*\*(.+?)\*\*\s*-\s*(\d+)\s*interactions/g;
       let match;
-      
+
       while ((match = customerDataRegex.exec(content)) !== null) {
         rows.push([
           parseInt(match[1]), // Rank
@@ -846,7 +1000,7 @@ ORDER BY
           parseInt(match[3])  // Interactions count
         ]);
       }
-      
+
       // If we didn't match anything, try alternative format
       if (rows.length === 0) {
         const altRegex = /(\d+)\.\s+(.+?)\s*-\s*(\d+)\s*interactions/g;
@@ -858,15 +1012,15 @@ ORDER BY
           ]);
         }
       }
-      
+
       return rows.length > 0 ? { headers, rows, type: 'customer' } : null;
     }
-    
+
     if (isServiceData) {
       // Example: "1. **Whitening Laser**: 323 instances 2. **Hair Removal Underarm**: 220 instances"
       const serviceDataRegex = /(\d+)\.\s+\*\*(.+?)\*\*:?\s+(\d+)\s+instances/g;
       let match;
-      
+
       while ((match = serviceDataRegex.exec(content)) !== null) {
         rows.push([
           parseInt(match[1]), // Rank
@@ -874,7 +1028,7 @@ ORDER BY
           parseInt(match[3])  // Instances count
         ]);
       }
-      
+
       // If we didn't match anything, try alternative format
       if (rows.length === 0) {
         const altRegex = /(\d+)\.\s+(.+?):\s+(\d+)\s+instances/g;
@@ -886,16 +1040,16 @@ ORDER BY
           ]);
         }
       }
-      
+
       return rows.length > 0 ? { headers, rows, type: 'service' } : null;
     }
-    
+
     if (isTherapistData) {
       // Try to match therapist data patterns
       // Example: "1. **John Smith** - 45 services" or "1. **Jane Doe**: 32 treatments"
       const therapistDataRegex = /(\d+)\.\s+\*\*(.+?)\*\*[:\s-]+(\d+)\s+(services|treatments|appointments)/ig;
       let match;
-      
+
       while ((match = therapistDataRegex.exec(content)) !== null) {
         rows.push([
           parseInt(match[1]), // Rank
@@ -903,7 +1057,7 @@ ORDER BY
           parseInt(match[3])  // Services/treatments count
         ]);
       }
-      
+
       // If we didn't match anything, try alternative format
       if (rows.length === 0) {
         const altRegex = /(\d+)\.\s+(.+?)[:\s-]+(\d+)\s+(services|treatments|appointments)/ig;
@@ -915,7 +1069,7 @@ ORDER BY
           ]);
         }
       }
-      
+
       // If we still didn't match anything, try a more generic approach
       if (rows.length === 0) {
         const genericRegex = /(\d+)\.\s+(?:\*\*)?([^*:]+?)(?:\*\*)?[:\s-]+(\d+)/ig;
@@ -927,10 +1081,10 @@ ORDER BY
           ]);
         }
       }
-      
+
       return rows.length > 0 ? { headers, rows, type: 'therapist' } : null;
     }
-    
+
     return null;
   };
 
@@ -938,7 +1092,7 @@ ORDER BY
     // Check if the message contains customer interactions data for visualization
     if (data?.customerInteractions) {
       const { names, values } = data.customerInteractions;
-      
+
       // Create chart data
       const chartData = {
         labels: names,
@@ -952,30 +1106,30 @@ ORDER BY
           },
         ],
       };
-      
+
       // Create table data if not already provided
       const customerTableData = data.tableData || {
         headers: ['Rank', 'Customer Name', 'Interactions'],
         rows: names.map((name: string, i: number) => [i + 1, name, values[i]])
       };
-      
+
       return (
         <Box sx={{ width: '100%', mb: 2, maxWidth: '100%' }}>
           <Typography variant="body1" sx={{ mb: 2 }}>
             {content}
           </Typography>
-          
+
           {/* Table View */}
           <TableContainer component={Paper} sx={{ bgcolor: 'transparent', maxWidth: '100%', mb: 3, overflowX: 'auto' }}>
             <Table size="small" sx={{ minWidth: '650px' }}>
               <TableHead>
                 <TableRow>
                   {customerTableData.headers.map((header: string, index: number) => (
-                    <TableCell 
-                      key={index} 
-                      sx={{ 
-                        fontWeight: 'bold', 
-                        color: '#fff', 
+                    <TableCell
+                      key={index}
+                      sx={{
+                        fontWeight: 'bold',
+                        color: '#fff',
                         borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                       }}
                     >
@@ -992,15 +1146,15 @@ ORDER BY
                       const isCustomerName = cellIndex === 1 || customerTableData.headers[cellIndex]?.toLowerCase().includes('customer');
                       const isServiceName = customerTableData.headers[cellIndex]?.toLowerCase().includes('service');
                       const isTherapistName = customerTableData.headers[cellIndex]?.toLowerCase().includes('therapist');
-                      
+
                       if (isCustomerName || isServiceName || isTherapistName) {
                         let path = '';
                         // Modified to use phone number for customer navigation
                         if (isCustomerName) {
                           // Check if we have phone data in this row
-                          const phoneIndex = customerTableData.headers.findIndex(header => 
+                          const phoneIndex = customerTableData.headers.findIndex(header =>
                             header.toLowerCase().includes('phone'));
-                          
+
                           // If we have a phone column, use it for navigation
                           if (phoneIndex >= 0 && customerTableData.rows[rowIndex][phoneIndex]) {
                             path = `/customers/${encodeURIComponent(customerTableData.rows[rowIndex][phoneIndex])}`;
@@ -1011,12 +1165,12 @@ ORDER BY
                         }
                         if (isServiceName) path = `/services/${encodeURIComponent(cell)}`;
                         if (isTherapistName) path = `/therapists/${encodeURIComponent(cell)}`;
-                        
+
                         return (
-                          <TableCell 
+                          <TableCell
                             key={cellIndex}
-                            sx={{ 
-                              color: '#fff', 
+                            sx={{
+                              color: '#fff',
                               borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                             }}
                           >
@@ -1043,12 +1197,12 @@ ORDER BY
                           </TableCell>
                         );
                       }
-                      
+
                       return (
-                        <TableCell 
+                        <TableCell
                           key={cellIndex}
-                          sx={{ 
-                            color: '#fff', 
+                          sx={{
+                            color: '#fff',
                             borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                           }}
                         >
@@ -1061,7 +1215,7 @@ ORDER BY
               </TableBody>
             </Table>
           </TableContainer>
-          
+
           {/* Chart View */}
           <Box sx={{ height: '300px', width: '100%', maxWidth: '100%', mb: 2 }}>
             <Bar
@@ -1096,7 +1250,7 @@ ORDER BY
         </Box>
       );
     }
-  
+
     // Check if the message includes table data 
     if (data?.tableData) {
       const tableData = data.tableData;
@@ -1110,11 +1264,11 @@ ORDER BY
               <TableHead>
                 <TableRow>
                   {tableData.headers.map((header: string, index: number) => (
-                    <TableCell 
-                      key={index} 
-                      sx={{ 
-                        fontWeight: 'bold', 
-                        color: '#fff', 
+                    <TableCell
+                      key={index}
+                      sx={{
+                        fontWeight: 'bold',
+                        color: '#fff',
                         borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                       }}
                     >
@@ -1131,29 +1285,29 @@ ORDER BY
                       const isCustomerName = cellIndex === 1 || tableData.headers[cellIndex]?.toLowerCase().includes('customer');
                       const isServiceName = tableData.headers[cellIndex]?.toLowerCase().includes('service');
                       const isTherapistName = tableData.headers[cellIndex]?.toLowerCase().includes('therapist');
-                      
+
                       // Additional checks for therapist names in generic tables
                       const headerText = tableData.headers[cellIndex]?.toLowerCase() || '';
                       const isGenericNameColumn = headerText === 'item' || headerText === 'name' || cellIndex === 1;
-                      
+
                       // Check message content for therapist keywords
                       const messageContent = content.toLowerCase();
-                      const isTherapistRelated = messageContent.includes('therapist') || 
-                                              messageContent.includes('practitioner') || 
-                                              messageContent.includes('employee') ||
-                                              messageContent.includes('theripish');
-                      
+                      const isTherapistRelated = messageContent.includes('therapist') ||
+                        messageContent.includes('practitioner') ||
+                        messageContent.includes('employee') ||
+                        messageContent.includes('theripish');
+
                       // Determine if this should be linked as a therapist
-                      const shouldLinkAsTherapist = isTherapistName || 
-                                                 (isGenericNameColumn && isTherapistRelated && typeof cell === 'string');
-                      
+                      const shouldLinkAsTherapist = isTherapistName ||
+                        (isGenericNameColumn && isTherapistRelated && typeof cell === 'string');
+
                       if (isCustomerName || isServiceName || shouldLinkAsTherapist) {
                         let path = '';
                         if (isCustomerName) {
                           // Check if we have phone data in this row
-                          const phoneIndex = tableData.headers.findIndex(header => 
+                          const phoneIndex = tableData.headers.findIndex(header =>
                             header.toLowerCase().includes('phone'));
-                          
+
                           // If we have a phone column, use it for navigation
                           if (phoneIndex >= 0 && row[phoneIndex]) {
                             path = `/customers/${encodeURIComponent(row[phoneIndex])}`;
@@ -1164,12 +1318,12 @@ ORDER BY
                         }
                         if (isServiceName) path = `/services/${encodeURIComponent(cell)}`;
                         if (isTherapistName || shouldLinkAsTherapist) path = `/therapists/${encodeURIComponent(cell)}`;
-                        
+
                         return (
-                          <TableCell 
+                          <TableCell
                             key={cellIndex}
-                            sx={{ 
-                              color: '#fff', 
+                            sx={{
+                              color: '#fff',
                               borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                             }}
                           >
@@ -1196,16 +1350,18 @@ ORDER BY
                           </TableCell>
                         );
                       }
-                      
+
                       return (
-                        <TableCell 
+                        <TableCell
                           key={cellIndex}
-                          sx={{ 
-                            color: '#fff', 
+                          sx={{
+                            color: '#fff',
                             borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                           }}
                         >
-                          {cell}
+                          {typeof cell === 'object' && cell !== null
+                            ? (cell.value?.toString() || 'N/A')
+                            : (cell?.toString() || 'N/A')}
                         </TableCell>
                       );
                     })}
@@ -1220,17 +1376,17 @@ ORDER BY
 
     // NEW: Check if the text content appears to be structured data and convert to table
     // Detect if the content contains numbered lists or data points that might represent a table
-    if (content.includes('1.') && 
-        (content.includes('instances') || 
-         content.includes('interactions') || 
-         content.toLowerCase().includes('top') || 
-         content.includes(':')) && 
-        !data?.isHeatmap) {
-      
+    if (content.includes('1.') &&
+      (content.includes('instances') ||
+        content.includes('interactions') ||
+        content.toLowerCase().includes('top') ||
+        content.includes(':')) &&
+      !data?.isHeatmap) {
+
       try {
         // First, attempt to extract table data from the text
         let parsedTableData = parseStructuredTextToTable(content);
-        
+
         if (parsedTableData && parsedTableData.rows.length > 0) {
           return (
             <Box sx={{ width: '100%', mb: 2, maxWidth: '100%' }}>
@@ -1238,7 +1394,7 @@ ORDER BY
               <Typography variant="body1" sx={{ mb: 3 }}>
                 {content}
               </Typography>
-              
+
               {/* Then render the parsed table view */}
               <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 'bold', color: '#3b82f6' }}>
                 Table View
@@ -1248,115 +1404,117 @@ ORDER BY
                   <TableHead>
                     <TableRow>
                       {parsedTableData.headers.map((header: string, index: number) => (
-                      <TableCell 
-                        key={index} 
-                        sx={{ 
-                          fontWeight: 'bold', 
-                          color: '#fff', 
-                          borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
-                        }}
-                      >
-                        {header}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {parsedTableData.rows.map((row: any[], rowIndex: number) => (
-                    <TableRow key={rowIndex}>
-                      {row.map((cell: any, cellIndex: number) => {
-                        // For the first column (item name), make it clickable if it's a service or customer
-                        if (cellIndex === 1 && typeof cell === 'string') {
-                          const isCustomerName = parsedTableData.type === 'customer';
-                          const isServiceName = parsedTableData.type === 'service';
-                          const isTherapistName = parsedTableData.type === 'therapist';
-                          
-                          // If type is not explicitly set, try to determine from headers or content
-                          const headerText = parsedTableData.headers[cellIndex]?.toLowerCase() || '';
-                          const isTherapistHeader = headerText.includes('therapist') || 
-                                                  headerText.includes('practitioner') || 
-                                                  headerText.includes('employee') ||
-                                                  headerText === 'item'; // Generic "Item" might be a therapist name
-                          
-                          // Check if this looks like a therapist query from the content
-                          const messageContent = content.toLowerCase();
-                          const containsTherapistKeywords = messageContent.includes('therapist') || 
-                                                           messageContent.includes('practitioner') || 
-                                                           messageContent.includes('employee') ||
-                                                           messageContent.includes('theripish'); // Handle typo
-                          
-                          // Use either explicit type or implicit detection
-                          const shouldLinkAsTherapist = isTherapistName || 
-                                                       (isTherapistHeader && containsTherapistKeywords);
-                          
-                          if (isCustomerName || isServiceName || shouldLinkAsTherapist) {
-                            let path = '';
-                            if (isCustomerName) {
-                              // Check if we have phone data in this row
-                              const phoneIndex = parsedTableData.headers.findIndex(header => 
-                                header.toLowerCase().includes('phone'));
-                                
-                              // If we have a phone column, use it for navigation
-                              if (phoneIndex >= 0 && row[phoneIndex]) {
-                                path = `/customers/${encodeURIComponent(row[phoneIndex])}`;
-                              } else {
-                                // Fallback to using name 
-                                path = `/customers/${encodeURIComponent(cell)}`;
+                        <TableCell
+                          key={index}
+                          sx={{
+                            fontWeight: 'bold',
+                            color: '#fff',
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                          }}
+                        >
+                          {header}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {parsedTableData.rows.map((row: any[], rowIndex: number) => (
+                      <TableRow key={rowIndex}>
+                        {row.map((cell: any, cellIndex: number) => {
+                          // For the first column (item name), make it clickable if it's a service or customer
+                          if (cellIndex === 1 && typeof cell === 'string') {
+                            const isCustomerName = parsedTableData.type === 'customer';
+                            const isServiceName = parsedTableData.type === 'service';
+                            const isTherapistName = parsedTableData.type === 'therapist';
+
+                            // If type is not explicitly set, try to determine from headers or content
+                            const headerText = parsedTableData.headers[cellIndex]?.toLowerCase() || '';
+                            const isTherapistHeader = headerText.includes('therapist') ||
+                              headerText.includes('practitioner') ||
+                              headerText.includes('employee') ||
+                              headerText === 'item'; // Generic "Item" might be a therapist name
+
+                            // Check if this looks like a therapist query from the content
+                            const messageContent = content.toLowerCase();
+                            const containsTherapistKeywords = messageContent.includes('therapist') ||
+                              messageContent.includes('practitioner') ||
+                              messageContent.includes('employee') ||
+                              messageContent.includes('theripish'); // Handle typo
+
+                            // Use either explicit type or implicit detection
+                            const shouldLinkAsTherapist = isTherapistName ||
+                              (isTherapistHeader && containsTherapistKeywords);
+
+                            if (isCustomerName || isServiceName || shouldLinkAsTherapist) {
+                              let path = '';
+                              if (isCustomerName) {
+                                // Check if we have phone data in this row
+                                const phoneIndex = parsedTableData.headers.findIndex(header =>
+                                  header.toLowerCase().includes('phone'));
+
+                                // If we have a phone column, use it for navigation
+                                if (phoneIndex >= 0 && row[phoneIndex]) {
+                                  path = `/customers/${encodeURIComponent(row[phoneIndex])}`;
+                                } else {
+                                  // Fallback to using name 
+                                  path = `/customers/${encodeURIComponent(cell)}`;
+                                }
                               }
-                            }
-                            if (isServiceName) path = `/services/${encodeURIComponent(cell)}`;
-                            if (isTherapistName || shouldLinkAsTherapist) path = `/therapists/${encodeURIComponent(cell)}`;
-                            
-                            return (
-                              <TableCell 
-                                key={cellIndex}
-                                sx={{ 
-                                  color: '#fff', 
-                                  borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
-                                }}
-                              >
-                                <Link
-                                  to={path}
-                                  style={{
-                                    color: '#3b82f6',
-                                    textDecoration: 'none',
-                                    cursor: 'pointer',
-                                    fontWeight: 500,
-                                    display: 'inline-block',
-                                    position: 'relative'
-                                  }}
-                                  title="Click to view details"
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.textDecoration = 'underline';
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.textDecoration = 'none';
+                              if (isServiceName) path = `/services/${encodeURIComponent(cell)}`;
+                              if (isTherapistName || shouldLinkAsTherapist) path = `/therapists/${encodeURIComponent(cell)}`;
+
+                              return (
+                                <TableCell
+                                  key={cellIndex}
+                                  sx={{
+                                    color: '#fff',
+                                    borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
                                   }}
                                 >
-                                  {cell}
-                                </Link>
-                              </TableCell>
-                            );
+                                  <Link
+                                    to={path}
+                                    style={{
+                                      color: '#3b82f6',
+                                      textDecoration: 'none',
+                                      cursor: 'pointer',
+                                      fontWeight: 500,
+                                      display: 'inline-block',
+                                      position: 'relative'
+                                    }}
+                                    title="Click to view details"
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.textDecoration = 'underline';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.textDecoration = 'none';
+                                    }}
+                                  >
+                                    {cell}
+                                  </Link>
+                                </TableCell>
+                              );
+                            }
                           }
-                        }
-                        
-                        return (
-                          <TableCell 
-                            key={cellIndex}
-                            sx={{ 
-                              color: '#fff', 
-                              borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
-                            }}
-                          >
-                            {cell}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+
+                          return (
+                            <TableCell
+                              key={cellIndex}
+                              sx={{
+                                color: '#fff',
+                                borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                              }}
+                            >
+                              {typeof cell === 'object' && cell !== null
+                                ? (cell.value?.toString() || 'N/A')
+                                : (cell?.toString() || 'N/A')}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </Box>
           );
         }
@@ -1370,16 +1528,16 @@ ORDER BY
     if (data?.entities) {
       const parts = [];
       let lastIndex = 0;
-      
+
       // Sort entities by their position to ensure proper rendering
       const sortedEntities = [...data.entities].sort((a, b) => a.startIndex - b.startIndex);
-      
+
       for (const entity of sortedEntities) {
         // Add text before the entity
         if (entity.startIndex > lastIndex) {
           parts.push(content.slice(lastIndex, entity.startIndex));
         }
-        
+
         // Add the clickable entity
         let path = '';
         if (entity.type === 'customer') {
@@ -1389,7 +1547,7 @@ ORDER BY
         }
         if (entity.type === 'service') path = `/services/${encodeURIComponent(entity.name)}`;
         if (entity.type === 'therapist') path = `/therapists/${encodeURIComponent(entity.name)}`;
-        
+
         parts.push(
           <Link
             key={entity.startIndex}
@@ -1408,15 +1566,15 @@ ORDER BY
             {entity.name}
           </Link>
         );
-        
+
         lastIndex = entity.endIndex;
       }
-      
+
       // Add any remaining text
       if (lastIndex < content.length) {
         parts.push(content.slice(lastIndex));
       }
-      
+
       return parts.length > 0 ? parts : content;
     }
 
@@ -1427,7 +1585,7 @@ ORDER BY
           <Typography variant="body1" sx={{ mb: 2 }}>
             You can view the Daily Treatment Report here:
           </Typography>
-          <Link 
+          <Link
             to="/daily-treatment"
             style={{ textDecoration: 'none' }}
           >
@@ -1585,31 +1743,31 @@ ORDER BY
 
   const renderChart = () => {
     if (!chartData) return null;
-                              
-                              return (
+
+    return (
       <div className="h-64 bg-gray-800 p-4 rounded-lg">
         <Bar
-        data={chartData}
-                              options={{
-                                responsive: true,
+          data={chartData}
+          options={{
+            responsive: true,
             maintainAspectRatio: false,
-                                plugins: {
-                                  legend: { display: false },
-                                  title: { display: false }
-                                },
-                                scales: {
-                                  y: {
-                                    beginAtZero: true,
+            plugins: {
+              legend: { display: false },
+              title: { display: false }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
                 ticks: { color: '#ffffff' },
                 grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                                  },
-                                  x: {
+              },
+              x: {
                 ticks: { color: '#ffffff' },
                 grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                                  }
-                                }
-                              }}
-                            />
+              }
+            }
+          }}
+        />
       </div>
     );
   };
@@ -1636,10 +1794,10 @@ ORDER BY
               </h1>
               <p className="text-gray-300 text-xl">How can I help you today?</p>
             </div>
-            
+
             {/* Suggestion cards */}
             <div className="w-full max-w-5xl mx-auto space-y-3 px-4">
-              <button 
+              <button
                 onClick={() => {
                   setInputMessage("Top 10 customers this month");
                   handleSendMessage();
@@ -1651,8 +1809,8 @@ ORDER BY
                   <span className="text-gray-400 text-sm mt-1">Show top 10 customers by revenue this month</span>
                 </div>
               </button>
-              
-              <button 
+
+              <button
                 onClick={() => {
                   setInputMessage("Top 10 services this month");
                   handleSendMessage();
@@ -1707,11 +1865,10 @@ ORDER BY
                     </div>
                   )}
                   <div
-                    className={`w-full md:max-w-[75%] p-4 rounded-2xl ${
-                      message.type === 'user'
+                    className={`w-full md:max-w-[75%] p-4 rounded-2xl ${message.type === 'user'
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-800 text-gray-100'
-                    }`}
+                      }`}
                   >
                     {renderMessageContent(message.content, message.data)}
                   </div>
@@ -1734,8 +1891,8 @@ ORDER BY
           <div className="relative">
             <input
               type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
                   handleSendMessage();
@@ -1746,7 +1903,7 @@ ORDER BY
               disabled={loading}
             />
             <button
-            onClick={handleSendMessage}
+              onClick={handleSendMessage}
               disabled={loading || !inputMessage.trim()}
               className="absolute right-3 top-1/2 transform -translate-y-1/2 text-blue-500 disabled:text-gray-600 hover:text-blue-400 transition-colors"
             >
@@ -1785,12 +1942,18 @@ const App = () => {
 
   return (
     <ClinicProvider>
-    <Router>
-        <Toaster position="top-right" />
+      <Router>
+        <Toaster position="top-right" toastOptions={{
+          style: {
+            background: '#151f38',
+            color: '#f3f4f6',
+            border: '1px solid rgba(148, 163, 184, 0.12)'
+          },
+        }} />
         {!isAuthenticated ? (
           <Login onLogin={handleLogin} />
         ) : (
-          <div className="flex h-screen bg-[#111923] text-white">
+          <div className="flex h-screen bg-[#101729] text-[#f3f4f6]">
             <AppContent />
           </div>
         )}
@@ -1801,39 +1964,46 @@ const App = () => {
 
 const AppContent = () => {
   const navigate = useNavigate();
-  const { 
-    currentClinic, 
-    setCurrentClinic, 
-    isUsingFallbackData, 
+  const {
+    currentClinic,
+    setCurrentClinic,
+    isUsingFallbackData,
     setIsUsingFallbackData,
     availableClinics,
     setAvailableClinics
   } = useClinic();
-  
+
   const handleClinicChange = (clinic: any) => {
-    setCurrentClinic(clinic);
+    // If clinic is different, update it
+    if (clinic.code !== currentClinic?.code) {
+      setCurrentClinic(clinic);
+
+      // Store the new clinic selection in localStorage
+      localStorage.setItem('selectedClinicId', clinic.id);
+
+      // Clear chat history in sessionStorage when changing clinics
+      sessionStorage.removeItem('chatMessages');
+    }
   };
 
   const handleLogout = () => {
     sessionStorage.removeItem('isAuthenticated');
     window.location.reload();
   };
-  
+
   return (
     <>
       <Sidebar onLogout={handleLogout} />
       <div className="flex-1 h-full overflow-auto">
-        {/* Clinic selector hidden for now
-        <div className="bg-[#101729] border-b border-gray-800 px-4 py-2">
-          <ClinicSelector 
-            onClinicChange={handleClinicChange} 
+        <div className="bg-[#101729] border-b border-[rgba(148,163,184,0.12)] px-4 py-2">
+          <ClinicSelector
+            onClinicChange={handleClinicChange}
           />
         </div>
-        */}
-        
+
         {/* Main content area */}
-        <div className="flex-1 overflow-auto">
-      <Routes>
+        <div className="flex-1 overflow-auto bg-[#101729]">
+          <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/conversational-ai" element={<div className="h-full"><MainChat /></div>} />
@@ -1843,16 +2013,22 @@ const AppContent = () => {
             <Route path="/services/:name" element={<ServiceDetails />} />
             <Route path="/therapists" element={<TherapistList />} />
             <Route path="/therapists/:name" element={<TherapistDetails />} />
-        <Route path="/commission" element={<Commission />} />
-        <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
-        <Route path="/payment-details" element={<PaymentDetails />} />
-        <Route path="/banking-details" element={<BankingDetails />} />
-        <Route path="/appointments" element={<Appointments />} />
-        <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
+            <Route path="/helpers" element={<HelperList />} />
+            <Route path="/helpers/:name" element={<HelperDetails />} />
+            <Route path="/commission" element={<Commission />} />
+            <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
+            <Route path="/payment-details" element={<PaymentDetails />} />
+            <Route path="/banking-details" element={<BankingDetails />} />
+            <Route path="/appointments" element={<Appointments />} />
+            <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
+            <Route path="/check-in-out" element={<CheckInOut />} />
+            <Route path="/transactions" element={<Transaction />} />
+            <Route path="/wallet" element={<Wallet />} />
+            <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+          </Routes>
         </div>
       </div>
     </>

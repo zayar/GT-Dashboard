@@ -24,6 +24,7 @@ import axios from 'axios';
 import ReactApexChart from 'react-apexcharts';
 import { ApexOptions } from 'apexcharts';
 import SearchIcon from '@mui/icons-material/Search';
+import { useClinic } from '../contexts/ClinicContext';
 
 // Define period type for time selection
 type PeriodType = 'monthly' | 'quarterly' | 'annual';
@@ -45,6 +46,7 @@ interface MonthlyCustomers {
 }
 
 const CustomerBehaviorReport: React.FC = () => {
+  const { currentClinic } = useClinic();
   const [period, setPeriod] = useState<PeriodType>('monthly');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,15 +89,22 @@ const CustomerBehaviorReport: React.FC = () => {
         groupFormat = "EXTRACT(YEAR FROM CheckInTime)::text";
       }
       
+      if (!currentClinic) {
+        setError('No clinic selected. Please select a clinic first.');
+        setLoading(false);
+        return;
+      }
+      
       // SQL for individual customer activity - NO limit, to get ALL active members
       const customerVisitsSQL = `
         SELECT 
           CustomerName AS customerName,
           ${groupFormat} AS month,
           COUNT(*) AS visitCount
-        FROM great_time.QueenDataView
+        FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND CustomerName IS NOT NULL
+        AND ClinicCode = '${currentClinic.code}'
         GROUP BY CustomerName, ${groupFormat}
         ORDER BY CustomerName, ${groupFormat} DESC
       `;
@@ -105,9 +114,10 @@ const CustomerBehaviorReport: React.FC = () => {
         SELECT 
           ${groupFormat} AS month,
           COUNT(DISTINCT CustomerName) AS uniqueCustomers
-        FROM great_time.QueenDataView
+        FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND CustomerName IS NOT NULL
+        AND ClinicCode = '${currentClinic.code}'
         GROUP BY ${groupFormat}
         ORDER BY ${groupFormat} ASC
       `;

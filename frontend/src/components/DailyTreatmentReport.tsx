@@ -62,7 +62,7 @@ const DailyTreatmentReport: React.FC = () => {
           COALESCE(PractitionerName, 'Unknown') as therapist_name,
           ServiceName as service_name,
           COUNT(*) as service_count
-        FROM great_time.QueenDataView
+        FROM great_time.MainDataView
         WHERE DATE(CheckInTime) = '${formattedDate}'
         GROUP BY PractitionerName, ServiceName
       )
@@ -82,7 +82,7 @@ const DailyTreatmentReport: React.FC = () => {
         ServiceName as service_name,
         CustomerName as customer_name,
         CustomerPhoneNumber as customer_phone
-      FROM great_time.QueenDataView
+      FROM great_time.MainDataView
       WHERE DATE(CheckInTime) = '${formattedDate}'
       ORDER BY CheckInTime DESC;`;
 

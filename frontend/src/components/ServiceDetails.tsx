@@ -1,11 +1,13 @@
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import { Avatar, Box, CircularProgress, Grid, IconButton, MenuItem, Pagination, Paper, Select, SelectChangeEvent, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, useTheme } from '@mui/material';
-import axios from 'axios';
-import { ChartData } from 'chart.js';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, TablePagination, useTheme } from '@mui/material';
 import { Bar } from 'react-chartjs-2';
-import { useNavigate, useParams } from 'react-router-dom';
+import { ChartData } from 'chart.js';
+import axios from 'axios';
+import { SelectChangeEvent } from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface ServiceDetailsProps {}
 
@@ -41,6 +43,7 @@ const ServiceDetails: React.FC<ServiceDetailsProps> = React.memo(() => {
   const navigate = useNavigate();
   const { name } = useParams<{ name: string }>();
   const theme = useTheme();
+  const { currentClinic } = useClinic();
   const [loading, setLoading] = React.useState(true);
   const [serviceData, setServiceData] = React.useState<ServiceData | null>(null);
   const [error, setError] = React.useState('');
@@ -190,8 +193,8 @@ const ServiceDetails: React.FC<ServiceDetailsProps> = React.memo(() => {
 
   React.useEffect(() => {
     const fetchServiceData = async () => {
-      if (!name) {
-        setError('Service name is required');
+      if (!name || !currentClinic) {
+        setError('Service name is required and clinic must be selected');
         setLoading(false);
         return;
       }
@@ -212,9 +215,10 @@ WITH ServiceStats AS (
     COUNT(DISTINCT BookingID) as total_bookings,
     COUNT(DISTINCT CustomerName) as total_customers,
     CAST(SUM(CAST(Price AS FLOAT64)) AS INT64) as total_revenue
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+  AND ClinicCode = '${currentClinic.code}'
   GROUP BY ServiceName, ServiceImage
 )
 SELECT
@@ -225,10 +229,11 @@ SELECT
   total_customers,
   total_revenue,
   FORMAT_TIMESTAMP('%d %b, %Y %I:%M %p', MAX(CheckInTime)) AS last_booking_date
-FROM great_time.QueenDataView
+FROM great_time.MainDataView
 JOIN ServiceStats USING (ServiceName)
 WHERE ServiceName = '${escapedServiceName}'
 AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+AND ClinicCode = '${currentClinic.code}'
 GROUP BY ServiceName, ServiceStats.ServiceImage, total_bookings, total_customers, total_revenue;`;
 
         const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
@@ -253,9 +258,10 @@ WITH MonthlySales AS (
   SELECT
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
     COUNT(*) as count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+  AND ClinicCode = '${currentClinic.code}'
   GROUP BY month
   ORDER BY month DESC
   LIMIT 18
@@ -265,11 +271,13 @@ BoughtTogether AS (
   SELECT
     b2.ServiceName as service_name,
     COUNT(*) as bought_together_count
-  FROM great_time.QueenDataView b1
-  JOIN great_time.QueenDataView b2
+  FROM great_time.MainDataView b1
+  JOIN great_time.MainDataView b2
     ON b1.CustomerName = b2.CustomerName
     AND b1.ServiceName = '${escapedServiceName}'
     AND b2.ServiceName != '${escapedServiceName}'
+    AND b1.ClinicCode = '${currentClinic.code}'
+    AND b2.ClinicCode = '${currentClinic.code}'
   WHERE EXTRACT(YEAR FROM b1.CheckInTime) = ${selectedYear}
   AND EXTRACT(YEAR FROM b2.CheckInTime) = ${selectedYear}
   GROUP BY b2.ServiceName
@@ -281,10 +289,11 @@ Therapists AS (
   SELECT
     PractitionerName as name,
     COUNT(*) as service_count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
     AND PractitionerName IS NOT NULL
     AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+    AND ClinicCode = '${currentClinic.code}'
   GROUP BY PractitionerName
   ORDER BY service_count DESC
 ),
@@ -294,9 +303,10 @@ Customers AS (
     CustomerName as name,
     CustomerPhoneNumber as phone,
     COUNT(*) as purchase_count
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+  AND ClinicCode = '${currentClinic.code}'
   GROUP BY CustomerName, CustomerPhoneNumber
   ORDER BY purchase_count DESC
   LIMIT 100
@@ -308,9 +318,10 @@ ServiceRecords AS (
     CustomerName as customer_name,
     PractitionerName as therapist_name,
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) as month
-  FROM great_time.QueenDataView
+  FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+  AND ClinicCode = '${currentClinic.code}'
   ORDER BY CheckInTime DESC
 )
 
@@ -379,7 +390,7 @@ SELECT
     };
 
     fetchServiceData();
-  }, [name, selectedYear]);
+  }, [name, selectedYear, currentClinic]);
 
   if (loading) {
     return (
@@ -1003,7 +1014,7 @@ SELECT
                 <TableBody>
                   {filteredServiceRecords
                     .slice(recordsPage * recordsPerPage, (recordsPage + 1) * recordsPerPage)
-                    .map((record: ServiceRecord, index: number) => (
+                    .map((record: any, index: number) => (
                       <TableRow key={index} sx={{ '&:hover': { bgcolor: '#242f3d' } }}>
                         <TableCell sx={{ color: '#e2e8f0', borderBottom: '1px solid #2d3748' }}>
                           {record.checkin_time}
@@ -1020,7 +1031,7 @@ SELECT
                           }}
                           onClick={() => {
                             // Look for phone in record or find it in the service data
-                            const customerPhone = (record as any ).phone || 
+                            const customerPhone = record.phone || 
                               // Try to find the phone number from the customers array if available
                               (serviceData.customers?.find(c => c.name === record.customer_name)?.phone) || 
                               record.customer_name;

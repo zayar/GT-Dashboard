@@ -6,7 +6,12 @@ export const OPENAI_SQL_CONFIG = {
 Rules:
 1. Convert the user's question into a SQL query using ONLY the available columns from the BigQuery schema.
 2. Use exact column names from the BigQuery schema.
-3. For date/time handling in BigQuery:
+3. IMPORTANT: You MUST ALWAYS include a filter for clinic in the WHERE clause using the appropriate column name from the schema:
+   - Look for one of these column names in the schema: ClinicCode, clinic_code, clinicCode, clinic_id
+   - Then use the one that exists: AND [column_name] = '{clinicCode}'
+   - This filter MUST be present in EVERY query to ensure data security
+   - NEVER generate a query without this clinic code filter
+4. For date/time handling in BigQuery:
    - Always use TIMESTAMP() for timestamp literals
    - Always cast string dates to TIMESTAMP type before comparison
    - Use FORMAT_TIMESTAMP() for formatting timestamp fields
@@ -20,29 +25,37 @@ Rules:
      - FORMAT_DATE('%Y-%m-%d', DATE(field))
      - TIMESTAMP_ADD(field, INTERVAL 1 DAY)
      - EXTRACT(HOUR FROM field)
-4. For counting services or items:
+5. For counting services or items:
    - Use COUNT(*) as count to show the frequency
    - Always include GROUP BY clause
    - Include both the service name and its count in the SELECT clause
    - Order results by count in descending order
    - Use HAVING clause when filtering by count
-5. When querying service counts:
+6. When querying service counts:
    - SELECT service_name, COUNT(*) as count
    - GROUP BY service_name
    - ORDER BY count DESC
-6. For individual customer service queries:
+7. For individual customer service queries:
    - Always include service_name and COUNT(*) as count in SELECT
    - Use customer_name or customer_id in WHERE clause
    - GROUP BY service_name to show service frequency
    - ORDER BY count DESC for clear visualization
-7. For customer-related queries:
+8. For customer-related queries:
    - ALWAYS include CustomerName and CustomerPhoneNumber in the SELECT clause
    - Use appropriate aliases for clarity (e.g., CustomerName as name, CustomerPhoneNumber as phone)
    - Ensure these fields are included in GROUP BY if using aggregations
+9. For appointment-related queries (today, this week, this month):
+   - Always include CustomerName, ServiceName, CheckInTime, and PractitionerName in the SELECT clause
+   - For "today" appointments: WHERE DATE(CheckInTime) = CURRENT_DATE()
+   - For "this week" appointments: WHERE DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL EXTRACT(DAYOFWEEK FROM CURRENT_DATE())-1 DAY) AND DATE_ADD(CURRENT_DATE(), INTERVAL 7-EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) DAY)
+   - For "this month" appointments: WHERE EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM CURRENT_DATE()) AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_DATE())
+   - Order results by CheckInTime ASC for chronological display
+   - Include any other relevant appointment details in SELECT
 
 IMPORTANT: You MUST strictly follow this response format:
 [SQL Query]
-SELECT ... FROM great_time.QueenDataView ...
+SELECT ... FROM great_time.MainDataView ...
+WHERE ... AND [clinic_column_name] = '{clinicCode}' ...
 [End SQL]
 [Response]
 I've translated your question into a SQL query that will fetch the required data.
@@ -54,12 +67,17 @@ Notes:
 - Keep responses clear and concise.
 - For counting queries, ensure to include both item names and their counts in results.
 - For customer-specific queries, always show service frequency.
-- For customer-related queries, always include phone numbers for future reference.`,
+- For customer-related queries, always include phone numbers for future reference.
+- For appointment queries, focus on providing complete appointment details with customer names and services.
+- ALWAYS use MainDataView instead of QueenDataView in all queries.
+- ALWAYS filter by clinic code by examining the schema for the correct clinic code column name.`,
   
-  formatMessages: (schemaContext: string, userQuery: string) => [
+  formatMessages: (schemaContext: string, userQuery: string, clinicCode: string) => [
     {
       role: 'system',
-      content: OPENAI_SQL_CONFIG.systemPrompt.replace('{schemaContext}', schemaContext)
+      content: OPENAI_SQL_CONFIG.systemPrompt
+                .replace('{schemaContext}', schemaContext)
+                .replace(/{clinicCode}/g, clinicCode)
     },
     {
       role: 'user',
@@ -86,6 +104,12 @@ Rules:
    - Use bar charts for comparing quantities
    - Use line charts for trends over time
    - Use pie charts for proportions
+8. For appointment data:
+   - Highlight the total number of appointments
+   - Mention popular services and their frequency
+   - Identify key clients with multiple appointments
+   - Note any patterns in scheduling
+   - Keep insights focused on actionable business intelligence
 
 IMPORTANT: You MUST strictly follow this response format:
 [Response]
