@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Typography, Avatar, Menu, MenuItem, IconButton } from '@mui/material';
+import { Box, Typography, Avatar, Menu, MenuItem, IconButton, CircularProgress } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import axios from 'axios';
+import { useClinic } from '../contexts/ClinicContext'; // Import useClinic
 
-// Interface for clinic data
-interface Clinic {
+// Interface for clinic data (can be shared or kept here)
+export interface Clinic {
   id: string;
   logo: string;
   name: string;
@@ -13,7 +13,7 @@ interface Clinic {
   active: number;
   pass_id?: string;
   pass_key?: string;
-  pass?: string | Record<string, any>;
+  pass?: string | Record<string, any>; // Keep pass for potential legacy use in context
 }
 
 // Generate a consistent color based on clinic ID
@@ -120,300 +120,51 @@ const ClinicAvatar = ({ clinic, size = 32, mr = 1 }: { clinic: Clinic, size?: nu
   );
 };
 
-// Fallback clinic data to use when API fails
-export const FALLBACK_CLINICS: Clinic[] = [
-  {
-    id: "GTTHEQUEEN",
-    name: "The Queen",
-    code: "GTTHEQUEEN",
-    logo: "/clinic-logos/queen-logo.png",
-    active: 1,
-    pass_id: "GTTHEQUEEN_PASS",
-    pass_key: "GTTHEQUEEN_KEY"
-  },
-  {
-    id: "GTLEMON1",
-    name: "Lemon Aesthetic",
-    code: "GTLEMON1",
-    logo: "/clinic-logos/lemon-logo.png",
-    active: 1,
-    pass_id: "GTLEMON1_PASS",
-    pass_key: "GTLEMON1_KEY"
-  },
-  {
-    id: "GTPITI",
-    name: "Great Time",
-    code: "GTPITI",
-    logo: "/clinic-logos/greattime-logo.png",
-    active: 1,
-    pass_id: "GTPITI_PASS",
-    pass_key: "GTPITI_KEY"
-  },
-  {
-    id: "GTPURE",
-    name: "Pure Wellness Clinic",
-    code: "GTPURE",
-    logo: "/clinic-logos/pure-logo.png",
-    active: 1,
-    pass_id: "GTPURE_PASS",
-    pass_key: "GTPURE_KEY"
-  },
-  {
-    id: "GTCHI",
-    name: "Chi Wellness Spa & Salon",
-    code: "GTCHI",
-    logo: "/clinic-logos/chi-logo.png",
-    active: 1,
-    pass_id: "GTCHI_PASS",
-    pass_key: "GTCHI_KEY"
-  },
-  {
-    id: "GTLEMON",
-    name: "Lemon Aesthetic",
-    code: "GTLEMON",
-    logo: "/clinic-logos/lemon-logo.png",
-    active: 1,
-    pass_id: "GTLEMON_PASS",
-    pass_key: "GTLEMON_KEY"
-  },
-  {
-    id: "GTDRKO",
-    name: "Dr.KO Aesthetic & Laser",
-    code: "GTDRKO",
-    logo: "/clinic-logos/drko-logo.png",
-    active: 1,
-    pass_id: "GTDRKO_PASS",
-    pass_key: "GTDRKO_KEY"
-  },
-  {
-    id: "GTDRMIN",
-    name: "Dr.Min K-Beauty Clinic",
-    code: "GTDRMIN",
-    logo: "/clinic-logos/drmin-logo.png",
-    active: 1,
-    pass_id: "GTDRMIN_PASS",
-    pass_key: "GTDRMIN_KEY"
-  }
-];
+// Fallback clinic data can be removed if not used elsewhere, or kept for reference
+// export const FALLBACK_CLINICS: Clinic[] = [ ... ]; 
 
 interface ClinicSelectorProps {
   onClinicChange?: (clinic: Clinic) => void;
 }
 
 const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
-  const [clinics, setClinics] = useState<Clinic[]>(FALLBACK_CLINICS);
-  const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  // Get state from context
+  const {
+    availableClinics, 
+    currentClinic,
+    setCurrentClinic,
+    loadingClinics,
+    isUsingFallbackData 
+  } = useClinic();
+  
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [usingFallback, setUsingFallback] = useState<boolean>(false);
 
-  // Define fetchClinics with useCallback so it can be reused
-  const fetchClinics = useCallback(async () => {
-    // Don't set loading to true immediately - we'll use fallback data first
-    // and try to load real data in the background
-    
-    try {
-      // Set up a timeout to abort the fetch if it takes too long
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        throw new Error("Request timed out after 5 seconds");
-      }, 5000);
+  // Remove internal state for clinics, loading, error, usingFallback
+  // const [clinics, setClinics] = useState<Clinic[]>(FALLBACK_CLINICS);
+  // const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
+  // const [loading, setLoading] = useState<boolean>(false);
+  // const [error, setError] = useState<string | null>(null);
+  // const [usingFallback, setUsingFallback] = useState<boolean>(false);
 
-      const query = `
-        SELECT
-        id, 
-        logo, 
-        name,
-        code, 
-        description, 
-        active,
-        JSON_VALUE(pass, '$.id') AS pass_id,
-        JSON_VALUE(pass, '$.key') AS pass_key
-        FROM great_time.clinics 
-        WHERE active = 1
-        ORDER BY name ASC
-      `;
-      
-      const response = await axios.post('/api/query', { query }, {
-        timeout: 15000, // Increase timeout to 15 seconds
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // Detailed logging of raw response
-      console.log('=== CLINIC API RAW RESPONSE ===');
-      console.log('Raw response:', response);
-      console.log('Response status:', response.status);
-      
-      const { data } = response.data;
-      console.log('Raw data from response:', data);
-      
-      // Debug the pass field for the first clinic if available
-      if (data && Array.isArray(data) && data.length > 0) {
-        console.log('First clinic raw data:', data[0]);
-        console.log('First clinic pass field:', data[0].pass);
-        console.log('First clinic pass field type:', typeof data[0].pass);
-        if (data[0].pass) {
-          try {
-            // If pass is a string, try to parse it as JSON
-            if (typeof data[0].pass === 'string') {
-              const passObject = JSON.parse(data[0].pass);
-              console.log('Parsed pass JSON:', passObject);
-              console.log('pass.id value after parsing:', passObject.id);
-            } else {
-              console.log('pass is not a string, direct access:', data[0].pass.id);
-            }
-          } catch (e) {
-            console.error('Error parsing pass JSON:', e);
-          }
-        }
-      }
-      console.log('=== END API RAW RESPONSE ===');
-      
-      // Handle different response formats based on backend implementation
-      let clinicsData = [];
-      if (data && data.success && data.data && Array.isArray(data.data)) {
-        // This matches the response format we saw in the backend code
-        clinicsData = data.data;
-      } else if (data && data.rows && Array.isArray(data.rows)) {
-        clinicsData = data.rows;
-      } else if (data && Array.isArray(data)) {
-        clinicsData = data;
-      } else {
-        console.error('Invalid API response format:', data);
-        throw new Error('Invalid API response format');
-      }
-      
-      if (clinicsData.length === 0) {
-        console.warn('No clinics found in API response, using fallback data');
-        setUsingFallback(true);
-      } else {
-        console.log('Found clinics from API:', clinicsData.length);
-        // Log each clinic to see all data including pass_id
-        clinicsData.forEach((clinic: Clinic, index: number) => {
-          console.log(`Clinic ${index + 1} details:`, {
-            name: clinic.name,
-            id: clinic.id,
-            code: clinic.code,
-            pass_id: clinic.pass_id,
-            pass_key: clinic.pass_key,
-            rawPass: clinic.pass, // Log the raw pass field if it exists
-            pass_id_type: typeof clinic.pass_id,
-            pass_key_type: typeof clinic.pass_key
-          });
-        });
-        
-        // Enhanced processing - check more carefully for pass_id and pass_key
-        const processedClinics = clinicsData.map((clinic: Clinic) => {
-          // Try to extract pass_id from different potential sources
-          let finalPassId = clinic.pass_id;
-          let finalPassKey = clinic.pass_key;
-          
-          // If we have a pass object but no pass_id, try to get it from there
-          if (!finalPassId && clinic.pass) {
-            try {
-              // If pass is a string, try to parse it
-              if (typeof clinic.pass === 'string') {
-                const passObj = JSON.parse(clinic.pass);
-                finalPassId = passObj.id;
-                finalPassKey = passObj.key;
-                console.log(`Extracted from JSON string for ${clinic.name}:`, {
-                  pass_id: finalPassId,
-                  pass_key: finalPassKey
-                });
-              } 
-              // If pass is an object, try direct access
-              else if (typeof clinic.pass === 'object' && clinic.pass !== null) {
-                finalPassId = clinic.pass.id;
-                finalPassKey = clinic.pass.key;
-                console.log(`Extracted from object for ${clinic.name}:`, {
-                  pass_id: finalPassId,
-                  pass_key: finalPassKey
-                });
-              }
-            } catch (e) {
-              console.error(`Error extracting pass details for ${clinic.name}:`, e);
-            }
-          }
-          
-          // Return the clinic with our best attempt at pass_id and pass_key
-          return {
-            ...clinic,
-            pass_id: finalPassId || null,
-            pass_key: finalPassKey || null
-          };
-        });
-        
-        // Log the final processed clinics
-        console.log('=== FINAL PROCESSED CLINICS ===');
-        processedClinics.forEach((clinic: Clinic, index: number) => {
-          console.log(`Processed clinic ${index + 1}:`, {
-            name: clinic.name,
-            code: clinic.code,
-            pass_id: clinic.pass_id,
-            pass_key: clinic.pass_key
-          });
-        });
-        console.log('=== END PROCESSED CLINICS ===');
-        
-        setClinics(processedClinics);
-        setUsingFallback(false);
-      }
-      
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching clinics:', err);
-      // We're already using fallback data, so just show a warning, not an error
-      console.warn('Using fallback clinic data due to API error');
-      setUsingFallback(true);
-      // No need to show error to user since we're using fallback data
-    } finally {
-      setLoading(false);
+  // Remove internal fetchClinics function
+  // const fetchClinics = useCallback(async () => { ... }, []);
+
+  // Remove useEffect that called internal fetchClinics
+  // useEffect(() => { ... }, []);
+
+  // Remove useEffect that updated internal selectedClinic based on internal clinics state
+  // useEffect(() => { ... }, [clinics]);
+  
+  // Update local storage and context when clinic changes (use provided setCurrentClinic)
+  const handleClinicSelect = (clinic: Clinic) => {
+    if (currentClinic?.id !== clinic.id) {
+        setCurrentClinic(clinic); // Update context
+        localStorage.setItem('selectedClinicId', clinic.id);
+        if (onClinicChange) onClinicChange(clinic);
+        console.log('Clinic changed via selector:', clinic.name);
     }
-  }, [onClinicChange]);
-
-  // Initialize component with selected clinic
-  useEffect(() => {
-    const storedClinicId = localStorage.getItem('selectedClinicId');
-    
-    if (storedClinicId) {
-      const savedClinic = clinics.find(clinic => clinic.id === storedClinicId);
-      if (savedClinic) {
-        setSelectedClinic(savedClinic);
-        if (onClinicChange) onClinicChange(savedClinic);
-      } else {
-        setSelectedClinic(FALLBACK_CLINICS[0]);
-        if (onClinicChange) onClinicChange(FALLBACK_CLINICS[0]);
-        localStorage.setItem('selectedClinicId', FALLBACK_CLINICS[0].id);
-      }
-    } else {
-      setSelectedClinic(FALLBACK_CLINICS[0]);
-      if (onClinicChange) onClinicChange(FALLBACK_CLINICS[0]);
-      localStorage.setItem('selectedClinicId', FALLBACK_CLINICS[0].id);
-    }
-    
-    fetchClinics().catch(err => {
-      console.error('Background fetch failed:', err);
-    });
-  }, []);
-
-  // Update selected clinic when clinics data changes
-  useEffect(() => {
-    const storedClinicId = localStorage.getItem('selectedClinicId');
-    if (storedClinicId && clinics.length > 0) {
-      const savedClinic = clinics.find(clinic => clinic.id === storedClinicId);
-      if (savedClinic) {
-        setSelectedClinic(savedClinic);
-        if (onClinicChange) onClinicChange(savedClinic);
-      }
-    }
-  }, [clinics]);
+    handleClose();
+  };
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -423,20 +174,21 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
     setAnchorEl(null);
   };
 
-  const handleClinicSelect = (clinic: Clinic) => {
-    setSelectedClinic(clinic);
-    localStorage.setItem('selectedClinicId', clinic.id);
-    if (onClinicChange) onClinicChange(clinic);
-    handleClose();
-  };
-
-  // Component is never in a loading state for the user now
-  if (loading && !selectedClinic) {
+  if (loadingClinics) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', p: 1 }}>
+        <CircularProgress size={20} sx={{ mr: 1 }} />
         <Typography variant="body2" color="text.secondary">Loading clinics...</Typography>
       </Box>
     );
+  }
+
+  if (!currentClinic && !loadingClinics && availableClinics.length === 0) {
+    return (
+       <Box sx={{ display: 'flex', alignItems: 'center', p: 1 }}>
+        <Typography variant="body2" color="error.main">No clinics available for this user.</Typography>
+      </Box>
+    )
   }
 
   return (
@@ -444,26 +196,35 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
       display: 'flex', 
       alignItems: 'center', 
       p: 1, 
-      cursor: 'pointer',
+      cursor: availableClinics.length > 0 ? 'pointer' : 'default', // Only allow click if clinics exist
       borderRadius: 1,
-      '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.08)' }
+      '&:hover': { bgcolor: availableClinics.length > 0 ? 'rgba(255, 255, 255, 0.08)' : 'transparent' }
     }}>
-      <Box onClick={handleClick} sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-        {selectedClinic && (
+      <Box onClick={availableClinics.length > 0 ? handleClick : undefined} sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+        {currentClinic ? (
           <>
-            <ClinicAvatar clinic={selectedClinic} mr={1} />
+            {/* TODO: ClinicAvatar needs to be defined or imported if removed from here */}
+            {/* <ClinicAvatar clinic={currentClinic} mr={1} /> */}
+             <Avatar sx={{ width: 32, height: 32, mr: 1, bgcolor: 'secondary.main' }}>
+               {currentClinic.name?.charAt(0)?.toUpperCase() || 'C'}
+             </Avatar>
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
               <Typography variant="body1" noWrap component="div" sx={{ color: 'white' }}>
-                {selectedClinic.name}
+                {currentClinic.name}
+                 {isUsingFallbackData && <Typography variant="caption" color="warning.light" sx={{ml: 1}}>(Local)</Typography>}
               </Typography>
               <Typography variant="caption" noWrap component="div" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-                {selectedClinic.code}
+                {currentClinic.code}
               </Typography>
             </Box>
-            <IconButton size="small" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-              <ArrowDropDownIcon />
-            </IconButton>
+            {availableClinics.length > 1 && ( // Only show dropdown if more than one clinic
+                <IconButton size="small" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                  <ArrowDropDownIcon />
+                </IconButton>
+            )}
           </>
+        ) : (
+           <Typography variant="body2" color="text.secondary">No Clinic Selected</Typography>
         )}
       </Box>
 
@@ -483,29 +244,33 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
           }
         }}
       >
-        {usingFallback && (
+        {isUsingFallbackData && (
           <Box sx={{ px: 2, py: 1, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
             <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.7rem' }}>
-              Using local data. API connection failed.
+              Using local data. API connection may have failed.
             </Typography>
           </Box>
         )}
         
-        {clinics.map((clinic) => (
+        {availableClinics.map((clinic) => (
           <MenuItem 
             key={clinic.id} 
             onClick={() => handleClinicSelect(clinic)}
-            selected={selectedClinic?.id === clinic.id}
+            selected={currentClinic?.id === clinic.id}
             sx={{
-              borderLeft: selectedClinic?.id === clinic.id ? '3px solid #3f83f8' : '3px solid transparent',
-              bgcolor: selectedClinic?.id === clinic.id ? 'rgba(63, 131, 248, 0.1)' : 'transparent',
+              borderLeft: currentClinic?.id === clinic.id ? '3px solid #3f83f8' : '3px solid transparent',
+              bgcolor: currentClinic?.id === clinic.id ? 'rgba(63, 131, 248, 0.1)' : 'transparent',
               '&:hover': {
-                bgcolor: selectedClinic?.id === clinic.id ? 'rgba(63, 131, 248, 0.2)' : 'rgba(255, 255, 255, 0.08)'
+                bgcolor: currentClinic?.id === clinic.id ? 'rgba(63, 131, 248, 0.2)' : 'rgba(255, 255, 255, 0.08)'
               }
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-              <ClinicAvatar clinic={clinic} mr={1.5} />
+               {/* TODO: ClinicAvatar needs to be defined or imported if removed from here */}
+               {/* <ClinicAvatar clinic={clinic} mr={1.5} /> */}
+                <Avatar sx={{ width: 32, height: 32, mr: 1.5, bgcolor: 'secondary.dark' }}>
+                   {clinic.name?.charAt(0)?.toUpperCase() || 'C'}
+                 </Avatar>
               <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                 <Typography variant="body2" noWrap sx={{ color: 'white' }}>
                   {clinic.name}

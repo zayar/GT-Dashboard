@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { auth } from '../config/firebase';
 
 const API_BASE_URL = 'http://localhost:3000'; // Make sure this matches your backend port
 
@@ -66,6 +67,28 @@ const clearCache = (endpoint?: string) => {
   }
 };
 
-// Export all functions
-export { executeQuery, clearCache };
-export default { executeQuery, clearCache }; 
+// Add request interceptor for adding auth tokens
+axiosInstance.interceptors.request.use(
+  async (config) => {
+    const user = auth.currentUser;
+    if (user) {
+      try {
+        const token = await user.getIdToken();
+        config.headers.Authorization = `Bearer ${token}`;
+      } catch (error) {
+        console.error('Error getting ID token:', error);
+        // Optionally handle token refresh errors, e.g., force logout
+      }
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Export the configured axios instance as the default
+export default axiosInstance;
+
+// Also keep named exports for functions that may be used elsewhere
+export { executeQuery, clearCache }; 

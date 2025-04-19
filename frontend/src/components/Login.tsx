@@ -1,182 +1,112 @@
 import React, { useState } from 'react';
-import { Box, Container, TextField, Button, Typography, IconButton, InputAdornment } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
-import { Visibility, VisibilityOff } from '@mui/icons-material';
+import { Box, TextField, Button, Typography, CircularProgress, Alert } from '@mui/material';
+import { auth } from '../config/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 
 interface LoginProps {
-  onLogin: (isAuthenticated: boolean) => void;
+  onLogin: (status: boolean) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (username === 'admin' && password === 'p@ssword') {
-      onLogin(true);
-      navigate('/dashboard');
-    } else {
-      setError('Invalid username or password');
+  const handleLogin = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged in AuthProvider will handle setting currentUser
+      onLogin(true); // Update App's state
+    } catch (err: any) {
+      setError(err.message || 'Failed to log in.');
+      console.error("Firebase Login Error:", err);
+      // Map Firebase error codes to user-friendly messages (optional but recommended)
+      switch (err.code) {
+        case 'auth/invalid-email':
+          setError('Invalid email address format.');
+          break;
+        case 'auth/user-disabled':
+          setError('This user account has been disabled.');
+          break;
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+          setError('Invalid email or password.');
+          break;
+        default:
+          setError('Login failed. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
+    <Box 
+      sx={{ 
+        display: 'flex', 
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        bgcolor: '#1E1E1E',
-        color: 'white',
+        height: '100vh',
+        bgcolor: '#101729'
       }}
     >
-      <Container maxWidth="sm">
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            textAlign: 'center',
+      <Box
+        sx={{
+          p: 4,
+          bgcolor: '#1a2235',
+          borderRadius: 2,
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+          width: '100%',
+          maxWidth: '400px',
+          textAlign: 'center'
+        }}
+      >
+        <Typography variant="h4" component="h1" sx={{ mb: 3, color: '#f3f4f6' }}>
+          Admin Login
+        </Typography>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+        <TextField
+          label="Email"
+          variant="outlined"
+          fullWidth
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          sx={{ mb: 2, input: { color: '#f3f4f6' }, label: { color: '#9ca3af' } }}
+          InputLabelProps={{
+            style: { color: '#9ca3af' },
           }}
+        />
+        <TextField
+          label="Password"
+          type="password"
+          variant="outlined"
+          fullWidth
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          sx={{ mb: 3, input: { color: '#f3f4f6' }, label: { color: '#9ca3af' } }}
+          InputLabelProps={{
+            style: { color: '#9ca3af' },
+          }}
+        />
+        <Button
+          variant="contained"
+          color="primary"
+          fullWidth
+          onClick={handleLogin}
+          disabled={loading}
+          sx={{ py: 1.5, fontSize: '1rem' }}
         >
-          <img 
-            src="/gtlogo.svg" 
-            alt="GT Logo" 
-            style={{ 
-              width: '80px',
-              height: 'auto',
-              marginBottom: '2rem'
-            }} 
-          />
-          
-          <Typography variant="h4" component="h1" gutterBottom>
-            Welcome back!
-          </Typography>
-          
-          <Typography variant="subtitle1" sx={{ mb: 4, color: 'gray.400' }}>
-            Please enter your credentials to sign in!
-          </Typography>
-
-          <Box component="form" onSubmit={handleLogin} sx={{ width: '100%', mt: 1 }}>
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              label="Email"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  '& fieldset': {
-                    borderColor: 'rgba(255, 255, 255, 0.23)',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'rgba(255, 255, 255, 0.4)',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: '#3b82f6',
-                  },
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                },
-                '& .MuiInputLabel-root': {
-                  color: 'rgba(255, 255, 255, 0.7)',
-                },
-                '& .MuiInputBase-input': {
-                  color: 'white',
-                },
-              }}
-            />
-            
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      aria-label="toggle password visibility"
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                      sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
-                    >
-                      {showPassword ? <VisibilityOff /> : <Visibility />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              }}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  '& fieldset': {
-                    borderColor: 'rgba(255, 255, 255, 0.23)',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'rgba(255, 255, 255, 0.4)',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: '#3b82f6',
-                  },
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                },
-                '& .MuiInputLabel-root': {
-                  color: 'rgba(255, 255, 255, 0.7)',
-                },
-                '& .MuiInputBase-input': {
-                  color: 'white',
-                },
-              }}
-            />
-
-            {error && (
-              <Typography color="error" sx={{ mt: 2, textAlign: 'center' }}>
-                {error}
-              </Typography>
-            )}
-
-            <Button
-              type="submit"
-              fullWidth
-              variant="contained"
-              sx={{
-                mt: 3,
-                mb: 2,
-                bgcolor: '#3b82f6',
-                color: 'white',
-                py: 1.5,
-                '&:hover': {
-                  bgcolor: '#2563eb',
-                },
-              }}
-            >
-              Sign In
-            </Button>
-
-            <Box sx={{ mt: 2, textAlign: 'center' }}>
-              <Button
-                sx={{
-                  color: '#3b82f6',
-                  textDecoration: 'none',
-                  '&:hover': {
-                    textDecoration: 'underline',
-                  },
-                }}
-              >
-                Forgot password?
-              </Button>
-            </Box>
-          </Box>
-        </Box>
-      </Container>
+          {loading ? <CircularProgress size={24} color="inherit" /> : 'Login'}
+        </Button>
+      </Box>
     </Box>
   );
 };

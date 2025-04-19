@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { createTheme, ThemeProvider, CssBaseline } from '@mui/material'
+import { AuthProvider } from './contexts/AuthContext'
 
 // Create a dark theme with #101729 as the primary color
 const darkTheme = createTheme({
@@ -60,7 +61,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </ThemeProvider>
   </StrictMode>,
 )

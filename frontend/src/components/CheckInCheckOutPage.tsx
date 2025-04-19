@@ -27,13 +27,13 @@ import {
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import axios from 'axios';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'; // Assuming you might want a back button
 import { useClinic } from '../contexts/ClinicContext';
+import axios from 'axios'; // Import axios for making direct API calls
 
 // Define the interface for the record based on schema
 interface CheckInOutRecord {
@@ -131,7 +131,8 @@ const CheckInCheckOutPage: React.FC = () => {
         return;
     }
 
-
+    // Query inoutview table - *KEEPING direct axios for the separate MySQL service*
+    // If /api/mysql *also* needs Firebase auth, this should use apiClient too.
     let query = `
       SELECT 
         OrderId, CheckInTime, CheckOutTime, Servicename, TherapicName, HelperName, 
@@ -149,7 +150,7 @@ const CheckInCheckOutPage: React.FC = () => {
     query += ` ORDER BY CheckInTime DESC;`; // Example ordering
 
     try {
-      // Use the new MySQL service endpoint and pass connection details + query
+      // Use axios directly with the MYSQL_SERVICE_URL
       const response = await axios.post(`${MYSQL_SERVICE_URL}/query`, {
         ...connectionConfig,
         query: query

@@ -40,3 +40,4 @@ coverage/
 .cache/
 .DS_Store
 Thumbs.db
+backend/gtportal-2252c-firebase.json

@@ -41,6 +41,9 @@ import WalletTransactionDetails from './components/WalletTransactionDetails';
 import CheckInCheckOutPage from './components/CheckInCheckOutPage';
 import MySQLConnector from './components/MySQLConnector';
 import AppointmentsListPage from './components/AppointmentsListPage';
+import { useAuth } from './contexts/AuthContext'; // Import useAuth
+import { signOut } from 'firebase/auth';
+import { auth } from './config/firebase';
 
 ChartJS.register(
   CategoryScale,
@@ -1954,30 +1957,32 @@ ORDER BY
 };
 
 const App = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return sessionStorage.getItem('isAuthenticated') === 'true';
-  });
+  const { currentUser, loading } = useAuth(); // Use AuthContext
 
   const handleLogin = (authStatus: boolean) => {
-    setIsAuthenticated(authStatus);
-    sessionStorage.setItem('isAuthenticated', String(authStatus));
+    // This function might become redundant or just used for initial redirect logic
+    // The actual auth state is managed by AuthContext
+    console.log("Login triggered, auth state handled by AuthContext:", authStatus);
   };
 
+  if (loading) {
+    // Show a full-page loader while checking auth state
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#101729' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
-    <ClinicProvider>
+    <ClinicProvider> {/* Keep ClinicProvider */}
       <Router>
-        <Toaster position="top-right" toastOptions={{
-          style: {
-            background: '#151f38',
-            color: '#f3f4f6',
-            border: '1px solid rgba(148, 163, 184, 0.12)'
-          },
-        }} />
-        {!isAuthenticated ? (
+        <Toaster position="top-right" toastOptions={{ /* ... */ }} />
+        {!currentUser ? ( // Check currentUser from context
           <Login onLogin={handleLogin} />
         ) : (
           <div className="flex h-screen bg-[#101729] text-[#f3f4f6]">
-            <AppContent />
+            <AppContent /> {/* Render AppContent if logged in */}
           </div>
         )}
       </Router>
@@ -1987,6 +1992,7 @@ const App = () => {
 
 const AppContent = () => {
   const navigate = useNavigate();
+  const { currentUser } = useAuth(); // Can use currentUser here too if needed
   const { 
     currentClinic, 
     setCurrentClinic, 
@@ -1994,9 +2000,10 @@ const AppContent = () => {
     setIsUsingFallbackData,
     availableClinics,
     setAvailableClinics
+    // TODO: Add loadingClinics state here from ClinicContext later
   } = useClinic();
   
-  const handleClinicChange = (clinic: any) => {
+  const handleClinicChange = (clinic: Clinic) => {
     // If clinic is different, update it
     if (clinic.code !== currentClinic?.code) {
       setCurrentClinic(clinic);
@@ -2009,14 +2016,26 @@ const AppContent = () => {
     }
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem('isAuthenticated');
-    window.location.reload();
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // onAuthStateChanged will update currentUser to null, triggering redirect in App
+      sessionStorage.removeItem('isAuthenticated'); // Clear legacy flag if still used elsewhere
+      localStorage.removeItem('selectedClinicId'); // Clear selected clinic
+      sessionStorage.removeItem('chatMessages'); // Clear chat
+      // No need for window.location.reload() typically
+      // navigate('/login'); // Optionally navigate programmatically
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
+  
+  // TODO: Add loading indicator while clinics are loading from ClinicContext
+  // if (loadingClinics) { ... }
   
   return (
     <>
-      <Sidebar onLogout={handleLogout} />
+      <Sidebar onLogout={handleLogout} /> {/* Pass updated handleLogout */}
       <div className="flex-1 h-full overflow-auto">
         <div className="bg-[#101729] border-b border-[rgba(148,163,184,0.12)] px-4 py-2">
           <ClinicSelector 
@@ -2027,6 +2046,7 @@ const AppContent = () => {
         {/* Main content area */}
         <div className="flex-1 overflow-auto bg-[#101729]">
           <Routes>
+            {/* Routes remain the same */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/conversational-ai" element={<div className="h-full"><MainChat /></div>} />
@@ -2042,17 +2062,17 @@ const AppContent = () => {
             <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
             <Route path="/payment-details" element={<PaymentDetails />} />
             <Route path="/banking-details" element={<BankingDetails />} />
-            <Route path="/appointments" element={<Appointments />} />
+            {/* <Route path="/appointments" element={<Appointments />} /> */}{/* Removed old appointments */}
             <Route path="/appointments-list" element={<AppointmentsListPage />} />
             <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
-            <Route path="/check-in-out" element={<CheckInOut />} />
+            {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
             <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
             <Route path="/transactions" element={<Transaction />} />
             <Route path="/wallet" element={<Wallet />} />
             <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
-            <Route path="/mysql-connector" element={<MySQLConnector />} />
+            {/* <Route path="/mysql-connector" element={<MySQLConnector />} /> */}{/* Removed mysql connector */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>
