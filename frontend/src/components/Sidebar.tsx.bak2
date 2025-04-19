@@ -129,8 +129,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { id: 'service-behavior', label: 'Service Behavior', icon: 'fas fa-spa', path: '/service-behavior-report' },
       ]
     },
-    { id: 'appointments-list-mysql', label: 'Appointments List', icon: 'fas fa-list', path: '/appointments-list' },
-    { id: 'checkin-records', label: 'CheckIn/Out Records', icon: 'fas fa-clipboard-list', path: '/checkin-checkout-page' },
+    { 
+      id: 'appointments', 
+      label: 'Appointments', 
+      icon: 'fas fa-calendar-alt', 
+      hasSubmenu: true,
+      submenu: [
+        { id: 'appointments-list', label: 'Appointments', icon: 'fas fa-calendar-check', path: '/appointments' },
+        { id: 'checkin-out', label: 'CheckIn/Out', icon: 'fas fa-clipboard-check', path: '/check-in-out' },
+      ]
+    },
     { id: 'conversational-ai', label: 'Conversational AI', icon: 'fas fa-robot', path: '/conversational-ai', isAiFeature: true },
     { 
       id: 'sales', 
@@ -171,7 +179,18 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           path: '/wallet'
         }
       ]
-    }
+    },
+    {
+      type: 'group',
+      group: 'Developer Tools',
+      items: [
+        {
+          text: 'MySQL Test',
+          icon: <i className="fas fa-database" style={{ fontSize: '1.25rem' }} />,
+          path: '/mysql-test'
+        }
+      ]
+    },
   ];
 
   // Check if a path is active or part of active submenu
@@ -673,43 +692,41 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           }}
         >
           <Tooltip title={isMinimized ? "Logout" : ""}>
-            <span>
-              <Button
-                onClick={onLogout}
-                sx={{
-                  color: isDarkMode ? theme.palette.error.light : theme.palette.error.main,
+            <span><Button
+              onClick={onLogout}
+              sx={{
+                color: isDarkMode ? theme.palette.error.light : theme.palette.error.main,
+                backgroundColor: isDarkMode 
+                  ? alpha(theme.palette.error.dark, 0.1) 
+                  : alpha(theme.palette.error.light, 0.1),
+                borderRadius: '8px',
+                py: 1,
+                px: isMinimized ? 1 : 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isMinimized ? 'center' : 'flex-start',
+                width: isMinimized ? '40px' : '100%',
+                minWidth: isMinimized ? '40px' : 'auto',
+                '&:hover': {
                   backgroundColor: isDarkMode 
-                    ? alpha(theme.palette.error.dark, 0.1) 
-                    : alpha(theme.palette.error.light, 0.1),
-                  borderRadius: '8px',
-                  py: 1,
-                  px: isMinimized ? 1 : 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: isMinimized ? 'center' : 'flex-start',
-                  width: isMinimized ? '40px' : '100%',
-                  minWidth: isMinimized ? '40px' : 'auto',
-                  '&:hover': {
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.error.dark, 0.2) 
-                      : alpha(theme.palette.error.light, 0.2),
-                  }
-                }}
-              >
-                <LogoutIcon sx={{ fontSize: isMinimized ? '1.2rem' : '1rem' }} />
-                {!isMinimized && (
-                  <Typography 
-                    sx={{ 
-                      ml: 1, 
-                      fontSize: '0.9rem',
-                      fontWeight: 'medium',
-                    }}
-                  >
-                    Logout
-                  </Typography>
-                )}
-              </Button>
-            </span>
+                    ? alpha(theme.palette.error.dark, 0.2) 
+                    : alpha(theme.palette.error.light, 0.2),
+                }
+              }}
+            >
+              <LogoutIcon sx={{ fontSize: isMinimized ? '1.2rem' : '1rem' }} />
+              {!isMinimized && (
+                <Typography 
+                  sx={{ 
+                    ml: 1, 
+                    fontSize: '0.9rem',
+                    fontWeight: 'medium',
+                  }}
+                >
+                  Logout
+                </Typography>
+              )}
+            </Button>
           </Tooltip>
         </Box>
       </Box>

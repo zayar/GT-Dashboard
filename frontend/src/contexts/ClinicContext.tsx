@@ -9,6 +9,8 @@ export interface Clinic {
   code: string;
   description?: string;
   active: number;
+  pass_id?: string;
+  pass_key?: string;
 }
 
 interface ClinicContextType {

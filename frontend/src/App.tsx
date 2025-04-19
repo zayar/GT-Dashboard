@@ -38,6 +38,9 @@ import { format } from 'date-fns';
 import Transaction from './components/Transaction';
 import Wallet from './components/Wallet';
 import WalletTransactionDetails from './components/WalletTransactionDetails';
+import CheckInCheckOutPage from './components/CheckInCheckOutPage';
+import MySQLConnector from './components/MySQLConnector';
+import AppointmentsListPage from './components/AppointmentsListPage';
 
 ChartJS.register(
   CategoryScale,
@@ -2040,13 +2043,16 @@ const AppContent = () => {
             <Route path="/payment-details" element={<PaymentDetails />} />
             <Route path="/banking-details" element={<BankingDetails />} />
             <Route path="/appointments" element={<Appointments />} />
+            <Route path="/appointments-list" element={<AppointmentsListPage />} />
             <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
             <Route path="/check-in-out" element={<CheckInOut />} />
+            <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
             <Route path="/transactions" element={<Transaction />} />
             <Route path="/wallet" element={<Wallet />} />
             <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
+            <Route path="/mysql-connector" element={<MySQLConnector />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>

@@ -11,6 +11,9 @@ interface Clinic {
   code: string;
   description?: string;
   active: number;
+  pass_id?: string;
+  pass_key?: string;
+  pass?: string | Record<string, any>;
 }
 
 // Generate a consistent color based on clinic ID
@@ -124,56 +127,72 @@ export const FALLBACK_CLINICS: Clinic[] = [
     name: "The Queen",
     code: "GTTHEQUEEN",
     logo: "/clinic-logos/queen-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTTHEQUEEN_PASS",
+    pass_key: "GTTHEQUEEN_KEY"
   },
   {
     id: "GTLEMON1",
     name: "Lemon Aesthetic",
     code: "GTLEMON1",
     logo: "/clinic-logos/lemon-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTLEMON1_PASS",
+    pass_key: "GTLEMON1_KEY"
   },
   {
     id: "GTPITI",
     name: "Great Time",
     code: "GTPITI",
     logo: "/clinic-logos/greattime-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTPITI_PASS",
+    pass_key: "GTPITI_KEY"
   },
   {
     id: "GTPURE",
     name: "Pure Wellness Clinic",
     code: "GTPURE",
     logo: "/clinic-logos/pure-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTPURE_PASS",
+    pass_key: "GTPURE_KEY"
   },
   {
     id: "GTCHI",
     name: "Chi Wellness Spa & Salon",
     code: "GTCHI",
     logo: "/clinic-logos/chi-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTCHI_PASS",
+    pass_key: "GTCHI_KEY"
   },
   {
     id: "GTLEMON",
     name: "Lemon Aesthetic",
     code: "GTLEMON",
     logo: "/clinic-logos/lemon-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTLEMON_PASS",
+    pass_key: "GTLEMON_KEY"
   },
   {
     id: "GTDRKO",
     name: "Dr.KO Aesthetic & Laser",
     code: "GTDRKO",
     logo: "/clinic-logos/drko-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTDRKO_PASS",
+    pass_key: "GTDRKO_KEY"
   },
   {
     id: "GTDRMIN",
     name: "Dr.Min K-Beauty Clinic",
     code: "GTDRMIN",
     logo: "/clinic-logos/drmin-logo.png",
-    active: 1
+    active: 1,
+    pass_id: "GTDRMIN_PASS",
+    pass_key: "GTDRMIN_KEY"
   }
 ];
 
@@ -203,17 +222,59 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
       }, 5000);
 
       const query = `
-        SELECT id, logo, name,code, description, active
+        SELECT
+        id, 
+        logo, 
+        name,
+        code, 
+        description, 
+        active,
+        JSON_VALUE(pass, '$.id') AS pass_id,
+        JSON_VALUE(pass, '$.key') AS pass_key
         FROM great_time.clinics 
         WHERE active = 1
         ORDER BY name ASC
       `;
       
-      const response = await axios.post('/api/query', { query });
+      const response = await axios.post('/api/query', { query }, {
+        timeout: 15000, // Increase timeout to 15 seconds
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       
       clearTimeout(timeoutId);
       
+      // Detailed logging of raw response
+      console.log('=== CLINIC API RAW RESPONSE ===');
+      console.log('Raw response:', response);
+      console.log('Response status:', response.status);
+      
       const { data } = response.data;
+      console.log('Raw data from response:', data);
+      
+      // Debug the pass field for the first clinic if available
+      if (data && Array.isArray(data) && data.length > 0) {
+        console.log('First clinic raw data:', data[0]);
+        console.log('First clinic pass field:', data[0].pass);
+        console.log('First clinic pass field type:', typeof data[0].pass);
+        if (data[0].pass) {
+          try {
+            // If pass is a string, try to parse it as JSON
+            if (typeof data[0].pass === 'string') {
+              const passObject = JSON.parse(data[0].pass);
+              console.log('Parsed pass JSON:', passObject);
+              console.log('pass.id value after parsing:', passObject.id);
+            } else {
+              console.log('pass is not a string, direct access:', data[0].pass.id);
+            }
+          } catch (e) {
+            console.error('Error parsing pass JSON:', e);
+          }
+        }
+      }
+      console.log('=== END API RAW RESPONSE ===');
       
       // Handle different response formats based on backend implementation
       let clinicsData = [];
@@ -232,14 +293,76 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
       if (clinicsData.length === 0) {
         console.warn('No clinics found in API response, using fallback data');
         setUsingFallback(true);
-        // We're already using fallback data, so no need to setClinics again
       } else {
         console.log('Found clinics from API:', clinicsData.length);
-        // Log each clinic to see logo URLs
-        clinicsData.forEach((clinic: Clinic) => {
-          console.log(`Clinic: ${clinic.name}, ID: ${clinic.id}, Logo: ${clinic.logo || 'None'}`);
+        // Log each clinic to see all data including pass_id
+        clinicsData.forEach((clinic: Clinic, index: number) => {
+          console.log(`Clinic ${index + 1} details:`, {
+            name: clinic.name,
+            id: clinic.id,
+            code: clinic.code,
+            pass_id: clinic.pass_id,
+            pass_key: clinic.pass_key,
+            rawPass: clinic.pass, // Log the raw pass field if it exists
+            pass_id_type: typeof clinic.pass_id,
+            pass_key_type: typeof clinic.pass_key
+          });
         });
-        setClinics(clinicsData);
+        
+        // Enhanced processing - check more carefully for pass_id and pass_key
+        const processedClinics = clinicsData.map((clinic: Clinic) => {
+          // Try to extract pass_id from different potential sources
+          let finalPassId = clinic.pass_id;
+          let finalPassKey = clinic.pass_key;
+          
+          // If we have a pass object but no pass_id, try to get it from there
+          if (!finalPassId && clinic.pass) {
+            try {
+              // If pass is a string, try to parse it
+              if (typeof clinic.pass === 'string') {
+                const passObj = JSON.parse(clinic.pass);
+                finalPassId = passObj.id;
+                finalPassKey = passObj.key;
+                console.log(`Extracted from JSON string for ${clinic.name}:`, {
+                  pass_id: finalPassId,
+                  pass_key: finalPassKey
+                });
+              } 
+              // If pass is an object, try direct access
+              else if (typeof clinic.pass === 'object' && clinic.pass !== null) {
+                finalPassId = clinic.pass.id;
+                finalPassKey = clinic.pass.key;
+                console.log(`Extracted from object for ${clinic.name}:`, {
+                  pass_id: finalPassId,
+                  pass_key: finalPassKey
+                });
+              }
+            } catch (e) {
+              console.error(`Error extracting pass details for ${clinic.name}:`, e);
+            }
+          }
+          
+          // Return the clinic with our best attempt at pass_id and pass_key
+          return {
+            ...clinic,
+            pass_id: finalPassId || null,
+            pass_key: finalPassKey || null
+          };
+        });
+        
+        // Log the final processed clinics
+        console.log('=== FINAL PROCESSED CLINICS ===');
+        processedClinics.forEach((clinic: Clinic, index: number) => {
+          console.log(`Processed clinic ${index + 1}:`, {
+            name: clinic.name,
+            code: clinic.code,
+            pass_id: clinic.pass_id,
+            pass_key: clinic.pass_key
+          });
+        });
+        console.log('=== END PROCESSED CLINICS ===');
+        
+        setClinics(processedClinics);
         setUsingFallback(false);
       }
       

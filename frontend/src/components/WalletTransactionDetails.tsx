@@ -193,9 +193,24 @@ const WalletTransactionDetails: React.FC = () => {
     setLoading(true);
     setError(null);
     
+    if (!currentClinic) {
+      setError('No clinic selected. Please select a clinic first.');
+      setLoading(false);
+      return;
+    }
+
+    // Enhanced debug logging for clinic data
+    console.log('=== WALLET TRANSACTION DETAILS: CLINIC DATA DEBUG ===');
+    console.log('Current Clinic Full Data:', currentClinic);
+    console.log('Type of currentClinic:', typeof currentClinic);
+    console.log('Properties available:', Object.keys(currentClinic));
+    console.log('pass_id value:', currentClinic.pass_id);
+    console.log('pass_id type:', typeof currentClinic.pass_id);
+    console.log('clinic code:', currentClinic.code);
+    console.log('=== END CLINIC DEBUG ===');
+    
     try {
       // Build SQL query to fetch transactions for the specific wallet owner
-      // Hardcoding 'Fancy House' for testing like in previous components
       const query = `
         SELECT 
           ClinicName,
@@ -220,15 +235,18 @@ const WalletTransactionDetails: React.FC = () => {
         FROM 
           \`piti-pass.passdb_prod.wallettransaction\`
         WHERE 
-          ClinicName = 'Fancy House'
-          AND MainAccountName = '${decodedOwnerName}'
+           MainAccountName = '${decodedOwnerName}'
         ORDER BY 
           createddate_myanmar DESC
         LIMIT 200
       `;
       
-      console.log('Executing wallet transactions query for:', decodedOwnerName);
-      
+      console.log('=== WALLET TRANSACTION DETAILS QUERY DEBUG ===');
+      console.log('Wallet transactions query for owner:', decodedOwnerName);
+      console.log('Using ClinicCode:', currentClinic.code);
+      console.log('Full SQL Query:', query);
+      console.log('=== END QUERY DEBUG ===');
+
       try {
         const response = await axios.post('/api/query', 
           { query },
@@ -285,7 +303,7 @@ const WalletTransactionDetails: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [decodedOwnerName]); // Only re-run when the owner name changes
+  }, [decodedOwnerName, currentClinic]);
   
   useEffect(() => {
     fetchTransactions();
@@ -448,23 +466,13 @@ const WalletTransactionDetails: React.FC = () => {
       >
         <MuiLink
           component={RouterLink}
-          to="/wallet"
           underline="hover"
-          color={isDarkMode ? "primary.light" : "primary"}
-          sx={{ display: 'flex', alignItems: 'center' }}
+          color={isDarkMode ? "primary.light" : "inherit"}
+          to="/wallet"
         >
-          <AccountBalanceWalletIcon sx={{ mr: 0.5 }} fontSize="small" />
           Wallet Accounts
         </MuiLink>
-        <Typography 
-          color="text.primary"
-          sx={{
-            color: isDarkMode ? theme.palette.common.white : undefined,
-            fontWeight: 'medium'
-          }}
-        >
-          {decodedOwnerName}
-        </Typography>
+        <Typography color="text.primary">{decodedOwnerName}</Typography>
       </Breadcrumbs>
       
       <Typography 
@@ -483,21 +491,38 @@ const WalletTransactionDetails: React.FC = () => {
         }}
       >
         <AccountBalanceWalletIcon fontSize="large" />
-        {decodedOwnerName}'s Transactions
+        Wallet Transactions: {decodedOwnerName}
         {currentClinic && (
-          <Typography component="span" sx={{ 
-            ml: 2, 
-            fontSize: '0.9rem', 
-            bgcolor: alpha(theme.palette.primary.main, 0.15),
-            color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
-            px: 2,
-            py: 0.5,
-            borderRadius: 2,
-            display: 'inline-flex',
-            alignItems: 'center'
-          }}>
-            Clinic: {currentClinic.name}
-          </Typography>
+          <>
+            <Typography component="span" sx={{ 
+              ml: 2, 
+              fontSize: '0.9rem', 
+              bgcolor: alpha(theme.palette.primary.main, 0.15),
+              color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
+              px: 2,
+              py: 0.5,
+              borderRadius: 2,
+              display: 'inline-flex',
+              alignItems: 'center'
+            }}>
+              Clinic: {currentClinic.name}
+            </Typography>
+            {currentClinic.pass_id && (
+              <Typography component="span" sx={{ 
+                ml: 1, 
+                fontSize: '0.9rem', 
+                bgcolor: alpha(theme.palette.secondary.main, 0.15),
+                color: isDarkMode ? theme.palette.secondary.light : theme.palette.secondary.dark,
+                px: 2,
+                py: 0.5,
+                borderRadius: 2,
+                display: 'inline-flex',
+                alignItems: 'center'
+              }}>
+                Pass ID: {currentClinic.pass_id}
+              </Typography>
+            )}
+          </>
         )}
       </Typography>
       

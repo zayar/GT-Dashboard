@@ -92,9 +92,24 @@ const Wallet: React.FC = () => {
     setLoading(true);
     setError(null);
     
+    if (!currentClinic) {
+      setError('No clinic selected. Please select a clinic first.');
+      setLoading(false);
+      return;
+    }
+
+    // Enhanced debug logging for clinic data
+    console.log('=== WALLET COMPONENT: CLINIC DATA DEBUG ===');
+    console.log('Current Clinic Full Data:', currentClinic);
+    console.log('Type of currentClinic:', typeof currentClinic);
+    console.log('Properties available:', Object.keys(currentClinic));
+    console.log('pass_id value:', currentClinic.pass_id);
+    console.log('pass_id type:', typeof currentClinic.pass_id);
+    console.log('clinic code:', currentClinic.code);
+    console.log('=== END CLINIC DEBUG ===');
+
     try {
       // Build SQL query to fetch wallet accounts with aggregations
-      // Hardcoding 'Fancy House' for testing like in Transaction component
       const query = `
         WITH AccountTransactions AS (
           SELECT 
@@ -106,7 +121,7 @@ const Wallet: React.FC = () => {
           FROM 
             \`piti-pass.passdb_prod.wallettransaction\`
           WHERE 
-            ClinicName = 'Fancy House'
+            ClinicCode = '${currentClinic.pass_id}'
             AND MainAccountName IS NOT NULL
             AND MainAccountName != ''
         ),
@@ -145,7 +160,11 @@ const Wallet: React.FC = () => {
         LIMIT 100
       `;
       
-      console.log('Executing wallet accounts query with hardcoded clinic:', query);
+      console.log('=== WALLET QUERY DEBUG ===');
+      console.log('Wallet query for clinic:', currentClinic.name);
+      console.log('Using ClinicCode:', currentClinic.code);
+      console.log('Full SQL Query:', query);
+      console.log('=== END WALLET QUERY DEBUG ===');
       
       try {
         const response = await axios.post('/api/query', 
@@ -160,7 +179,7 @@ const Wallet: React.FC = () => {
         );
         
         if (response.data && response.data.success && response.data.data) {
-          console.log(`Fetched ${response.data.data.length} wallet accounts for clinic: Fancy House`);
+          console.log(`Fetched ${response.data.data.length} wallet accounts for clinic: ${currentClinic.name}`);
           
           // Format the data to ensure numeric values are handled correctly
           const formattedAccounts = response.data.data.map((account: any) => ({
@@ -207,7 +226,7 @@ const Wallet: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []); // No dependencies to prevent rerenders
+  }, [currentClinic]);
   
   useEffect(() => {
     fetchWalletAccounts();
@@ -361,19 +380,36 @@ const Wallet: React.FC = () => {
         <AccountBalanceWalletIcon fontSize="large" />
         Wallet Accounts
         {currentClinic && (
-          <Typography component="span" sx={{ 
-            ml: 2, 
-            fontSize: '0.9rem', 
-            bgcolor: alpha(theme.palette.primary.main, 0.15),
-            color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
-            px: 2,
-            py: 0.5,
-            borderRadius: 2,
-            display: 'inline-flex',
-            alignItems: 'center'
-          }}>
-            Clinic: {currentClinic.name}
-          </Typography>
+          <>
+            <Typography component="span" sx={{ 
+              ml: 2, 
+              fontSize: '0.9rem', 
+              bgcolor: alpha(theme.palette.primary.main, 0.15),
+              color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
+              px: 2,
+              py: 0.5,
+              borderRadius: 2,
+              display: 'inline-flex',
+              alignItems: 'center'
+            }}>
+              Clinic: {currentClinic.name}
+            </Typography>
+            {currentClinic.pass_id && (
+              <Typography component="span" sx={{ 
+                ml: 1, 
+                fontSize: '0.9rem', 
+                bgcolor: alpha(theme.palette.secondary.main, 0.15),
+                color: isDarkMode ? theme.palette.secondary.light : theme.palette.secondary.dark,
+                px: 2,
+                py: 0.5,
+                borderRadius: 2,
+                display: 'inline-flex',
+                alignItems: 'center'
+              }}>
+                Pass ID: {currentClinic.pass_id}
+              </Typography>
+            )}
+          </>
         )}
       </Typography>
       

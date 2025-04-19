@@ -127,3 +127,67 @@ For detailed API documentation, refer to the backend source code.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+# MySQL Connector
+
+A more advanced MySQL connection tool has been added to this project that allows you to connect to any MySQL database using your own credentials, explore tables, and run custom queries.
+
+## Setup
+
+### Backend Setup
+
+1. Navigate to the MySQL service folder:
+   ```
+   cd backend/mysql
+   ```
+
+2. Install dependencies:
+   ```
+   npm install
+   ```
+
+3. Start the MySQL service:
+   ```
+   npm start
+   ```
+
+   Or use the provided script:
+   ```
+   ./start-mysql-service.sh
+   ```
+
+The MySQL service will start on port 5004.
+
+### Frontend Integration
+
+The MySQL Connector is integrated into the main application. You can access it from the sidebar menu under "Developer Tools" > "MySQL Connector".
+
+## Using the MySQL Connector
+
+1. Open the MySQL Connector page from the sidebar
+2. Enter your MySQL connection details:
+   - Host: Your MySQL server hostname/IP
+   - Port: MySQL port (default 3306)
+   - Database: Your database name
+   - User: Your MySQL username
+   - Password: Your MySQL password
+
+3. Click "Test Connection" to verify connectivity
+4. Once connected, switch to the Query tab to:
+   - Select tables from the dropdown
+   - Write and execute custom SQL queries
+   - View formatted results
+
+## Features
+
+- Connect to any MySQL database with your credentials
+- Browse available tables in the database
+- Execute custom SQL queries
+- View results in a formatted table
+- Support for various data types (including JSON)
+
+## Security Notes
+
+- This tool transmits connection credentials in request bodies
+- Use only on secure networks
+- Consider implementing additional authentication for production use

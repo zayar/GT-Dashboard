@@ -141,14 +141,67 @@ const CustomerBehaviorReport: React.FC = () => {
       ]);
       
       if (visitsResponse.data.success) {
-        setCustomerVisits(visitsResponse.data.data || []);
+        let customerVisitsData = visitsResponse.data.data || [];
+        
+        // For year 2024 and monthly period, ensure all months are represented
+        if (yearSelection === 2024 && period === 'monthly') {
+          const allMonths = generateMonthsForYear(2024);
+          const allCustomers = Array.from(new Set(customerVisitsData.map(visit => visit.customerName)));
+          
+          // For each customer, make sure they have entries for all months
+          // Even if they have no visits (will be displayed as "-")
+          allCustomers.forEach(customerName => {
+            allMonths.forEach(month => {
+              // Check if this customer-month combo exists
+              const exists = customerVisitsData.some(
+                visit => visit.customerName === customerName && visit.month === month
+              );
+              
+              // If not, add an entry with zero visits
+              if (!exists) {
+                customerVisitsData.push({
+                  customerName,
+                  month,
+                  visitCount: 0
+                });
+              }
+            });
+          });
+        }
+        
+        setCustomerVisits(customerVisitsData);
       } else {
         setError(visitsResponse.data.error || 'Failed to fetch customer visit data.');
         return;
       }
       
       if (customersResponse.data.success) {
-        setMonthlyCustomers(customersResponse.data.data || []);
+        let monthlyCustomersData = customersResponse.data.data || [];
+        
+        // For year 2024, make sure all 12 months are included even if no data
+        if (yearSelection === 2024 && period === 'monthly') {
+          const allMonths = generateMonthsForYear(2024);
+          const existingMonths = new Set(monthlyCustomersData.map(item => item.month));
+          
+          // Add missing months with zero counts
+          allMonths.forEach(month => {
+            if (!existingMonths.has(month)) {
+              monthlyCustomersData.push({
+                month,
+                uniqueCustomers: 0
+              });
+            }
+          });
+          
+          // Sort months chronologically
+          monthlyCustomersData = monthlyCustomersData.sort((a, b) => {
+            const dateA = new Date(a.month);
+            const dateB = new Date(b.month);
+            return dateA.getTime() - dateB.getTime();
+          });
+        }
+        
+        setMonthlyCustomers(monthlyCustomersData);
       } else {
         setError(customersResponse.data.error || 'Failed to fetch monthly customer data.');
         return;
@@ -341,6 +394,17 @@ const CustomerBehaviorReport: React.FC = () => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
   }, [customerVisits]);
+
+  // Add this function after the formatMonthDisplay function to generate all months for a year
+  // Function to generate all months for a given year
+  const generateMonthsForYear = (year: number): string[] => {
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(year, i, 1);
+      months.push(date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+    }
+    return months;
+  };
 
   return (
     <Box sx={{ 
@@ -557,15 +621,19 @@ const CustomerBehaviorReport: React.FC = () => {
                         MEMBER NAME
                       </TableCell>
                       
-                      {/* Dynamic month columns - get unique months from data and sort them in reverse chronological order */}
+                      {/* Dynamic month columns - get unique months from data and sort them */}
                       {Array.from(new Set(customerVisits.map(visit => visit.month)))
                         .sort((a, b) => {
-                          // Sort months in reverse chronological order (newest first)
+                          // For year 2024, sort chronologically (January to December)
+                          // Otherwise sort in reverse chronological order (newest first)
                           const dateA = new Date(a);
                           const dateB = new Date(b);
-                          return dateB.getTime() - dateA.getTime();
+                          return yearSelection === 2024 
+                            ? dateA.getTime() - dateB.getTime() 
+                            : dateB.getTime() - dateA.getTime();
                         })
-                        .slice(0, 3) // Show only 3 most recent months as in the screenshot
+                        // Show all 12 months for year 2024, otherwise show 3 most recent months
+                        .slice(0, yearSelection === 2024 ? 12 : 3)
                         .map(month => (
                         <TableCell 
                           key={month} 
@@ -591,12 +659,16 @@ const CustomerBehaviorReport: React.FC = () => {
                       .map(customerName => {
                         const uniqueMonths = Array.from(new Set(customerVisits.map(visit => visit.month)))
                           .sort((a, b) => {
-                            // Sort months in reverse chronological order (newest first)
+                            // For year 2024, sort chronologically (January to December)
+                            // Otherwise sort in reverse chronological order (newest first)
                             const dateA = new Date(a);
                             const dateB = new Date(b);
-                            return dateB.getTime() - dateA.getTime();
+                            return yearSelection === 2024 
+                              ? dateA.getTime() - dateB.getTime() 
+                              : dateB.getTime() - dateA.getTime();
                           })
-                          .slice(0, 3); // Show only 3 most recent months
+                          // Show all 12 months for year 2024, otherwise show 3 most recent months
+                          .slice(0, yearSelection === 2024 ? 12 : 3);
                         
                         // Check if customer has any visits to determine if they're active
                         const customerHasVisits = customerVisits.some(

@@ -192,7 +192,7 @@ const Transaction: React.FC = () => {
           cash,
           detailBalance,
           accountbalance,
-          mainAccount,
+          mainAccountName,
           sender_id,
           senderName,
           senderPhone,
