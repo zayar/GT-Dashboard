@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Typography, Avatar, Menu, MenuItem, IconButton, CircularProgress } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import { Avatar, Box, CircularProgress, IconButton, Menu, MenuItem, Typography } from '@mui/material';
+import React, { useState } from 'react';
 import { useClinic } from '../contexts/ClinicContext'; // Import useClinic
 
 // Interface for clinic data (can be shared or kept here)

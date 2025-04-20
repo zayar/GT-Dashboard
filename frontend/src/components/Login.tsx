@@ -1,7 +1,7 @@
+import { Alert, Box, Button, CircularProgress, TextField, Typography } from '@mui/material';
 import React, { useState } from 'react';
-import { Box, TextField, Button, Typography, CircularProgress, Alert } from '@mui/material';
-import { auth } from '../config/firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { useAuth } from '../contexts/AuthContext';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface LoginProps {
   onLogin: (status: boolean) => void;
@@ -12,41 +12,30 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
+  const { reload } = useClinic();
 
   const handleLogin = async () => {
     setError('');
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await login(email, password);
       // onAuthStateChanged in AuthProvider will handle setting currentUser
+      reload();
       onLogin(true); // Update App's state
+
     } catch (err: any) {
       setError(err.message || 'Failed to log in.');
       console.error("Firebase Login Error:", err);
-      // Map Firebase error codes to user-friendly messages (optional but recommended)
-      switch (err.code) {
-        case 'auth/invalid-email':
-          setError('Invalid email address format.');
-          break;
-        case 'auth/user-disabled':
-          setError('This user account has been disabled.');
-          break;
-        case 'auth/user-not-found':
-        case 'auth/wrong-password':
-          setError('Invalid email or password.');
-          break;
-        default:
-          setError('Login failed. Please try again.');
-      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Box 
-      sx={{ 
-        display: 'flex', 
+    <Box
+      sx={{
+        display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',

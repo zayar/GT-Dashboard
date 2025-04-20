@@ -152,7 +152,10 @@ const AppointmentsListPage: React.FC = () => {
     query += ` ORDER BY FromTime DESC;`;
 
     try {
-      const response = await axios.post(`${MYSQL_SERVICE_URL}/query`, {
+      const searchQuery = new URLSearchParams({
+        scope:"view.query"
+      })
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/sqlquery?${searchQuery}`, {
         ...connectionConfig,
         query: query
       });

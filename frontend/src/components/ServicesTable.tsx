@@ -70,7 +70,7 @@ const ServicesTable: React.FC = () => {
         LIMIT 100
       `;
 
-      const response = await axios.post('http://localhost:3000/api/query', 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
         { query },
         {
           headers: {

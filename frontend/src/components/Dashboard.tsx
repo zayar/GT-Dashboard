@@ -172,7 +172,7 @@ const Dashboard: React.FC = () => {
         `;
 
         // API endpoint to execute the query
-        const response = await fetch('/api/query', {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -296,7 +296,7 @@ const Dashboard: React.FC = () => {
           ORDER BY ts.TotalRevenue DESC, cd.Day
         `;
         
-        const fullResponse = await fetch('/api/query', {
+        const fullResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -470,7 +470,7 @@ const Dashboard: React.FC = () => {
           FROM CurrentPeriodStats cp, PreviousPeriodStats pp
         `;
         
-        const statsResponse = await fetch('/api/query', {
+        const statsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -600,7 +600,7 @@ const Dashboard: React.FC = () => {
         `;
 
         // Execute the query
-        const servicesResponse = await fetch('/api/query', {
+        const servicesResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -686,7 +686,7 @@ const Dashboard: React.FC = () => {
         `;
 
         // Execute the query
-        const methodsResponse = await fetch('/api/query', {
+        const methodsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -767,7 +767,7 @@ const Dashboard: React.FC = () => {
         `;
 
         // Execute the query
-        const therapistsResponse = await fetch('/api/query', {
+        const therapistsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

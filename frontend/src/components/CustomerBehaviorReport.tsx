@@ -124,14 +124,14 @@ const CustomerBehaviorReport: React.FC = () => {
       
       // Execute queries in parallel
       const [visitsResponse, customersResponse] = await Promise.all([
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: customerVisitsSQL },
           {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000
           }
         ),
-        axios.post('/api/query', 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: monthlyCustomersSQL },
           {
             headers: { 'Content-Type': 'application/json' },
@@ -146,7 +146,7 @@ const CustomerBehaviorReport: React.FC = () => {
         // For year 2024 and monthly period, ensure all months are represented
         if (yearSelection === 2024 && period === 'monthly') {
           const allMonths = generateMonthsForYear(2024);
-          const allCustomers = Array.from(new Set(customerVisitsData.map(visit => visit.customerName)));
+          const allCustomers = Array.from(new Set(customerVisitsData.map((visit:any) => visit.customerName)));
           
           // For each customer, make sure they have entries for all months
           // Even if they have no visits (will be displayed as "-")
@@ -154,7 +154,7 @@ const CustomerBehaviorReport: React.FC = () => {
             allMonths.forEach(month => {
               // Check if this customer-month combo exists
               const exists = customerVisitsData.some(
-                visit => visit.customerName === customerName && visit.month === month
+                (visit:any) => visit.customerName === customerName && visit.month === month
               );
               
               // If not, add an entry with zero visits
@@ -181,7 +181,7 @@ const CustomerBehaviorReport: React.FC = () => {
         // For year 2024, make sure all 12 months are included even if no data
         if (yearSelection === 2024 && period === 'monthly') {
           const allMonths = generateMonthsForYear(2024);
-          const existingMonths = new Set(monthlyCustomersData.map(item => item.month));
+          const existingMonths = new Set(monthlyCustomersData.map((item:any) => item.month));
           
           // Add missing months with zero counts
           allMonths.forEach(month => {
@@ -194,7 +194,7 @@ const CustomerBehaviorReport: React.FC = () => {
           });
           
           // Sort months chronologically
-          monthlyCustomersData = monthlyCustomersData.sort((a, b) => {
+          monthlyCustomersData = monthlyCustomersData.sort((a:any, b:any) => {
             const dateA = new Date(a.month);
             const dateB = new Date(b.month);
             return dateA.getTime() - dateB.getTime();

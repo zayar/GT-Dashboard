@@ -114,12 +114,12 @@ const TherapistDetails: React.FC<TherapistDetailsProps> = (): JSX.Element => {
       }
     });
     
-    const visitData: { [key: string]: { [key: string]: number, phone?: string } } = {};
+    const visitData: { [key: string]: { [key: string]: number} } = {};
     customers.forEach(customer => {
       visitData[customer] = {
         ...months.reduce((obj, month) => ({ ...obj, [month]: 0 }), {}),
         phone: phoneNumberMap[customer] // Store the phone number for each customer
-      };
+      } as any;
     });
 
     data.forEach(visit => {
@@ -171,7 +171,7 @@ SELECT
   CAST(total_service_hours / 24 AS INT64) as total_service_days
 FROM TherapistStats;`;
 
-        const profileResponse = await axios.post('http://localhost:3000/api/query', 
+        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: profileQuery },
           {
             headers: {
@@ -229,7 +229,7 @@ SELECT
   ARRAY(SELECT AS STRUCT * FROM CustomersByMonth) as customersByMonth,
   ARRAY(SELECT AS STRUCT * FROM ServiceRecords) as serviceRecords;`;
 
-        const dataResponse = await axios.post('http://localhost:3000/api/query', 
+        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: dataQuery },
           {
             headers: {

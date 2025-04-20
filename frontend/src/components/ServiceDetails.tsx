@@ -236,7 +236,7 @@ AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
 AND ClinicCode = '${currentClinic.code}'
 GROUP BY ServiceName, ServiceStats.ServiceImage, total_bookings, total_customers, total_revenue;`;
 
-        const profileResponse = await axios.post('http://localhost:3000/api/query', 
+        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: profileQuery },
           {
             headers: {
@@ -332,7 +332,7 @@ SELECT
   ARRAY(SELECT AS STRUCT * FROM Customers) as customers,
   ARRAY(SELECT AS STRUCT * FROM ServiceRecords) as serviceRecords;`;
 
-        const dataResponse = await axios.post('http://localhost:3000/api/query', 
+        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
           { query: dataQuery },
           {
             headers: {
@@ -1014,7 +1014,7 @@ SELECT
                 <TableBody>
                   {filteredServiceRecords
                     .slice(recordsPage * recordsPerPage, (recordsPage + 1) * recordsPerPage)
-                    .map((record: ServiceRecord, index: number) => (
+                    .map((record: any, index: number) => (
                       <TableRow key={index} sx={{ '&:hover': { bgcolor: '#242f3d' } }}>
                         <TableCell sx={{ color: '#e2e8f0', borderBottom: '1px solid #2d3748' }}>
                           {record.checkin_time}

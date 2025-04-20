@@ -68,7 +68,7 @@ const CheckInCheckOutPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { currentClinic } = useClinic();
-  
+
   // Filter states
   const [dateRange, setDateRange] = useState<'day' | 'week' | 'month'>('day');
   const [endDate, setEndDate] = useState<Date | null>(new Date());
@@ -98,19 +98,19 @@ const CheckInCheckOutPage: React.FC = () => {
         return null;
     }
   };
-  
+
   const getEndDateRange = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
-     if (!end) return null;
-      switch (range) {
-        case 'day':
-           return endOfDay(end);
-        case 'week':
-           return endOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
-        case 'month':
-           return endOfMonth(end);
-         default:
-           return null;
-       }
+    if (!end) return null;
+    switch (range) {
+      case 'day':
+        return endOfDay(end);
+      case 'week':
+        return endOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
+      case 'month':
+        return endOfMonth(end);
+      default:
+        return null;
+    }
   };
 
   const fetchData = useCallback(async () => {
@@ -126,9 +126,9 @@ const CheckInCheckOutPage: React.FC = () => {
     const calculatedEndDate = getEndDateRange(dateRange, endDate); // Use the end of the selected period for range queries
 
     if (!calculatedStartDate || !calculatedEndDate) {
-        setError("Invalid date range selected.");
-        setLoading(false);
-        return;
+      setError("Invalid date range selected.");
+      setLoading(false);
+      return;
     }
 
     // Query inoutview table - *KEEPING direct axios for the separate MySQL service*
@@ -146,12 +146,14 @@ const CheckInCheckOutPage: React.FC = () => {
     if (paymentStatusFilter !== 'all') {
       query += ` AND PaymentStatus = '${paymentStatusFilter.toUpperCase()}'`;
     }
-    
+
     query += ` ORDER BY CheckInTime DESC;`; // Example ordering
 
     try {
-      // Use axios directly with the MYSQL_SERVICE_URL
-      const response = await axios.post(`${MYSQL_SERVICE_URL}/query`, {
+      const searchQuery = new URLSearchParams({
+        scope: "view.query"
+      })
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/sqlquery?${searchQuery}`, {
         ...connectionConfig,
         query: query
       });
@@ -183,7 +185,7 @@ const CheckInCheckOutPage: React.FC = () => {
       return records;
     }
     const lowerSearchTerm = searchTerm.toLowerCase();
-    return records.filter(record => 
+    return records.filter(record =>
       record.CustomerName?.toLowerCase().includes(lowerSearchTerm) ||
       record.Servicename?.toLowerCase().includes(lowerSearchTerm) ||
       record.TherapicName?.toLowerCase().includes(lowerSearchTerm) ||
@@ -195,20 +197,20 @@ const CheckInCheckOutPage: React.FC = () => {
   const formatDisplayDateTime = (dateTimeString: string | null) => {
     if (!dateTimeString) return '-';
     try {
-        // Handle potential Z at the end if it's UTC
-        const date = parseISO(dateTimeString.endsWith('Z') ? dateTimeString : dateTimeString.replace(' ', 'T') + 'Z');
-       return format(date, 'yyyy-MM-dd hh:mm a');
+      // Handle potential Z at the end if it's UTC
+      const date = parseISO(dateTimeString.endsWith('Z') ? dateTimeString : dateTimeString.replace(' ', 'T') + 'Z');
+      return format(date, 'yyyy-MM-dd hh:mm a');
     } catch (e) {
-       console.error("Error parsing date:", dateTimeString, e);
-       return 'Invalid Date';
+      console.error("Error parsing date:", dateTimeString, e);
+      return 'Invalid Date';
     }
   };
-  
+
   // Function to format currency
-   const formatCurrency = (amount: number | null) => {
-      if (amount === null || isNaN(amount)) return 'MMK 0';
-      return `MMK ${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-    };
+  const formatCurrency = (amount: number | null) => {
+    if (amount === null || isNaN(amount)) return 'MMK 0';
+    return `MMK ${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
 
   // Function to handle CSV export
   const handleExportCSV = () => {
@@ -229,28 +231,28 @@ const CheckInCheckOutPage: React.FC = () => {
       formatCurrency(record.Total)
     ]);
 
-    let csvContent = "data:text/csv;charset=utf-8," 
-      + headers.join(",") + "\n" 
+    let csvContent = "data:text/csv;charset=utf-8,"
+      + headers.join(",") + "\n"
       + rows.map(e => e.join(",")).join("\n");
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", `check_in_out_records_${format(new Date(), 'yyyyMMdd')}.csv`);
-    document.body.appendChild(link); 
+    document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
-  
-   const getStatusChipColor = (status: string | null): "success" | "warning" | "error" | "default" | "info" => {
-      switch (status?.toUpperCase()) {
-        case 'PAID': return "success";
-        case 'PENDING': return "warning";
-        case 'CANCELLED':
-        case 'REFUNDED': return "error";
-        default: return "default";
-      }
-    };
+
+  const getStatusChipColor = (status: string | null): "success" | "warning" | "error" | "default" | "info" => {
+    switch (status?.toUpperCase()) {
+      case 'PAID': return "success";
+      case 'PENDING': return "warning";
+      case 'CANCELLED':
+      case 'REFUNDED': return "error";
+      default: return "default";
+    }
+  };
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -275,15 +277,15 @@ const CheckInCheckOutPage: React.FC = () => {
             Check-In/Out Records
           </Typography>
           <Box>
-             <Button
-                 variant="outlined"
-                 startIcon={<RefreshIcon />}
-                 onClick={fetchData}
-                 disabled={loading}
-                 sx={{ mr: 1 }}
-             >
-                 Refresh
-             </Button>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={fetchData}
+              disabled={loading}
+              sx={{ mr: 1 }}
+            >
+              Refresh
+            </Button>
             <Button
               variant="contained"
               startIcon={<FileDownloadIcon />}
@@ -292,71 +294,71 @@ const CheckInCheckOutPage: React.FC = () => {
             >
               Export CSV
             </Button>
-           </Box>
+          </Box>
         </Box>
 
         {/* Filters */}
         <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: isDarkMode ? alpha(theme.palette.background.default, 0.6) : alpha(theme.palette.primary.main, 0.05), borderRadius: 1.5 }}>
           <Grid container spacing={2} alignItems="center">
-             <Grid item xs={12} sm={6} md={3}>
-                 <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Date Range</Typography>
-                  <ButtonGroup variant="outlined" size="small" fullWidth>
-                    <Button onClick={() => setDateRange('day')} variant={dateRange === 'day' ? 'contained' : 'outlined'}>Day</Button>
-                    <Button onClick={() => setDateRange('week')} variant={dateRange === 'week' ? 'contained' : 'outlined'}>Week</Button>
-                    <Button onClick={() => setDateRange('month')} variant={dateRange === 'month' ? 'contained' : 'outlined'}>Month</Button>
-                  </ButtonGroup>
-             </Grid>
-             <Grid item xs={12} sm={6} md={3}>
-                 <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>End Date</Typography>
-                 <DatePicker
-                     value={endDate}
-                     onChange={(newValue) => setEndDate(newValue)}
-                     slotProps={{ textField: { size: 'small', fullWidth: true } }}
-                 />
-             </Grid>
-             <Grid item xs={12} sm={6} md={3}>
-                 <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Payment Status</Typography>
-                 <Select
-                     value={paymentStatusFilter}
-                     onChange={(e: SelectChangeEvent<string>) => setPaymentStatusFilter(e.target.value)}
-                     size="small"
-                     fullWidth
-                 >
-                     <MenuItem value="all">All Statuses</MenuItem>
-                     <MenuItem value="paid">Paid</MenuItem>
-                     <MenuItem value="pending">Pending</MenuItem>
-                      <MenuItem value="cancelled">Cancelled</MenuItem>
-                      <MenuItem value="refunded">Refunded</MenuItem>
-                     {/* Add other statuses if needed */}
-                 </Select>
-             </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                 <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Search Records</Typography>
-                 <TextField
-                     placeholder="Customer, service, therapist..."
-                     value={searchTerm}
-                     onChange={(e) => setSearchTerm(e.target.value)}
-                     size="small"
-                     fullWidth
-                     InputProps={{
-                         startAdornment: (
-                             <InputAdornment position="start">
-                                 <SearchIcon color="action" />
-                             </InputAdornment>
-                         ),
-                     }}
-                 />
-             </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Date Range</Typography>
+              <ButtonGroup variant="outlined" size="small" fullWidth>
+                <Button onClick={() => setDateRange('day')} variant={dateRange === 'day' ? 'contained' : 'outlined'}>Day</Button>
+                <Button onClick={() => setDateRange('week')} variant={dateRange === 'week' ? 'contained' : 'outlined'}>Week</Button>
+                <Button onClick={() => setDateRange('month')} variant={dateRange === 'month' ? 'contained' : 'outlined'}>Month</Button>
+              </ButtonGroup>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>End Date</Typography>
+              <DatePicker
+                value={endDate}
+                onChange={(newValue) => setEndDate(newValue)}
+                slotProps={{ textField: { size: 'small', fullWidth: true } }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Payment Status</Typography>
+              <Select
+                value={paymentStatusFilter}
+                onChange={(e: SelectChangeEvent<string>) => setPaymentStatusFilter(e.target.value)}
+                size="small"
+                fullWidth
+              >
+                <MenuItem value="all">All Statuses</MenuItem>
+                <MenuItem value="paid">Paid</MenuItem>
+                <MenuItem value="pending">Pending</MenuItem>
+                <MenuItem value="cancelled">Cancelled</MenuItem>
+                <MenuItem value="refunded">Refunded</MenuItem>
+                {/* Add other statuses if needed */}
+              </Select>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Search Records</Typography>
+              <TextField
+                placeholder="Customer, service, therapist..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                size="small"
+                fullWidth
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
           </Grid>
         </Paper>
 
         {/* Record Count and Loading/Error State */}
-         <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-           <Typography variant="body2" color="text.secondary">
-             {loading ? 'Loading records...' : `${filteredRecords.length} records found`}
-           </Typography>
-           {error && <Alert severity="error" sx={{ py: 0, px: 1 }}>{error}</Alert>}
-         </Box>
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="body2" color="text.secondary">
+            {loading ? 'Loading records...' : `${filteredRecords.length} records found`}
+          </Typography>
+          {error && <Alert severity="error" sx={{ py: 0, px: 1 }}>{error}</Alert>}
+        </Box>
 
         {/* Data Table */}
         <TableContainer component={Paper} elevation={1} sx={{ maxHeight: '65vh' }}>
@@ -384,16 +386,16 @@ const CheckInCheckOutPage: React.FC = () => {
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length === 0 && !error ? (
-                 <TableRow>
-                   <TableCell colSpan={11} align="center">
-                     <Typography color="text.secondary" sx={{ my: 4 }}>No records match the current filters.</Typography>
-                   </TableCell>
-                 </TableRow>
+                <TableRow>
+                  <TableCell colSpan={11} align="center">
+                    <Typography color="text.secondary" sx={{ my: 4 }}>No records match the current filters.</Typography>
+                  </TableCell>
+                </TableRow>
               ) : (
                 filteredRecords.map((record, index) => (
-                  <TableRow 
-                    key={record.OrderId ? `${record.OrderId}-${index}` : `record-${index}`} 
-                    hover 
+                  <TableRow
+                    key={record.OrderId ? `${record.OrderId}-${index}` : `record-${index}`}
+                    hover
                     sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                   >
                     <TableCell>{record.OrderId ?? '-'}</TableCell>
@@ -406,12 +408,12 @@ const CheckInCheckOutPage: React.FC = () => {
                     <TableCell>{record.CustomerPhoneNumber}</TableCell>
                     <TableCell>{record.PaymentMethod ?? '-'}</TableCell>
                     <TableCell>
-                      <Chip 
-                        label={record.PaymentStatus ?? '-'} 
-                        size="small" 
+                      <Chip
+                        label={record.PaymentStatus ?? '-'}
+                        size="small"
                         color={getStatusChipColor(record.PaymentStatus)}
                         variant="filled"
-                       />
+                      />
                     </TableCell>
                     <TableCell align="right">{formatCurrency(record.Total)}</TableCell>
                   </TableRow>

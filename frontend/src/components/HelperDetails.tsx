@@ -236,7 +236,7 @@ const HelperDetails: React.FC = () => {
       console.log('Executing query:', query);
 
       // Execute the main query for bookings
-      const response = await axios.post('/api/query', 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
         { query },
         {
           headers: {
@@ -258,7 +258,7 @@ const HelperDetails: React.FC = () => {
       }
 
       // Execute the service by month query
-      const serviceResponse = await axios.post('/api/query', 
+      const serviceResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
         { query: serviceQuery },
         {
           headers: {

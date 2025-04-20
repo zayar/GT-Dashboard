@@ -205,7 +205,7 @@ const Transaction: React.FC = () => {
         FROM 
           \`piti-pass.passdb_prod.wallettransaction\`
         WHERE 
-          ClinicName = 'Fancy House'
+          ClinicCode = '${currentClinic?.pass_id}'
           ${dateCondition}
         ORDER BY 
           createddate_myanmar DESC
@@ -213,9 +213,12 @@ const Transaction: React.FC = () => {
       `;
       
       console.log('Executing wallet transaction query with hardcoded clinic:', query);
-      
+      const searchQuery = new URLSearchParams({
+        projectId: "piti-pass",
+        location: "us-central1",
+      })
       try {
-        const response = await axios.post('/api/query', 
+        const response = await axios.post(`${import.meta.env.VITE_API_URL}/query2?${searchQuery}`, 
           { query },
           {
             headers: {
@@ -438,10 +441,10 @@ const Transaction: React.FC = () => {
       });
     }
     
-    // Always filter by 'Fancy House' clinic name (hardcoded for testing)
-    filtered = filtered.filter(transaction => 
-      transaction.ClinicName === 'Fancy House'
-    );
+    // // Always filter by 'Fancy House' clinic name (hardcoded for testing)
+    // filtered = filtered.filter(transaction => 
+    //   transaction.ClinicName === 'Fancy House'
+    // );
     
     // Apply sorting if a sort key is specified
     if (sortConfig.key) {

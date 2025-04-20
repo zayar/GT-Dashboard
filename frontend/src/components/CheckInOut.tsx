@@ -137,7 +137,7 @@ const CheckInOut: React.FC = () => {
       `;
     
       console.log('Executing query:', query);
-      const response = await axios.post('/api/query', { query });
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query });
       
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch check-in/out data');
@@ -308,7 +308,7 @@ const CheckInOut: React.FC = () => {
           LIMIT 1000
         `;
         
-        const response = await axios.post('/api/query', { query }, {
+        const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query }, {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
