@@ -155,7 +155,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { id: 'helper-list', label: 'Helpers', icon: 'fas fa-hands-helping', path: '/helpers' },
       ]
     },
-    { id: 'commission', label: 'Commission', icon: 'fas fa-percentage', path: '/commission' },
+    // { id: 'commission', label: 'Commission', icon: 'fas fa-percentage', path: '/commission' },
     {
       type: 'group',
       group: 'Wallet',
