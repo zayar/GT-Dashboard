@@ -32,6 +32,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleLogin();
+    }
+  };
+
   return (
     <Box
       sx={{
@@ -40,60 +46,123 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        bgcolor: '#101729'
+        bgcolor: '#0f1628',
+        backgroundImage: 'radial-gradient(circle at center, #1a2235 0%, #0f1628 100%)',
       }}
     >
       <Box
         sx={{
-          p: 4,
-          bgcolor: '#1a2235',
-          borderRadius: 2,
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+          p: 5,
+          bgcolor: 'rgba(30, 41, 59, 0.8)',
+          borderRadius: 4,
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
           width: '100%',
-          maxWidth: '400px',
-          textAlign: 'center'
+          maxWidth: '450px',
+          textAlign: 'center',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
         }}
       >
-        <Typography variant="h4" component="h1" sx={{ mb: 3, color: '#f3f4f6' }}>
-          Admin Login
-        </Typography>
+        <Box sx={{ mb: 4, display: 'flex', justifyContent: 'center' }}>
+          <img src="/gtlogo.svg" alt="GT Logo" width="120" />
+        </Box>
+        
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
             {error}
           </Alert>
         )}
+        
         <TextField
-          label="Email"
+          placeholder="Name"
           variant="outlined"
           fullWidth
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          sx={{ mb: 2, input: { color: '#f3f4f6' }, label: { color: '#9ca3af' } }}
+          onKeyPress={handleKeyPress}
+          sx={{
+            mb: 3,
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 2,
+              bgcolor: 'rgba(15, 23, 42, 0.3)',
+              color: '#f3f4f6',
+              '& fieldset': {
+                borderColor: 'rgba(148, 163, 184, 0.2)',
+              },
+              '&:hover fieldset': {
+                borderColor: 'rgba(148, 163, 184, 0.4)',
+              },
+              '&.Mui-focused fieldset': {
+                borderColor: '#94a3b8',
+              },
+            },
+            '& .MuiInputBase-input': {
+              padding: '16px',
+            },
+          }}
           InputLabelProps={{
-            style: { color: '#9ca3af' },
+            shrink: false,
+          }}
+          InputProps={{
+            style: { color: '#f3f4f6' },
           }}
         />
+        
         <TextField
-          label="Password"
+          placeholder="Password"
           type="password"
           variant="outlined"
           fullWidth
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          sx={{ mb: 3, input: { color: '#f3f4f6' }, label: { color: '#9ca3af' } }}
+          onKeyPress={handleKeyPress}
+          sx={{
+            mb: 4,
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 2,
+              bgcolor: 'rgba(15, 23, 42, 0.3)',
+              color: '#f3f4f6',
+              '& fieldset': {
+                borderColor: 'rgba(148, 163, 184, 0.2)',
+              },
+              '&:hover fieldset': {
+                borderColor: 'rgba(148, 163, 184, 0.4)',
+              },
+              '&.Mui-focused fieldset': {
+                borderColor: '#94a3b8',
+              },
+            },
+            '& .MuiInputBase-input': {
+              padding: '16px',
+            },
+          }}
           InputLabelProps={{
-            style: { color: '#9ca3af' },
+            shrink: false,
+          }}
+          InputProps={{
+            style: { color: '#f3f4f6' },
           }}
         />
+        
         <Button
           variant="contained"
-          color="primary"
           fullWidth
           onClick={handleLogin}
           disabled={loading}
-          sx={{ py: 1.5, fontSize: '1rem' }}
+          sx={{
+            py: 1.8,
+            fontSize: '1rem',
+            fontWeight: 'bold',
+            bgcolor: '#0f1628',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+            borderRadius: 2,
+            letterSpacing: '1px',
+            '&:hover': {
+              bgcolor: '#1a2235',
+            },
+          }}
         >
-          {loading ? <CircularProgress size={24} color="inherit" /> : 'Login'}
+          {loading ? <CircularProgress size={24} color="inherit" /> : 'LOGIN'}
         </Button>
       </Box>
     </Box>
