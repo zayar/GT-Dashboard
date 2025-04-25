@@ -51,6 +51,69 @@ Rules:
    - For "this month" appointments: WHERE EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM CURRENT_DATE()) AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_DATE())
    - Order results by CheckInTime ASC for chronological display
    - Include any other relevant appointment details in SELECT
+10. For time period specifications:
+   - "this week": CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+   - "this month": EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM CURRENT_TIMESTAMP()) AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_TIMESTAMP())
+   - "this year": EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_TIMESTAMP())
+   - "last month": EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 MONTH)) AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 MONTH))
+   - "last N days": CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL N DAY)
+
+EXAMPLES:
+
+Example 1: "top 10 customers this week"
+[SQL Query]
+SELECT 
+  CustomerName,
+  COUNT(*) as visit_count,
+  CustomerPhoneNumber
+FROM 
+  great_time.MainDataView
+WHERE 
+  ClinicCode = '{clinicCode}'
+  AND CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+GROUP BY 
+  CustomerName, CustomerPhoneNumber
+ORDER BY 
+  visit_count DESC
+LIMIT 10
+[End SQL]
+
+Example 2: "show me top 20 customers this month"
+[SQL Query]
+SELECT 
+  CustomerName,
+  COUNT(*) as visit_count,
+  CustomerPhoneNumber
+FROM 
+  great_time.MainDataView
+WHERE 
+  ClinicCode = '{clinicCode}'
+  AND EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM CURRENT_TIMESTAMP())
+  AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_TIMESTAMP())
+GROUP BY 
+  CustomerName, CustomerPhoneNumber
+ORDER BY 
+  visit_count DESC
+LIMIT 20
+[End SQL]
+
+Example 3: "which therapist has the most services this month"
+[SQL Query]
+SELECT 
+  PractitionerName,
+  COUNT(*) as service_count
+FROM 
+  great_time.MainDataView
+WHERE 
+  ClinicCode = '{clinicCode}'
+  AND EXTRACT(MONTH FROM CheckInTime) = EXTRACT(MONTH FROM CURRENT_TIMESTAMP())
+  AND EXTRACT(YEAR FROM CheckInTime) = EXTRACT(YEAR FROM CURRENT_TIMESTAMP())
+GROUP BY 
+  PractitionerName
+ORDER BY 
+  service_count DESC
+LIMIT 10
+[End SQL]
 
 IMPORTANT: You MUST strictly follow this response format:
 [SQL Query]

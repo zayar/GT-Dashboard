@@ -1,4 +1,4 @@
-# Queen AI Chat
+# Great Time Report
 
 A modern web application for managing customer data, services, and therapist information with AI-powered insights.
 
@@ -37,8 +37,8 @@ A modern web application for managing customer data, services, and therapist inf
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/queenaichat.git
-   cd queenaichat
+   git clone https://github.com/yourusername/greattimereport.git
+   cd greattimereport
    ```
 
 2. Install dependencies:

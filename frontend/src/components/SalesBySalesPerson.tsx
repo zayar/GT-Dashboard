@@ -22,6 +22,7 @@ import axios from 'axios';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { useNavigate } from 'react-router-dom';
+import { useClinic } from '../contexts/ClinicContext';
 
 interface SalesPersonData {
   salesPerson: string;
@@ -44,6 +45,7 @@ interface Transaction {
 
 const SalesBySalesPerson: React.FC = () => {
   const navigate = useNavigate();
+  const { currentClinic } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [timePeriod, setTimePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('weekly');
@@ -59,6 +61,11 @@ const SalesBySalesPerson: React.FC = () => {
 
   // Function to fetch sales data
   const fetchSalesData = useCallback(async () => {
+    if (!currentClinic) {
+      setError('Please select a clinic first.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError('');
@@ -112,12 +119,13 @@ const SalesBySalesPerson: React.FC = () => {
         CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
         SellerName
       FROM 
-        great_time.QueenPaymentView
+        great_time.MainPaymentView
       WHERE 
         DATE(OrderCreatedDate) BETWEEN '${formattedStartDate}' AND '${formattedEndDate}'
         AND PaymentStatus = 'PAID'
         AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
         AND PaymentMethod != 'PASS'
+        AND ClinicCode = '${currentClinic.code}'
       ORDER BY 
         Date DESC, InvoiceNumber;
       `;
@@ -159,7 +167,7 @@ const SalesBySalesPerson: React.FC = () => {
       setError(`Failed to load sales data: ${error.message || 'Unknown error'}`);
       setLoading(false);
     }
-  }, [timePeriod, startDate, endDate]);
+  }, [timePeriod, startDate, endDate, currentClinic]);
 
   // Function to process sales data by sales person
   const processDataForSalesPerson = (data: Transaction[]) => {
@@ -207,8 +215,10 @@ const SalesBySalesPerson: React.FC = () => {
 
   // Initial data fetch
   useEffect(() => {
-    fetchSalesData();
-  }, [fetchSalesData]);
+    if (currentClinic) {
+      fetchSalesData();
+    }
+  }, [fetchSalesData, currentClinic]);
 
   // Calculate totals
   const totalTransactions = salesBySalesPerson.reduce((sum, person) => sum + person.transactionCount, 0);
@@ -232,14 +242,16 @@ const SalesBySalesPerson: React.FC = () => {
           <Typography variant="body1" sx={{ color: '#94a3b8' }}>
             {error}
           </Typography>
-          <Box sx={{ mt: 3 }}>
-            <button
-              onClick={() => fetchSalesData()}
-              className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-md"
-            >
-              Retry
-            </button>
-          </Box>
+          {error !== 'Please select a clinic first.' && (
+            <Box sx={{ mt: 3 }}>
+              <button
+                onClick={() => fetchSalesData()}
+                className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-md"
+              >
+                Retry
+              </button>
+            </Box>
+          )}
         </Paper>
       </Box>
     );
