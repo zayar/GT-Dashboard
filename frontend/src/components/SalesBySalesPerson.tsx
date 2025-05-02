@@ -16,13 +16,16 @@ import {
   Pagination,
   FormControl,
   InputLabel,
-  OutlinedInput
+  OutlinedInput,
+  Button
 } from '@mui/material';
 import axios from 'axios';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { useNavigate } from 'react-router-dom';
 import { useClinic } from '../contexts/ClinicContext';
+import * as XLSX from 'xlsx';
+import { format } from 'date-fns';
 
 interface SalesPersonData {
   salesPerson: string;
@@ -125,7 +128,7 @@ const SalesBySalesPerson: React.FC = () => {
         AND PaymentStatus = 'PAID'
         AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
         AND PaymentMethod != 'PASS'
-        AND ClinicCode = '${currentClinic.code}'
+        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
       ORDER BY 
         Date DESC, InvoiceNumber;
       `;
@@ -223,6 +226,95 @@ const SalesBySalesPerson: React.FC = () => {
   // Calculate totals
   const totalTransactions = salesBySalesPerson.reduce((sum, person) => sum + person.transactionCount, 0);
   const totalAmount = salesBySalesPerson.reduce((sum, person) => sum + person.totalAmount, 0);
+
+  // Function to export Sales Summary to Excel
+  const exportSalesToExcel = () => {
+    if (salesBySalesPerson.length === 0) return;
+
+    const workbook = XLSX.utils.book_new();
+    
+    // Create data rows including the total row
+    const rows = [
+      ...salesBySalesPerson.map(person => ({
+        'Sales Person': person.salesPerson,
+        'Transaction Count': person.transactionCount,
+        'Total Amount': `${person.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK`
+      })),
+      { 
+        'Sales Person': 'Total',
+        'Transaction Count': totalTransactions,
+        'Total Amount': `${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK`
+      }
+    ];
+
+    // Create worksheet from data
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    
+    // Set column widths
+    const colWidths = [
+      { wch: 25 }, // Sales Person
+      { wch: 20 }, // Transaction Count
+      { wch: 20 }, // Total Amount
+    ];
+    worksheet['!cols'] = colWidths;
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales Summary');
+    
+    // Generate filename with current date
+    const dateStr = format(new Date(), 'yyyy-MM-dd');
+    const fileName = `sales_summary_${dateStr}.xlsx`;
+
+    // Export file
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  // Function to export Transactions to Excel
+  const exportTransactionsToExcel = () => {
+    if (filteredTransactions.length === 0) return;
+
+    const workbook = XLSX.utils.book_new();
+    
+    // Format data for Excel
+    const rows = filteredTransactions.map(transaction => ({
+      'Date': transaction.Date,
+      'Sales Person': transaction.SellerName || '-',
+      'Invoice': transaction.InvoiceNumber,
+      'Customer Name': transaction.CustomerName,
+      'Service': transaction.ServiceName,
+      'Package': transaction.ServicePackageName || '-',
+      'Payment Method': transaction.PaymentMethod,
+      'Status': transaction.PaymentStatus,
+      'Amount': `${Number(transaction.InvoiceNetTotal).toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK`
+    }));
+
+    // Create worksheet from data
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    
+    // Set column widths
+    const colWidths = [
+      { wch: 12 }, // Date
+      { wch: 20 }, // Sales Person
+      { wch: 15 }, // Invoice
+      { wch: 25 }, // Customer Name
+      { wch: 25 }, // Service
+      { wch: 20 }, // Package
+      { wch: 15 }, // Payment Method
+      { wch: 10 }, // Status
+      { wch: 15 }, // Amount
+    ];
+    worksheet['!cols'] = colWidths;
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Detailed Transactions');
+    
+    // Generate filename with current date
+    const dateStr = format(new Date(), 'yyyy-MM-dd');
+    const fileName = `transactions_${dateStr}.xlsx`;
+
+    // Export file
+    XLSX.writeFile(workbook, fileName);
+  };
 
   if (loading) {
     return (
@@ -405,7 +497,22 @@ const SalesBySalesPerson: React.FC = () => {
         <>
           {/* Sales Summary by Sales Person */}
           <Paper elevation={0} sx={{ p: 3, bgcolor: '#1a2235', mb: 3, borderRadius: '8px', border: '1px solid #2d3748' }}>
-            <Typography variant="h6" mb={2} color="#f3f4f6">Sales Summary</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6" color="#f3f4f6">Sales Summary</Typography>
+              <Button
+                onClick={exportSalesToExcel}
+                variant="contained"
+                size="small"
+                sx={{
+                  bgcolor: '#3b82f6',
+                  '&:hover': { bgcolor: '#2563eb' },
+                  textTransform: 'none',
+                  px: 2
+                }}
+              >
+                Export to Excel
+              </Button>
+            </Box>
             <TableContainer>
               <Table size="small">
                 <TableHead>
@@ -488,17 +595,32 @@ const SalesBySalesPerson: React.FC = () => {
           <Paper elevation={0} sx={{ p: 3, bgcolor: '#1a2235', borderRadius: '8px', border: '1px solid #2d3748' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Typography variant="h6" color="#f3f4f6">Detailed Transactions</Typography>
-              {filteredTransactions.length !== transactions.length && (
-                <button
-                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded"
-                  onClick={() => {
-                    setFilteredTransactions(transactions);
-                    setTransactionsPage(0);
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                {filteredTransactions.length !== transactions.length && (
+                  <button
+                    className="text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded"
+                    onClick={() => {
+                      setFilteredTransactions(transactions);
+                      setTransactionsPage(0);
+                    }}
+                  >
+                    Show All
+                  </button>
+                )}
+                <Button
+                  onClick={exportTransactionsToExcel}
+                  variant="contained"
+                  size="small"
+                  sx={{
+                    bgcolor: '#3b82f6',
+                    '&:hover': { bgcolor: '#2563eb' },
+                    textTransform: 'none',
+                    px: 2
                   }}
                 >
-                  Show All
-                </button>
-              )}
+                  Export to Excel
+                </Button>
+              </Box>
             </Box>
             <Box sx={{ overflowX: 'auto' }}>
               <TableContainer sx={{ 

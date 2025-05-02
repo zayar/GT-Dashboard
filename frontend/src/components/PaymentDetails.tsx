@@ -34,6 +34,8 @@ import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
 import { useClinic } from '../contexts/ClinicContext';
+import * as XLSX from 'xlsx';
+import { format } from 'date-fns';
 
 interface PaymentRecord {
   Date: string;
@@ -77,6 +79,9 @@ const PaymentDetails: React.FC = () => {
   };
 
   const isPaymentFilterOpen = Boolean(paymentFilterAnchorEl);
+  const isAllSelected = useMemo(() => {
+    return paymentMethods.length > 0 && selectedPaymentMethods.length === paymentMethods.length;
+  }, [selectedPaymentMethods, paymentMethods]);
 
   // Filter data based on selected payment methods, zero value setting, and search term
   const data = useMemo(() => {
@@ -188,7 +193,7 @@ const PaymentDetails: React.FC = () => {
         }
 
         AND PaymentMethod != 'PASS'  /* Filter out transactions with PASS payment method */
-        AND ClinicCode = '${currentClinic.code}'  /* Filter by selected clinic */
+        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')  /* Filter by selected clinic */
         ORDER BY OrderCreatedDate DESC
       `;
 
@@ -235,10 +240,6 @@ const PaymentDetails: React.FC = () => {
       }
     });
   };
-
-  const isAllSelected = useMemo(() => {
-    return paymentMethods.length > 0 && selectedPaymentMethods.length === paymentMethods.length;
-  }, [selectedPaymentMethods, paymentMethods]);
 
   const handleZeroValueToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
     setShowZeroValues(event.target.checked);
@@ -330,6 +331,88 @@ const PaymentDetails: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Function to export data to Excel
+  const exportToExcel = () => {
+    if (data.length === 0) return;
+    
+    const workbook = XLSX.utils.book_new();
+    
+    // Create a map to group rows by invoice number
+    const invoiceGroups: Record<string, Array<PaymentRecord>> = {};
+    
+    // Group data by invoice number
+    data.forEach(row => {
+      if (!invoiceGroups[row.InvoiceNumber]) {
+        invoiceGroups[row.InvoiceNumber] = [];
+      }
+      invoiceGroups[row.InvoiceNumber].push(row);
+    });
+    
+    // Prepare rows for Excel, ensuring only the first occurrence of each invoice shows the total
+    const processedRows: any[] = [];
+    
+    Object.entries(invoiceGroups).forEach(([invoiceNumber, rows]) => {
+      rows.forEach((record, index) => {
+        // Format the wallet value
+        let walletValue = '';
+        if (record.WalletTopUp) {
+          if (String(record.WalletTopUp).includes('*Point') || (typeof record.WalletTopUp === 'number' && record.WalletTopUp > 0)) {
+            walletValue = 'Topup';
+          } else {
+            walletValue = String(record.WalletTopUp);
+          }
+        }
+        
+        // Only show invoice total for the first row of each invoice
+        const isFirstRow = index === 0;
+        const invoiceTotal = isFirstRow ? record.InvoiceNetTotal : null;
+        
+        processedRows.push({
+          'Date': record.Date,
+          'Invoice Number': record.InvoiceNumber,
+          'Customer Name': record.CustomerName,
+          'Member ID': record.MemberId || '',
+          'Sale Person': record.SalePerson,
+          'Service Name': record.ServiceName || '',
+          'Service Package': record.ServicePackageName || '',
+          'Wallet': walletValue,
+          'Payment Status': record.PaymentStatus,
+          'Payment Method': record.PaymentMethod,
+          'Invoice Total': invoiceTotal
+        });
+      });
+    });
+    
+    // Create worksheet from data
+    const worksheet = XLSX.utils.json_to_sheet(processedRows);
+    
+    // Set column widths
+    const colWidths = [
+      { wch: 12 },  // Date
+      { wch: 15 },  // Invoice Number
+      { wch: 25 },  // Customer Name
+      { wch: 15 },  // Member ID
+      { wch: 20 },  // Sale Person
+      { wch: 25 },  // Service Name
+      { wch: 25 },  // Service Package
+      { wch: 10 },  // Wallet
+      { wch: 12 },  // Payment Status
+      { wch: 15 },  // Payment Method
+      { wch: 15 },  // Invoice Total
+    ];
+    worksheet['!cols'] = colWidths;
+    
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Payment Details');
+    
+    // Generate filename with current date
+    const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+    const fileName = `payment_details_${dateStr}.xlsx`;
+    
+    // Export file
+    XLSX.writeFile(workbook, fileName);
   };
 
   const handleViewModeChange = (_event: React.MouseEvent<HTMLElement>, newMode: 'detailed' | 'summary') => {
@@ -507,6 +590,40 @@ const PaymentDetails: React.FC = () => {
           gap: 1,
           flexWrap: 'nowrap'
         }}>
+          {/* Search field */}
+          <TextField
+            size="small"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: '#9ca3af' }} />
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              maxWidth: 200,
+              bgcolor: '#1a2234',
+              '& .MuiOutlinedInput-root': {
+                color: '#d1d5db',
+                '& fieldset': {
+                  borderColor: '#2d3748',
+                },
+                '&:hover fieldset': {
+                  borderColor: '#4a5568',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#3b82f6',
+                },
+              },
+              '& .MuiInputLabel-root': {
+                color: '#9ca3af',
+              }
+            }}
+          />
+          
           <Button
             variant="outlined"
             size="small"
@@ -531,159 +648,42 @@ const PaymentDetails: React.FC = () => {
           
           <FormControlLabel
             control={
-              <Switch 
+              <Switch
                 checked={showZeroValues}
                 onChange={handleZeroValueToggle}
-                size="small"
-                sx={{
-                  '& .MuiSwitch-switchBase': {
-                    '&.Mui-checked': {
-                      color: '#3b82f6',
-                      '& + .MuiSwitch-track': {
-                        backgroundColor: '#2563eb',
-                      },
-                    },
-                  },
-                  '& .MuiSwitch-track': {
-                    backgroundColor: '#4a5568',
-                  },
-                }}
               />
             }
-            label="Zero Values"
-            sx={{ 
-              m: 0,
-              '& .MuiFormControlLabel-label': { 
-                fontSize: '0.75rem',
-                color: '#d1d5db' 
-              }
-            }}
+            label="Show Zero Values"
           />
-
-          <ToggleButtonGroup
-            value={viewMode}
-            exclusive
-            onChange={handleViewModeChange}
-            size="small"
-            aria-label="view mode"
-            sx={{
-              height: 40,
-              '& .MuiToggleButton-root': {
-                color: '#9ca3af',
-                borderColor: '#2d3748',
-                bgcolor: '#1a2234',
-                padding: '4px 8px',
-                '&.Mui-selected': {
-                  color: '#3b82f6',
-                  bgcolor: 'rgba(59, 130, 246, 0.1)',
-                },
-                '&:hover': {
-                  bgcolor: 'rgba(26, 34, 52, 0.8)',
-                },
-              },
-            }}
-          >
-            <ToggleButton value="detailed" aria-label="detailed view" title="Detailed View">
-              <ViewListIcon fontSize="small" />
-            </ToggleButton>
-            <ToggleButton value="summary" aria-label="summary view" title="Invoice Summary">
-              <ViewModuleIcon fontSize="small" />
-            </ToggleButton>
-          </ToggleButtonGroup>
-
-          <Tooltip title="Export to CSV">
-            <IconButton
-              onClick={exportToCSV}
+          
+          {/* Excel Export Button */}
+          <Tooltip title="Export to Excel">
+            <Button
+              variant="outlined"
               size="small"
+              startIcon={<FileDownloadIcon />}
+              onClick={exportToExcel}
               sx={{
-                color: '#3b82f6',
-                p: 1,
                 height: 40,
-                width: 40,
+                borderColor: '#2d3748',
+                color: '#d1d5db',
+                bgcolor: '#1a2234',
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+                px: 1,
                 '&:hover': {
-                  bgcolor: 'rgba(59, 130, 246, 0.08)'
+                  borderColor: '#4a5568',
+                  bgcolor: 'rgba(26, 34, 52, 0.7)'
                 }
               }}
             >
-              <FileDownloadIcon fontSize="small" />
-            </IconButton>
+              Excel
+            </Button>
           </Tooltip>
         </Box>
       </Box>
 
-      {/* Search box */}
-      <Box sx={{ mb: 2 }}>
-        <TextField
-          placeholder="Search by Invoice #, Customer Name, Member ID, Sale Person, Service Name..."
-          variant="outlined"
-          fullWidth
-          size="small"
-          value={searchTerm}
-          onChange={handleSearchChange}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon sx={{ color: '#9ca3af', fontSize: '1.2rem' }} />
-              </InputAdornment>
-            ),
-            sx: {
-              height: 40,
-              color: '#d1d5db',
-              bgcolor: '#1a2234',
-              borderRadius: '6px',
-              '& fieldset': { borderColor: '#2d3748' },
-              '&:hover fieldset': { borderColor: '#4a5568' },
-              '&.Mui-focused fieldset': { borderColor: '#3b82f6' }
-            }
-          }}
-        />
-      </Box>
-
-      {/* Main table container */}
-      <Paper 
-        sx={{ 
-          p: 0,
-          bgcolor: '#121826',
-          borderRadius: '8px',
-          border: '1px solid #2d3748',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-          width: '100%',
-          maxWidth: '100%',
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden' // Ensure content doesn't overflow the Paper
-        }}
-      >
-        <DataTable 
-          data={dataToDisplay}
-          onCustomerClick={handleCustomerClick}
-          onServiceClick={handleServiceClick}
-          columnAliases={{ 
-            InvoiceNetTotal: 'Invoice Total',
-            MemberId: 'Member ID',
-            SalePerson: 'Sale Person',
-            ServiceName: 'Service Name',
-            ServicePackageName: 'Service Package',
-            WalletTopUp: 'Wallet',
-            InvoiceNumber: 'Invoice Number'
-          }}
-        />
-      </Paper>
-
-      {/* Record count indicator */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
-        <Typography 
-          variant="caption"
-          sx={{ 
-            color: '#9ca3af'
-          }}
-        >
-          {dataToDisplay.length} {dataToDisplay.length === 1 ? 'record' : 'records'}
-        </Typography>
-      </Box>
-
-      {/* Payment methods filter popover */}
+      {/* Payment filter popover */}
       <Popover
         open={isPaymentFilterOpen}
         anchorEl={paymentFilterAnchorEl}
@@ -703,55 +703,85 @@ const PaymentDetails: React.FC = () => {
               width: 250,
               maxHeight: 400,
               overflow: 'auto',
-              bgcolor: '#121826', // Updated to match theme
+              bgcolor: '#1a2234',
               color: '#d1d5db',
               borderRadius: '8px',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-              border: '1px solid #2d3748',
               zIndex: 1400
             }
           }
         }}
       >
         <FormGroup>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={isAllSelected}
-                indeterminate={selectedPaymentMethods.length > 0 && !isAllSelected}
-                onChange={() => handlePaymentMethodChange('all')}
-                sx={{
-                  color: '#4a5568',
-                  '&.Mui-checked': { color: '#3b82f6' },
-                  '&.MuiCheckbox-indeterminate': { color: '#3b82f6' }
-                }}
+          {paymentMethods.length > 0 ? (
+            <>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={isAllSelected}
+                    indeterminate={selectedPaymentMethods.length > 0 && !isAllSelected}
+                    onChange={() => handlePaymentMethodChange('all')}
+                    sx={{ 
+                      color: '#4a5568',
+                      '&.Mui-checked': { color: '#3b82f6' },
+                      '&.MuiCheckbox-indeterminate': { color: '#3b82f6' }
+                    }}
+                  />
+                }
+                label="Select All"
+                sx={{ color: '#d1d5db' }}
               />
-            }
-            label="Select All"
-            sx={{ color: '#d1d5db' }}
-          />
-          <Box sx={{ borderTop: '1px solid #2d3748', my: 1 }} />
-          {paymentMethods.map((method) => (
-            <FormControlLabel
-              key={method}
-              control={
-                <Checkbox
-                  checked={selectedPaymentMethods.includes(method)}
-                  onChange={() => handlePaymentMethodChange(method)}
-                  sx={{
-                    color: '#4a5568',
-                    '&.Mui-checked': { color: '#3b82f6' }
-                  }}
+              <Box sx={{ borderTop: '1px solid #2d3748', my: 1 }} />
+              {paymentMethods.map((method) => (
+                <FormControlLabel
+                  key={method}
+                  control={
+                    <Checkbox
+                      checked={selectedPaymentMethods.includes(method)}
+                      onChange={() => handlePaymentMethodChange(method)}
+                      sx={{ 
+                        color: '#4a5568',
+                        '&.Mui-checked': { color: '#3b82f6' }
+                      }}
+                    />
+                  }
+                  label={method}
+                  sx={{ color: '#d1d5db' }}
                 />
-              }
-              label={method}
-              sx={{ color: '#d1d5db' }}
-            />
-          ))}
+              ))}
+            </>
+          ) : (
+            <Typography variant="body2" color="#9ca3af">No payment methods available</Typography>
+          )}
         </FormGroup>
       </Popover>
+
+      {/* View mode toggle */}
+      <ToggleButtonGroup
+        value={viewMode}
+        exclusive
+        onChange={handleViewModeChange}
+        sx={{
+          mt: 2,
+          mb: 2,
+          justifyContent: 'center',
+        }}
+      >
+        <ToggleButton value="detailed" aria-label="detailed view">
+          <ViewListIcon />
+        </ToggleButton>
+        <ToggleButton value="summary" aria-label="summary view">
+          <ViewModuleIcon />
+        </ToggleButton>
+      </ToggleButtonGroup>
+
+      {/* Data table */}
+      <DataTable
+        data={dataToDisplay}
+        onCustomerClick={handleCustomerClick}
+        onServiceClick={handleServiceClick}
+      />
     </Box>
   );
 };
 
-export default PaymentDetails; 
+export default PaymentDetails;
