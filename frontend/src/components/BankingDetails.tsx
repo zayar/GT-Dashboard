@@ -211,19 +211,30 @@ const BankingDetails: React.FC = () => {
     
     const summary: Record<string, SummaryRecord> = {};
     
+    // Create a map to track processed invoices per payment method
+    const processedInvoices: Record<string, Set<string>> = {};
+    
+    // First pass: Group by payment method and invoice number to sum only unique invoices
     filteredData.forEach(record => {
-      const { PaymentMethod, InvoiceNetTotal } = record;
+      const { PaymentMethod, InvoiceNumber, InvoiceNetTotal } = record;
       
+      // Initialize payment method in summaries if not exists
       if (!summary[PaymentMethod]) {
         summary[PaymentMethod] = {
           PaymentMethod,
           TotalAmount: 0,
           TransactionCount: 0
         };
+        processedInvoices[PaymentMethod] = new Set();
       }
       
-      summary[PaymentMethod].TotalAmount += InvoiceNetTotal;
-      summary[PaymentMethod].TransactionCount += 1;
+      // Only add the amount once per invoice number
+      if (!processedInvoices[PaymentMethod].has(InvoiceNumber)) {
+        processedInvoices[PaymentMethod].add(InvoiceNumber);
+        summary[PaymentMethod].TotalAmount += InvoiceNetTotal;
+        // Count each unique invoice once for transaction count
+        summary[PaymentMethod].TransactionCount += 1;
+      }
     });
     
     const summaryArray = Object.values(summary).sort((a, b) => b.TotalAmount - a.TotalAmount);
