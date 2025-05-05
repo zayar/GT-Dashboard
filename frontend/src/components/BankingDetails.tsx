@@ -24,6 +24,7 @@ import {
   TableRow,
   useTheme,
   SelectChangeEvent,
+  ButtonGroup,
 } from '@mui/material';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -80,6 +81,7 @@ const BankingDetails: React.FC = () => {
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [paymentFilterAnchorEl, setPaymentFilterAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+  const [walletTopupFilter, setWalletTopupFilter] = useState<'all' | 'hide' | 'only'>('all');
   
   const isPaymentFilterOpen = Boolean(paymentFilterAnchorEl);
   const isAllSelected = selectedPaymentMethods.length === paymentMethods.length && paymentMethods.length > 0;
@@ -188,7 +190,7 @@ const BankingDetails: React.FC = () => {
         setSelectedPaymentMethods(methodsArray);
       }
 
-      // Generate summary data
+      // Generate summary data - this will use the current filter settings
       generateSummaryData(responseData.data as PaymentRecord[] || []);
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -198,16 +200,51 @@ const BankingDetails: React.FC = () => {
     }
   }, [selectedDate, filterType, startDate, endDate, currentClinic]);
 
+  // Helper function to check if a record is a wallet topup
+  const isWalletTopup = (record: PaymentRecord): boolean => {
+    return (
+      // Check for "Topup" in WalletTopUp field
+      (typeof record.WalletTopUp === 'string' && record.WalletTopUp.includes('Topup')) ||
+      // Check for invoice numbers starting with "TO"
+      record.InvoiceNumber.startsWith('TO')
+    );
+  };
+
+  // Function to filter data based on all current filters
+  const getFilteredData = useCallback((data: PaymentRecord[]): PaymentRecord[] => {
+    // Apply payment method filters
+    let filtered = selectedPaymentMethod 
+      ? data.filter(record => record.PaymentMethod === selectedPaymentMethod)
+      : data.filter(record => selectedPaymentMethods.includes(record.PaymentMethod));
+    
+    // Filter out zero-value transactions
+    filtered = filtered.filter(record => record.InvoiceNetTotal !== 0);
+
+    // Apply wallet topup filter
+    if (walletTopupFilter === 'hide') {
+      filtered = filtered.filter(record => !isWalletTopup(record));
+    } else if (walletTopupFilter === 'only') {
+      filtered = filtered.filter(record => isWalletTopup(record));
+    }
+
+    return filtered;
+  }, [selectedPaymentMethod, selectedPaymentMethods, walletTopupFilter]);
+
+  // Calculate filtered data for display
+  const filteredData = useMemo(() => {
+    return getFilteredData(rawData);
+  }, [rawData, getFilteredData]);
+
   // Generate summary data from raw data
-  const generateSummaryData = (data: PaymentRecord[]) => {
+  const generateSummaryData = useCallback((data: PaymentRecord[]) => {
     // Check if data is empty or undefined
     if (!data || data.length === 0) {
       setSummaryData([]);
       return;
     }
     
-    // Filter out zero-value transactions
-    const filteredData = data.filter(record => record.InvoiceNetTotal !== 0);
+    // Apply all filters to the data before generating summary
+    const filteredData = getFilteredData(data);
     
     const summary: Record<string, SummaryRecord> = {};
     
@@ -239,32 +276,28 @@ const BankingDetails: React.FC = () => {
     
     const summaryArray = Object.values(summary).sort((a, b) => b.TotalAmount - a.TotalAmount);
     setSummaryData(summaryArray);
-  };
-
-  // Calculate filtered data
-  const filteredData = useMemo(() => {
-    let filtered = selectedPaymentMethod 
-      ? rawData.filter(record => record.PaymentMethod === selectedPaymentMethod)
-      : rawData.filter(record => selectedPaymentMethods.includes(record.PaymentMethod));
-    
-    // Filter out zero-value transactions
-    filtered = filtered.filter(record => record.InvoiceNetTotal !== 0);
-
-    return filtered;
-  }, [rawData, selectedPaymentMethods, selectedPaymentMethod]);
+  }, [getFilteredData]);
 
   // Calculate filtered summary data based on selected payment methods
   const filteredSummaryData = useMemo(() => {
-    if (selectedPaymentMethod) {
-      return summaryData.filter(item => item.PaymentMethod === selectedPaymentMethod);
-    } else if (selectedPaymentMethods.length === 0) {
-      return [];
-    } else if (selectedPaymentMethods.length === paymentMethods.length) {
-      return summaryData;
-    } else {
-      return summaryData.filter(item => selectedPaymentMethods.includes(item.PaymentMethod));
+    return summaryData;
+  }, [summaryData]);
+
+  // Refresh summary data when wallet topup filter changes
+  useEffect(() => {
+    if (rawData.length > 0) {
+      // Apply wallet filter to generate correct summary
+      let filteredForSummary = rawData;
+      
+      if (walletTopupFilter === 'hide') {
+        filteredForSummary = rawData.filter(record => !isWalletTopup(record));
+      } else if (walletTopupFilter === 'only') {
+        filteredForSummary = rawData.filter(record => isWalletTopup(record));
+      }
+      
+      generateSummaryData(filteredForSummary);
     }
-  }, [summaryData, selectedPaymentMethods, selectedPaymentMethod, paymentMethods.length]);
+  }, [walletTopupFilter, rawData]);
 
   // Navigation handlers
   const handleBack = () => {
@@ -294,6 +327,11 @@ const BankingDetails: React.FC = () => {
       setStartDate(start);
       setEndDate(end);
     }
+    
+    // Automatically fetch data with the new filter type
+    setTimeout(() => {
+      fetchData();
+    }, 100);
   };
   
   // Change handler for date range inputs
@@ -671,6 +709,51 @@ const BankingDetails: React.FC = () => {
             )}
           </LocalizationProvider>
           
+          <ButtonGroup size="small" variant="outlined">
+            <Button 
+              onClick={() => setWalletTopupFilter('all')}
+              sx={{
+                borderColor: '#2d3748',
+                color: walletTopupFilter === 'all' ? '#3b82f6' : '#d1d5db',
+                bgcolor: walletTopupFilter === 'all' ? 'rgba(59, 130, 246, 0.1)' : '#1a2234',
+                '&:hover': {
+                  borderColor: '#4a5568',
+                  bgcolor: 'rgba(26, 34, 52, 0.7)'
+                }
+              }}
+            >
+              All Transactions
+            </Button>
+            <Button 
+              onClick={() => setWalletTopupFilter('hide')}
+              sx={{
+                borderColor: '#2d3748',
+                color: walletTopupFilter === 'hide' ? '#3b82f6' : '#d1d5db',
+                bgcolor: walletTopupFilter === 'hide' ? 'rgba(59, 130, 246, 0.1)' : '#1a2234',
+                '&:hover': {
+                  borderColor: '#4a5568',
+                  bgcolor: 'rgba(26, 34, 52, 0.7)'
+                }
+              }}
+            >
+              Hide Topup
+            </Button>
+            <Button 
+              onClick={() => setWalletTopupFilter('only')}
+              sx={{
+                borderColor: '#2d3748',
+                color: walletTopupFilter === 'only' ? '#3b82f6' : '#d1d5db',
+                bgcolor: walletTopupFilter === 'only' ? 'rgba(59, 130, 246, 0.1)' : '#1a2234',
+                '&:hover': {
+                  borderColor: '#4a5568',
+                  bgcolor: 'rgba(26, 34, 52, 0.7)'
+                }
+              }}
+            >
+              Only Topup
+            </Button>
+          </ButtonGroup>
+          
           {paymentMethods.length > 0 && (
             <Button
               variant="outlined"
@@ -957,6 +1040,255 @@ const BankingDetails: React.FC = () => {
             )}
           </Box>
         </Box>
+        
+        {/* Date filter tabs */}
+        <Box sx={{ mb: 3, display: 'flex', borderBottom: '1px solid #2d3748' }}>
+          {['daily', 'weekly', 'monthly', 'custom'].map((type) => (
+            <Box
+              key={type}
+              onClick={() => handleFilterTypeChange({ target: { value: type } } as SelectChangeEvent<'daily' | 'weekly' | 'monthly' | 'custom'>)}
+              sx={{
+                px: 3,
+                py: 1,
+                textTransform: 'capitalize',
+                cursor: 'pointer',
+                color: filterType === type ? '#3b82f6' : '#d1d5db',
+                borderBottom: filterType === type ? '2px solid #3b82f6' : 'none',
+                fontWeight: filterType === type ? 'bold' : 'normal',
+                '&:hover': {
+                  color: filterType === type ? '#3b82f6' : '#f3f4f6',
+                  bgcolor: 'rgba(59, 130, 246, 0.05)'
+                }
+              }}
+            >
+              {type}
+            </Box>
+          ))}
+        </Box>
+        
+        {filterType === 'custom' && (
+          <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DatePicker
+                label="Start Date"
+                value={startDate}
+                onChange={(newValue) => handleDateRangeChange(true, newValue)}
+                slotProps={{
+                  textField: {
+                    size: 'small',
+                    sx: {
+                      bgcolor: '#1a2234',
+                      '& .MuiOutlinedInput-root': {
+                        color: '#d1d5db',
+                        '& fieldset': {
+                          borderColor: '#2d3748',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#4a5568',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: '#9ca3af',
+                      },
+                      '& .MuiSvgIcon-root': {
+                        color: '#d1d5db',
+                      },
+                    },
+                  },
+                }}
+              />
+              <DatePicker
+                label="End Date"
+                value={endDate}
+                onChange={(newValue) => handleDateRangeChange(false, newValue)}
+                slotProps={{
+                  textField: {
+                    size: 'small',
+                    sx: {
+                      bgcolor: '#1a2234',
+                      '& .MuiOutlinedInput-root': {
+                        color: '#d1d5db',
+                        '& fieldset': {
+                          borderColor: '#2d3748',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#4a5568',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: '#9ca3af',
+                      },
+                      '& .MuiSvgIcon-root': {
+                        color: '#d1d5db',
+                      },
+                    },
+                  },
+                }}
+              />
+            </LocalizationProvider>
+            <Button 
+              variant="contained" 
+              size="small"
+              onClick={fetchData}
+              sx={{ 
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb'
+                }
+              }}
+            >
+              Apply
+            </Button>
+          </Box>
+        )}
+        
+        {filterType === 'daily' && (
+          <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DatePicker
+                label="Select Date"
+                value={selectedDate}
+                onChange={handleDateChange}
+                views={['year', 'month', 'day']}
+                slotProps={{
+                  textField: {
+                    size: 'small',
+                    sx: {
+                      bgcolor: '#1a2234',
+                      '& .MuiOutlinedInput-root': {
+                        color: '#d1d5db',
+                        '& fieldset': {
+                          borderColor: '#2d3748',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#4a5568',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: '#9ca3af',
+                      },
+                      '& .MuiSvgIcon-root': {
+                        color: '#d1d5db',
+                      },
+                    },
+                  },
+                }}
+              />
+            </LocalizationProvider>
+            <Button 
+              variant="contained" 
+              size="small"
+              onClick={fetchData}
+              sx={{ 
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb'
+                }
+              }}
+            >
+              Apply
+            </Button>
+          </Box>
+        )}
+        
+        {filterType === 'monthly' && (
+          <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DatePicker
+                label="Select Month"
+                value={selectedDate}
+                onChange={handleDateChange}
+                views={['year', 'month']}
+                slotProps={{
+                  textField: {
+                    size: 'small',
+                    sx: {
+                      bgcolor: '#1a2234',
+                      '& .MuiOutlinedInput-root': {
+                        color: '#d1d5db',
+                        '& fieldset': {
+                          borderColor: '#2d3748',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#4a5568',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: '#9ca3af',
+                      },
+                      '& .MuiSvgIcon-root': {
+                        color: '#d1d5db',
+                      },
+                    },
+                  },
+                }}
+              />
+            </LocalizationProvider>
+            <Button 
+              variant="contained" 
+              size="small"
+              onClick={fetchData}
+              sx={{ 
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb'
+                }
+              }}
+            >
+              Apply
+            </Button>
+          </Box>
+        )}
+        
+        {filterType === 'weekly' && (
+          <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+            <Paper 
+              elevation={0}
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                px: 2, 
+                py: 1, 
+                bgcolor: '#1a2234',
+                border: '1px solid #2d3748',
+                color: '#d1d5db',
+                borderRadius: '4px'
+              }}
+            >
+              <Typography variant="body2" sx={{ mr: 1, color: '#9ca3af' }}>
+                Period:
+              </Typography>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {format(new Date(new Date().setDate(new Date().getDate() - 7)), 'MMM dd, yyyy')} - {format(new Date(), 'MMM dd, yyyy')}
+              </Typography>
+            </Paper>
+            <Button 
+              variant="contained" 
+              size="small"
+              onClick={fetchData}
+              sx={{ 
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb'
+                }
+              }}
+            >
+              Refresh
+            </Button>
+          </Box>
+        )}
         
         {filteredData.length > 0 ? (
           <DataTable 
