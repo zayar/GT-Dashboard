@@ -218,7 +218,7 @@ WITH ServiceStats AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-  AND ClinicCode = '${currentClinic.code}'
+  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY ServiceName, ServiceImage
 )
 SELECT
@@ -233,7 +233,7 @@ FROM great_time.MainDataView
 JOIN ServiceStats USING (ServiceName)
 WHERE ServiceName = '${escapedServiceName}'
 AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-AND ClinicCode = '${currentClinic.code}'
+AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
 GROUP BY ServiceName, ServiceStats.ServiceImage, total_bookings, total_customers, total_revenue;`;
 
         const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
@@ -261,7 +261,7 @@ WITH MonthlySales AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-  AND ClinicCode = '${currentClinic.code}'
+  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY month
   ORDER BY month DESC
   LIMIT 18
@@ -276,8 +276,8 @@ BoughtTogether AS (
     ON b1.CustomerName = b2.CustomerName
     AND b1.ServiceName = '${escapedServiceName}'
     AND b2.ServiceName != '${escapedServiceName}'
-    AND b1.ClinicCode = '${currentClinic.code}'
-    AND b2.ClinicCode = '${currentClinic.code}'
+    AND LOWER(b1.ClinicCode) = LOWER('${currentClinic.code}')
+    AND LOWER(b2.ClinicCode) = LOWER('${currentClinic.code}')
   WHERE EXTRACT(YEAR FROM b1.CheckInTime) = ${selectedYear}
   AND EXTRACT(YEAR FROM b2.CheckInTime) = ${selectedYear}
   GROUP BY b2.ServiceName
@@ -293,7 +293,7 @@ Therapists AS (
   WHERE ServiceName = '${escapedServiceName}'
     AND PractitionerName IS NOT NULL
     AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-    AND ClinicCode = '${currentClinic.code}'
+    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY PractitionerName
   ORDER BY service_count DESC
 ),
@@ -306,7 +306,7 @@ Customers AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-  AND ClinicCode = '${currentClinic.code}'
+  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY CustomerName, CustomerPhoneNumber
   ORDER BY purchase_count DESC
   LIMIT 100
@@ -321,7 +321,7 @@ ServiceRecords AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-  AND ClinicCode = '${currentClinic.code}'
+  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   ORDER BY CheckInTime DESC
 )
 

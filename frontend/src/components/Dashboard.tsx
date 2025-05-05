@@ -167,7 +167,7 @@ const Dashboard: React.FC = () => {
           WHERE PaymentMethod != 'PASS'
             AND PaymentStatus = 'PAID'
             AND CAST(NetTotal AS FLOAT64) != 0
-            AND ClinicCode = '${currentClinic.code}'
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
           LIMIT 10
         `;
 
@@ -224,7 +224,7 @@ const Dashboard: React.FC = () => {
               AND PaymentMethod != 'PASS'
               AND PaymentStatus = 'PAID'
               AND CAST(NetTotal AS FLOAT64) > 0
-              AND ClinicCode = '${currentClinic.code}'
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
           ),
           
           -- Find top 3 services by revenue
@@ -565,7 +565,7 @@ const Dashboard: React.FC = () => {
             FROM \`great_time.MainDataView\`
             WHERE ${timeConstraint}
               AND ServiceName IS NOT NULL
-              AND ClinicCode = '${currentClinic.code}'
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
             GROUP BY ServiceName
           ),
           
@@ -577,7 +577,7 @@ const Dashboard: React.FC = () => {
             FROM \`great_time.MainDataView\`
             WHERE ${prevTimeConstraint}
               AND ServiceName IS NOT NULL
-              AND ClinicCode = '${currentClinic.code}'
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
             GROUP BY ServiceName
           )
           
@@ -669,7 +669,7 @@ const Dashboard: React.FC = () => {
               AND PaymentMethod IS NOT NULL
               AND PaymentMethod != 'PASS'
               AND PaymentStatus = 'PAID'
-              AND ClinicCode = '${currentClinic.code}'
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
             GROUP BY PaymentMethod
           ),
           
@@ -747,7 +747,7 @@ const Dashboard: React.FC = () => {
             WHERE ${timeConstraint}
               AND PractitionerName IS NOT NULL
               AND PractitionerName != ''
-              AND ClinicCode = '${currentClinic.code}'
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
             GROUP BY PractitionerName, PractitionerImage
             ORDER BY bookingCount DESC
             LIMIT 10

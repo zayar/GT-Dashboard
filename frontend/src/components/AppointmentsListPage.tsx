@@ -141,7 +141,7 @@ const AppointmentsListPage: React.FC = () => {
       FROM appointmentview
       WHERE FromTime >= '${formatDateForSQL(calculatedStartDate)}'
         AND FromTime <= '${formatDateForSQL(calculatedEndDate)}'
-        AND ClinicCode = '${currentClinic.code}'
+        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
     `;
 
     // Add status filter if not 'all'

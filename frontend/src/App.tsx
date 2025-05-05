@@ -409,7 +409,7 @@ ORDER BY
                  - Order by count/services/treatments DESC
                  - Use LIMIT to restrict to top N results
                
-              10. ALWAYS include this filter in your WHERE clause: AND ClinicCode = '${currentClinic.code}'
+              10. ALWAYS include this filter in your WHERE clause: AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
                   - This is mandatory for security and data isolation
                   - Never omit this filter from any query`
             }
@@ -450,7 +450,7 @@ ORDER BY
         }
 
         // Ensure the clinic code filter is present in all queries
-        if (!sqlQuery.includes(`ClinicCode = '${currentClinic.code}'`) && !sqlQuery.includes(`clinic_code = '${currentClinic.code}'`) && !sqlQuery.includes(`clinicCode = '${currentClinic.code}'`)) {
+        if (!sqlQuery.includes(`LOWER(ClinicCode) = LOWER('${currentClinic.code}')`)) {
           // Special handling for "top 10 customers this week" query to fix common issues
           if (currentInputMessage.toLowerCase().trim() === 'top 10 customers this week') {
             console.log('Using predefined query for "top 10 customers this week"');
@@ -463,7 +463,7 @@ SELECT
 FROM 
   great_time.MainDataView
 WHERE 
-  ClinicCode = '${currentClinic.code}'
+  LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   AND CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
 GROUP BY 
   CustomerName, CustomerPhoneNumber
@@ -492,10 +492,10 @@ LIMIT 10`;
 
           // Now use the determined column name for filtering
           if (sqlQuery.includes('WHERE')) {
-            sqlQuery = sqlQuery.replace(/WHERE/i, `WHERE ${clinicColumnName} = '${currentClinic.code}' AND`);
+            sqlQuery = sqlQuery.replace(/WHERE/i, `WHERE LOWER(${clinicColumnName}) = LOWER('${currentClinic.code}') AND`);
           } else {
             // If there's no WHERE clause, add one
-            sqlQuery = sqlQuery + ` WHERE ${clinicColumnName} = '${currentClinic.code}'`;
+            sqlQuery = sqlQuery + ` WHERE LOWER(${clinicColumnName}) = LOWER('${currentClinic.code}')`;
           }
         }
       }
@@ -2129,7 +2129,7 @@ const AppContent = () => {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/conversational-ai" element={<ConversationalAI />} />
             <Route path="/customers" element={<CustomersTable />} />
-            <Route path="/customers/:name" element={<CustomerDetails />} />
+            <Route path="/customers/:phoneNumber" element={<CustomerDetails />} />
             <Route path="/services" element={<ServicesTable />} />
             <Route path="/services/:name" element={<ServiceDetails />} />
             <Route path="/therapists" element={<TherapistList />} />

@@ -140,7 +140,7 @@ const CheckInCheckOutPage: React.FC = () => {
       FROM inoutview 
       WHERE CheckInTime >= '${formatDateForSQL(calculatedStartDate)}' 
         AND CheckInTime <= '${formatDateForSQL(calculatedEndDate)}'
-        AND ClinicCode = '${currentClinic.code}'
+        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
     `;
 
     if (paymentStatusFilter !== 'all') {

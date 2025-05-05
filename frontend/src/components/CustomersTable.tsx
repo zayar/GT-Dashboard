@@ -82,7 +82,7 @@ const CustomersTable: React.FC = () => {
           AND PaymentStatus = 'PAID'
           AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
           AND PaymentMethod != 'PASS'
-          AND ClinicCode = '${currentClinic.code}'
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
       ),
       CustomerSpend AS (
         SELECT
@@ -109,7 +109,7 @@ const CustomersTable: React.FC = () => {
         WHERE 
           q.CustomerName IS NOT NULL 
           AND q.CustomerPhoneNumber IS NOT NULL
-          AND q.ClinicCode = '${currentClinic.code}'
+          AND LOWER(q.ClinicCode) = LOWER('${currentClinic.code}')
         GROUP BY 
           q.CustomerName, q.CustomerPhoneNumber, q.DateOfBirth
       )

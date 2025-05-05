@@ -41,7 +41,7 @@ interface CustomerDetailsProps {}
 
 const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const navigate = useNavigate();
-  const { name: phoneNumber } = useParams<{ name: string }>();
+  const { phoneNumber } = useParams<{ phoneNumber: string }>();
   const { currentClinic } = useClinic();
   const [loading, setLoading] = React.useState(true);
   const [customerData, setCustomerData] = React.useState<any>(null);
@@ -83,6 +83,17 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     paymentMethods: [],
   });
 
+  // Add state for service usage data (separated from customer data)
+  const [serviceUsageData, setServiceUsageData] = React.useState<{
+    services: string[];
+    months: string[];
+    data: { [key: string]: { [key: string]: number } };
+  }>({
+    services: [],
+    months: [],
+    data: {},
+  });
+
   // Generate array of years for the dropdown (from 5 years ago to current year)
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -95,6 +106,16 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     // Reset page states
     setPage(0);
     setPaymentPage(0);
+    
+    // Reset data that depends on year filter
+    setPaymentFetched(false);
+    
+    // Reset service usage data to empty - will be refetched with new year
+    setServiceUsageData({
+      services: [],
+      months: [],
+      data: {},
+    });
   };
 
   const sortedBookings = useMemo(() => {
@@ -130,61 +151,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     setRowsPerPage(parseInt(event.target.value.toString(), 10));
     setPage(0);
   };
-
-  const serviceUsageData = useMemo(() => {
-    if (!customerData || !customerData.bookings) return { months: [], services: [], data: {} };
-
-    try {
-    // Extract all unique months from bookings and sort them chronologically in descending order
-    const months = Array.from(new Set(customerData.bookings.map((booking: any) => {
-        if (!booking || !booking.checkinTime) return null;
-      const date = new Date(booking.checkinTime);
-        return isNaN(date.getTime()) ? null : `${new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short' }).format(date)}`;
-      }).filter(Boolean))) as string[];  // Cast to string array, filter out nulls
-
-    // Sort months in descending order
-    months.sort((a, b) => {
-        try {
-      const dateA = new Date(a);
-      const dateB = new Date(b);
-      return dateB.getTime() - dateA.getTime();
-        } catch (error) {
-          return 0; // If dates are invalid, don't change order
-        }
-    });
-
-    // Get unique services and sort them alphabetically
-      const services = Array.from(new Set(customerData.bookings
-        .filter((booking: any) => booking && booking.service)
-        .map((booking: any) => booking.service)))
-      .map(service => String(service))
-      .sort((a, b) => a.localeCompare(b));
-
-    // Create a data map for service usage
-    const data: { [key: string]: { [key: string]: number } } = {};
-    services.forEach((service: string) => {
-      data[service] = {};
-      months.forEach((month) => {
-        data[service][month] = customerData.bookings.filter((booking: any) => {
-            if (!booking || !booking.checkinTime || !booking.service) return false;
-            try {
-          const date = new Date(booking.checkinTime);
-              if (isNaN(date.getTime())) return false;
-          const bookingMonth = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short' }).format(date);
-          return booking.service === service && bookingMonth === month;
-            } catch (error) {
-              return false;
-            }
-        }).length;
-      });
-    });
-
-    return { months, services, data };
-    } catch (error) {
-      console.error('Error generating service usage data:', error);
-      return { months: [], services: [], data: {} };
-    }
-  }, [customerData]);
 
   const handleServiceFilterChange = (event: SelectChangeEvent<'remaining' | 'completed'>) => {
     setServiceFilter(event.target.value as 'remaining' | 'completed');
@@ -281,7 +247,110 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     };
   }, [retryTimeout]);
 
-  // Fetch customer data when params change
+  // Function to fetch year-dependent data (service usage and payment history)
+  const fetchYearDependentData = useCallback(async () => {
+    if (!phoneNumber || !currentClinic) {
+      console.log('Cannot fetch year-dependent data: missing phone number or clinic');
+      return;
+    }
+    
+    try {
+      console.log('Fetching year-dependent data for year:', selectedYear);
+      
+      const decodedPhoneNumber = decodeURIComponent(phoneNumber);
+      const sanitizeForSQL = (input: string): string => {
+        return input.replace(/'/g, "''");
+      };
+      const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
+      
+      // SQL query to get service usage data filtered by year
+      const query = `
+      WITH AllServiceUsage AS (
+        SELECT
+          ServiceName,
+          CheckInTime
+        FROM great_time.MainDataView
+        WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
+          AND CheckInTime IS NOT NULL
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear} -- Filter by selected year
+      )
+      SELECT
+        ServiceName,
+        FORMAT_TIMESTAMP('%Y-%m', CheckInTime) AS month,
+        COUNT(*) AS usage_count
+      FROM AllServiceUsage
+      GROUP BY ServiceName, month
+      ORDER BY month DESC, ServiceName
+      `;
+      
+      console.log('Executing service usage query:', query);
+      
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+        { 
+          query: query
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
+          },
+          timeout: 15000
+        }
+      );
+      
+      if (!response.data.success) {
+        throw new Error(response.data.error || 'Failed to fetch service usage data');
+      }
+      
+      const serviceUsageRawData = response.data.data || [];
+      console.log('Service usage data fetched successfully:', serviceUsageRawData.length, 'records');
+      
+      // Process the data to create a heat map of service usage by month
+      const processedData: { [key: string]: { [key: string]: number } } = {};
+      const months: Set<string> = new Set();
+      const services: Set<string> = new Set();
+      
+      serviceUsageRawData.forEach((item: any) => {
+        const service = item.ServiceName || 'Unknown Service';
+        const month = item.month || 'Unknown Month';
+        const count = parseInt(item.usage_count) || 0;
+        
+        if (!processedData[service]) {
+          processedData[service] = {};
+        }
+        
+        processedData[service][month] = count;
+        months.add(month);
+        services.add(service);
+      });
+      
+      // Sort months chronologically
+      const sortedMonths = Array.from(months).sort();
+      
+      // Create complete dataset with zero values for missing entries
+      const serviceNames = Array.from(services);
+      serviceNames.forEach(service => {
+        sortedMonths.forEach(month => {
+          if (!processedData[service][month]) {
+            processedData[service][month] = 0;
+          }
+        });
+      });
+      
+      // Update service usage data in state
+      setServiceUsageData({
+        services: serviceNames,
+        months: sortedMonths,
+        data: processedData,
+      });
+      
+    } catch (error) {
+      console.error('Error fetching year-dependent data:', error);
+    }
+  }, [phoneNumber, currentClinic, selectedYear]);
+
+  // Fetch customer data when params change - this data doesn't depend on the year
   useEffect(() => {
     // Reset payment fetched state when phone number changes
     setPaymentFetched(false);
@@ -293,9 +362,22 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
         setLoading(false);
       });
     }
-  }, [phoneNumber, currentClinic, selectedYear]); // Added selectedYear as dependency
+  }, [phoneNumber, currentClinic]); // Removed selectedYear dependency
+
+  // Add dependency on selectedYear only for year-dependent data
+  useEffect(() => {
+    if (phoneNumber && currentClinic && !loading) {
+      // Only fetch the data that should be affected by year changes
+      fetchYearDependentData().catch(err => {
+        console.error('Failed to fetch year-dependent data:', err);
+      });
+      
+      // Reset payment history so it can be refetched with the new year
+      setPaymentFetched(false);
+    }
+  }, [selectedYear, fetchYearDependentData, phoneNumber, currentClinic, loading]);
   
-  // Effect for fetching customer payment history
+  // Effect for fetching payment history - this should still respect the year filter
   useEffect(() => {
     if (phoneNumber && !paymentFetched && !preventFetch.current && currentClinic) {
       try {
@@ -341,7 +423,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
         });
       }
     }
-  }, [phoneNumber, paymentFetched, customerData, selectedYear, currentClinic]); // Added customerData as dependency
+  }, [phoneNumber, paymentFetched, customerData, selectedYear, currentClinic]); // Keep selectedYear dependency for payment history
 
   // Add this useMemo for payment chart data
   const paymentChartData = useMemo(() => {
@@ -512,7 +594,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       };
       const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
       
-      // Payment History query
+      // Payment History query with year filtering
       const query = `
 -- Get payment data
 WITH CustomerPayments AS (
@@ -527,7 +609,8 @@ WITH CustomerPayments AS (
     SellerName
   FROM great_time.MainPaymentView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-    AND ClinicCode = '${currentClinic.code}'
+    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+    AND EXTRACT(YEAR FROM OrderCreatedDate) = ${selectedYear} -- Filter by selected year
 )
 
 -- Select payment history and summary separately
@@ -560,7 +643,7 @@ ORDER BY OrderCreatedDate DESC;
       `;
       
       try {
-        console.log('Fetching payment history for customer:', escapedPhoneNumber);
+        console.log('Fetching payment history for customer:', escapedPhoneNumber, 'for year:', selectedYear);
         const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
           { 
             query: query 
@@ -623,6 +706,11 @@ ORDER BY OrderCreatedDate DESC;
           });
         } else {
           console.log('No payment history found for customer');
+          setPaymentSummary({
+            totalSpent: 0,
+            invoiceCount: 0,
+            paymentMethods: [],
+          });
         }
         
         setPaymentFetched(true); // Mark payment data as fetched
@@ -665,14 +753,14 @@ ORDER BY OrderCreatedDate DESC;
   };
 
   // Basic fetchCustomerData function that can be called from useEffect
-    const fetchCustomerData = async () => {
+  const fetchCustomerData = async () => {
     if (!phoneNumber || !currentClinic) {
       setError('Customer phone number is required and clinic must be selected');
-        setLoading(false);
-        return;
-      }
+      setLoading(false);
+      return;
+    }
 
-      try {
+    try {
       // Only reset loading state if not in retry mode
       if (!isInRetryMode) {
         setLoading(true);
@@ -690,7 +778,7 @@ ORDER BY OrderCreatedDate DESC;
       console.log('Fetching data for phone number:', decodedPhoneNumber);
       
       // First, fetch customer profile with phone number filter - simplified query
-        const profileQuery = `
+      const profileQuery = `
 WITH AllAppointments AS (
   SELECT DISTINCT
     BookingID,
@@ -698,7 +786,7 @@ WITH AllAppointments AS (
   FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
     AND CheckInTime IS NOT NULL
-    AND ClinicCode = '${currentClinic.code}'
+    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
 )
 SELECT
   CustomerName AS name,
@@ -710,7 +798,7 @@ SELECT
   (SELECT COUNT(*) FROM AllAppointments) AS total_appointments
 FROM great_time.MainDataView
 WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-  AND ClinicCode = '${currentClinic.code}'
+  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
 GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
 
       console.log('Executing profile query:', profileQuery);
@@ -744,8 +832,9 @@ GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
         console.log('Profile data fetched successfully:', profile);
         
         // Then fetch other data with phone number filter - simplified query
+        // Notice we're not filtering by year for purchased services and recent bookings
         const dataQuery = `
--- Monthly sales data
+-- Monthly sales data (not filtered by year since it's just for display purposes)
 WITH MonthlySales AS (
   SELECT
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
@@ -753,13 +842,13 @@ WITH MonthlySales AS (
   FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
     AND Price IS NOT NULL
-    AND ClinicCode = '${currentClinic.code}'
+    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY month
   ORDER BY month DESC
   LIMIT 6
 ),
 
--- Purchased services
+-- Purchased services - not filtered by year
 PurchasedServices AS (
   SELECT DISTINCT 
     ServiceName AS service,
@@ -769,11 +858,11 @@ PurchasedServices AS (
     FORMAT_TIMESTAMP('%d %b, %Y', MAX(CheckInTime)) AS last_used
 FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-    AND ClinicCode = '${currentClinic.code}'
+    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY service, PackageCount, RemainingPackageCount, Price
 ),
 
--- Recent bookings
+-- Recent bookings - not filtered by year
 RecentBookings AS (
   SELECT
     BookingID,
@@ -786,7 +875,7 @@ RecentBookings AS (
   FROM great_time.MainDataView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
     AND CheckInTime IS NOT NULL
-    AND ClinicCode = '${currentClinic.code}'
+    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   ORDER BY CheckInTime DESC
   LIMIT 10
 )
@@ -883,6 +972,9 @@ SELECT
           bookings: recentBookings // Add a duplicate field for backward compatibility
         });
         
+        // Also fetch the year-dependent data
+        fetchYearDependentData();
+        
         setLoading(false);
         setRetryCount(0);
         setIsInRetryMode(false);
@@ -906,7 +998,7 @@ SELECT
           }, nextRetry);
           
           setRetryTimeout(timeout);
-      } else {
+        } else {
           // For non-rate limit errors, just show error message
           setError(`Failed to fetch customer data: ${axiosError.message || 'Unknown error'}`);
           setLoading(false);
