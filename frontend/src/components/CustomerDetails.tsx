@@ -753,14 +753,14 @@ ORDER BY OrderCreatedDate DESC;
   };
 
   // Basic fetchCustomerData function that can be called from useEffect
-  const fetchCustomerData = async () => {
+    const fetchCustomerData = async () => {
     if (!phoneNumber || !currentClinic) {
       setError('Customer phone number is required and clinic must be selected');
-      setLoading(false);
-      return;
-    }
+        setLoading(false);
+        return;
+      }
 
-    try {
+      try {
       // Only reset loading state if not in retry mode
       if (!isInRetryMode) {
         setLoading(true);
@@ -778,7 +778,7 @@ ORDER BY OrderCreatedDate DESC;
       console.log('Fetching data for phone number:', decodedPhoneNumber);
       
       // First, fetch customer profile with phone number filter - simplified query
-      const profileQuery = `
+        const profileQuery = `
 WITH AllAppointments AS (
   SELECT DISTINCT
     BookingID,
@@ -998,7 +998,7 @@ SELECT
           }, nextRetry);
           
           setRetryTimeout(timeout);
-        } else {
+      } else {
           // For non-rate limit errors, just show error message
           setError(`Failed to fetch customer data: ${axiosError.message || 'Unknown error'}`);
           setLoading(false);

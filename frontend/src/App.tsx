@@ -502,7 +502,7 @@ LIMIT 10`;
 
       try {
         queryResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query: sqlQuery }, axiosConfig);
-        if (!queryResponse.data.success) {
+      if (!queryResponse.data.success) {
           // Debug: Log SQL query error details to help debugging
           console.error('SQL Query Error:', queryResponse.data.error, 'SQL Query:', sqlQuery);
           
@@ -522,8 +522,8 @@ LIMIT 10`;
           }
           
           throw new Error(errorMessage);
-        }
-        queryResults = queryResponse.data.data;
+      }
+      queryResults = queryResponse.data.data;
       } catch (error: any) {
         // Handle network errors or other exceptions
         console.error('API Error:', error.message || 'Unknown error');
@@ -2015,13 +2015,13 @@ LIMIT 10`;
                 <CircularProgress size={16} className="text-gray-400" />
               </div>
             ) : (
-              <button
-                onClick={handleSendMessage}
-                disabled={loading || !inputMessage.trim()}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-blue-500 disabled:text-gray-600 hover:text-blue-400 transition-colors"
-              >
+            <button
+              onClick={handleSendMessage}
+              disabled={loading || !inputMessage.trim()}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-blue-500 disabled:text-gray-600 hover:text-blue-400 transition-colors"
+            >
                 <SendIcon />
-              </button>
+            </button>
             )}
           </div>
         </div>

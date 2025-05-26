@@ -58,6 +58,8 @@ const PaymentDetails: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<PaymentRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [startDate, setStartDate] = useState<Date | null>(new Date());
+  const [endDate, setEndDate] = useState<Date | null>(new Date());
   const [filterType, setFilterType] = useState<'day' | 'month'>('day');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
   const [showZeroValues, setShowZeroValues] = useState(false);
@@ -163,13 +165,17 @@ const PaymentDetails: React.FC = () => {
   }, [data, viewMode]);
 
   useEffect(() => {
-    if (selectedDate && currentClinic) {
+    if (currentClinic && ((filterType === 'day' && startDate && endDate) || (filterType === 'month' && selectedDate))) {
       fetchPaymentData();
     }
-  }, [selectedDate, filterType, currentClinic]);
+  }, [selectedDate, startDate, endDate, filterType, currentClinic]);
 
   const fetchPaymentData = async () => {
-    if (!selectedDate || !currentClinic) return;
+    if (!currentClinic) return;
+    
+    // Check if we have the required dates based on filter type
+    if (filterType === 'day' && (!startDate || !endDate)) return;
+    if (filterType === 'month' && !selectedDate) return;
     
     try {
       setLoading(true);
@@ -188,8 +194,8 @@ const PaymentDetails: React.FC = () => {
           CAST(NetTotal AS FLOAT64) as InvoiceNetTotal
         FROM great_time.MainPaymentView
         WHERE ${filterType === 'day' 
-          ? `DATE(OrderCreatedDate) = DATE('${selectedDate.toISOString().split('T')[0]}')`
-          : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate.toISOString().split('T')[0]}'))`
+          ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
+          : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
         }
 
         AND PaymentMethod != 'PASS'  /* Filter out transactions with PASS payment method */
@@ -251,6 +257,52 @@ const PaymentDetails: React.FC = () => {
 
   const handleDateChange = (newDate: Date | null) => {
     setSelectedDate(newDate);
+  };
+
+  const handleStartDateChange = (newDate: Date | null) => {
+    setStartDate(newDate);
+    // If end date is before start date, update end date to start date
+    if (newDate && endDate && newDate > endDate) {
+      setEndDate(newDate);
+    }
+  };
+
+  const handleEndDateChange = (newDate: Date | null) => {
+    setEndDate(newDate);
+    // If start date is after end date, update start date to end date
+    if (newDate && startDate && startDate > newDate) {
+      setStartDate(newDate);
+    }
+  };
+
+  // Quick date range selection functions
+  const setToday = () => {
+    const today = new Date();
+    setStartDate(today);
+    setEndDate(today);
+  };
+
+  const setLast7Days = () => {
+    const today = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(today.getDate() - 6);
+    setStartDate(sevenDaysAgo);
+    setEndDate(today);
+  };
+
+  const setLast30Days = () => {
+    const today = new Date();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(today.getDate() - 29);
+    setStartDate(thirtyDaysAgo);
+    setEndDate(today);
+  };
+
+  const setThisMonth = () => {
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    setStartDate(firstDay);
+    setEndDate(today);
   };
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -326,7 +378,17 @@ const PaymentDetails: React.FC = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `payment_details_${selectedDate?.toISOString().split('T')[0]}.csv`);
+    // Generate filename based on filter type and date
+    let dateStr = '';
+    if (filterType === 'month') {
+      dateStr = selectedDate ? format(selectedDate, 'yyyy-MM') : format(new Date(), 'yyyy-MM');
+    } else {
+      // For daily range
+      const start = startDate ? format(startDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+      const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+      dateStr = start === end ? start : `${start}_to_${end}`;
+    }
+    link.setAttribute('download', `payment_details_${dateStr}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -407,8 +469,16 @@ const PaymentDetails: React.FC = () => {
     // Add worksheet to workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Payment Details');
     
-    // Generate filename with current date
-    const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+    // Generate filename based on filter type and date
+    let dateStr = '';
+    if (filterType === 'month') {
+      dateStr = selectedDate ? format(selectedDate, 'yyyy-MM') : format(new Date(), 'yyyy-MM');
+    } else {
+      // For daily range
+      const start = startDate ? format(startDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+      const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+      dateStr = start === end ? start : `${start}_to_${end}`;
+    }
     const fileName = `payment_details_${dateStr}.xlsx`;
     
     // Export file
@@ -548,38 +618,200 @@ const PaymentDetails: React.FC = () => {
           </Select>
           
           <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              value={selectedDate}
-              onChange={handleDateChange}
-              views={filterType === 'month' ? ['year', 'month'] : ['year', 'month', 'day']}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  sx: {
-                    maxHeight: 40,
-                    bgcolor: '#1a2234',
-                    '& .MuiOutlinedInput-root': {
-                      color: '#d1d5db',
-                      '& fieldset': {
-                        borderColor: '#2d3748',
+            {filterType === 'day' ? (
+              <>
+                <DatePicker
+                  label="Start Date"
+                  value={startDate}
+                  onChange={handleStartDateChange}
+                  views={['year', 'month', 'day']}
+                  slotProps={{
+                    textField: {
+                      size: 'small',
+                      sx: {
+                        maxHeight: 40,
+                        minWidth: 140,
+                        bgcolor: '#1a2234',
+                        '& .MuiOutlinedInput-root': {
+                          color: '#d1d5db',
+                          '& fieldset': {
+                            borderColor: '#2d3748',
+                          },
+                          '&:hover fieldset': {
+                            borderColor: '#4a5568',
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: '#3b82f6',
+                          },
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: '#9ca3af',
+                        },
+                        '& .MuiSvgIcon-root': {
+                          color: '#d1d5db',
+                        },
                       },
-                      '&:hover fieldset': {
-                        borderColor: '#4a5568',
+                    }
+                  }}
+                />
+                <DatePicker
+                  label="End Date"
+                  value={endDate}
+                  onChange={handleEndDateChange}
+                  views={['year', 'month', 'day']}
+                  minDate={startDate || undefined}
+                  slotProps={{
+                    textField: {
+                      size: 'small',
+                      sx: {
+                        maxHeight: 40,
+                        minWidth: 140,
+                        bgcolor: '#1a2234',
+                        '& .MuiOutlinedInput-root': {
+                          color: '#d1d5db',
+                          '& fieldset': {
+                            borderColor: '#2d3748',
+                          },
+                          '&:hover fieldset': {
+                            borderColor: '#4a5568',
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: '#3b82f6',
+                          },
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: '#9ca3af',
+                        },
+                        '& .MuiSvgIcon-root': {
+                          color: '#d1d5db',
+                        },
                       },
-                      '&.Mui-focused fieldset': {
-                        borderColor: '#3b82f6',
-                      },
-                    },
-                    '& .MuiInputLabel-root': {
+                    }
+                  }}
+                />
+                
+                {/* Quick date range selection buttons */}
+                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={setToday}
+                    sx={{
+                      fontSize: '0.75rem',
+                      minWidth: 'auto',
+                      px: 1,
+                      py: 0.5,
+                      borderColor: '#2d3748',
                       color: '#9ca3af',
+                      bgcolor: '#1a2234',
+                      '&:hover': {
+                        borderColor: '#3b82f6',
+                        color: '#3b82f6',
+                        bgcolor: 'rgba(59, 130, 246, 0.08)'
+                      }
+                    }}
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={setLast7Days}
+                    sx={{
+                      fontSize: '0.75rem',
+                      minWidth: 'auto',
+                      px: 1,
+                      py: 0.5,
+                      borderColor: '#2d3748',
+                      color: '#9ca3af',
+                      bgcolor: '#1a2234',
+                      '&:hover': {
+                        borderColor: '#3b82f6',
+                        color: '#3b82f6',
+                        bgcolor: 'rgba(59, 130, 246, 0.08)'
+                      }
+                    }}
+                  >
+                    7D
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={setLast30Days}
+                    sx={{
+                      fontSize: '0.75rem',
+                      minWidth: 'auto',
+                      px: 1,
+                      py: 0.5,
+                      borderColor: '#2d3748',
+                      color: '#9ca3af',
+                      bgcolor: '#1a2234',
+                      '&:hover': {
+                        borderColor: '#3b82f6',
+                        color: '#3b82f6',
+                        bgcolor: 'rgba(59, 130, 246, 0.08)'
+                      }
+                    }}
+                  >
+                    30D
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={setThisMonth}
+                    sx={{
+                      fontSize: '0.75rem',
+                      minWidth: 'auto',
+                      px: 1,
+                      py: 0.5,
+                      borderColor: '#2d3748',
+                      color: '#9ca3af',
+                      bgcolor: '#1a2234',
+                      '&:hover': {
+                        borderColor: '#3b82f6',
+                        color: '#3b82f6',
+                        bgcolor: 'rgba(59, 130, 246, 0.08)'
+                      }
+                    }}
+                  >
+                    Month
+                  </Button>
+                </Box>
+              </>
+            ) : (
+              <DatePicker
+                value={selectedDate}
+                onChange={handleDateChange}
+                views={['year', 'month']}
+                slotProps={{
+                  textField: {
+                    size: 'small',
+                    sx: {
+                      maxHeight: 40,
+                      bgcolor: '#1a2234',
+                      '& .MuiOutlinedInput-root': {
+                        color: '#d1d5db',
+                        '& fieldset': {
+                          borderColor: '#2d3748',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#4a5568',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: '#9ca3af',
+                      },
+                      '& .MuiSvgIcon-root': {
+                        color: '#d1d5db',
+                      },
                     },
-                    '& .MuiSvgIcon-root': {
-                      color: '#d1d5db',
-                    },
-                  },
-                }
-              }}
-            />
+                  }
+                }}
+              />
+            )}
           </LocalizationProvider>
         </Box>
         
@@ -648,7 +880,7 @@ const PaymentDetails: React.FC = () => {
           
           <FormControlLabel
             control={
-              <Switch
+              <Switch 
                 checked={showZeroValues}
                 onChange={handleZeroValueToggle}
               />
@@ -660,11 +892,11 @@ const PaymentDetails: React.FC = () => {
           <Tooltip title="Export to Excel">
             <Button
               variant="outlined"
-              size="small"
+            size="small"
               startIcon={<FileDownloadIcon />}
               onClick={exportToExcel}
-              sx={{
-                height: 40,
+            sx={{
+              height: 40,
                 borderColor: '#2d3748',
                 color: '#d1d5db',
                 bgcolor: '#1a2234',
@@ -714,40 +946,40 @@ const PaymentDetails: React.FC = () => {
         <FormGroup>
           {paymentMethods.length > 0 ? (
             <>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={isAllSelected}
-                    indeterminate={selectedPaymentMethods.length > 0 && !isAllSelected}
-                    onChange={() => handlePaymentMethodChange('all')}
-                    sx={{ 
-                      color: '#4a5568',
-                      '&.Mui-checked': { color: '#3b82f6' },
-                      '&.MuiCheckbox-indeterminate': { color: '#3b82f6' }
-                    }}
-                  />
-                }
-                label="Select All"
-                sx={{ color: '#d1d5db' }}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={isAllSelected}
+                indeterminate={selectedPaymentMethods.length > 0 && !isAllSelected}
+                onChange={() => handlePaymentMethodChange('all')}
+                sx={{
+                  color: '#4a5568',
+                  '&.Mui-checked': { color: '#3b82f6' },
+                  '&.MuiCheckbox-indeterminate': { color: '#3b82f6' }
+                }}
               />
-              <Box sx={{ borderTop: '1px solid #2d3748', my: 1 }} />
-              {paymentMethods.map((method) => (
-                <FormControlLabel
-                  key={method}
-                  control={
-                    <Checkbox
-                      checked={selectedPaymentMethods.includes(method)}
-                      onChange={() => handlePaymentMethodChange(method)}
-                      sx={{ 
-                        color: '#4a5568',
-                        '&.Mui-checked': { color: '#3b82f6' }
-                      }}
-                    />
-                  }
-                  label={method}
-                  sx={{ color: '#d1d5db' }}
+            }
+            label="Select All"
+            sx={{ color: '#d1d5db' }}
+          />
+          <Box sx={{ borderTop: '1px solid #2d3748', my: 1 }} />
+          {paymentMethods.map((method) => (
+            <FormControlLabel
+              key={method}
+              control={
+                <Checkbox
+                  checked={selectedPaymentMethods.includes(method)}
+                  onChange={() => handlePaymentMethodChange(method)}
+                  sx={{
+                    color: '#4a5568',
+                    '&.Mui-checked': { color: '#3b82f6' }
+                  }}
                 />
-              ))}
+              }
+              label={method}
+              sx={{ color: '#d1d5db' }}
+            />
+          ))}
             </>
           ) : (
             <Typography variant="body2" color="#9ca3af">No payment methods available</Typography>
@@ -784,4 +1016,4 @@ const PaymentDetails: React.FC = () => {
   );
 };
 
-export default PaymentDetails;
+export default PaymentDetails; 

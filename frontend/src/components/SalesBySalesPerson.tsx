@@ -219,7 +219,7 @@ const SalesBySalesPerson: React.FC = () => {
   // Initial data fetch
   useEffect(() => {
     if (currentClinic) {
-      fetchSalesData();
+    fetchSalesData();
     }
   }, [fetchSalesData, currentClinic]);
 
@@ -335,14 +335,14 @@ const SalesBySalesPerson: React.FC = () => {
             {error}
           </Typography>
           {error !== 'Please select a clinic first.' && (
-            <Box sx={{ mt: 3 }}>
-              <button
-                onClick={() => fetchSalesData()}
-                className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-md"
-              >
-                Retry
-              </button>
-            </Box>
+          <Box sx={{ mt: 3 }}>
+            <button
+              onClick={() => fetchSalesData()}
+              className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-md"
+            >
+              Retry
+            </button>
+          </Box>
           )}
         </Paper>
       </Box>
@@ -596,17 +596,17 @@ const SalesBySalesPerson: React.FC = () => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Typography variant="h6" color="#f3f4f6">Detailed Transactions</Typography>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                {filteredTransactions.length !== transactions.length && (
-                  <button
-                    className="text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded"
-                    onClick={() => {
-                      setFilteredTransactions(transactions);
-                      setTransactionsPage(0);
-                    }}
-                  >
-                    Show All
-                  </button>
-                )}
+              {filteredTransactions.length !== transactions.length && (
+                <button
+                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded"
+                  onClick={() => {
+                    setFilteredTransactions(transactions);
+                    setTransactionsPage(0);
+                  }}
+                >
+                  Show All
+                </button>
+              )}
                 <Button
                   onClick={exportTransactionsToExcel}
                   variant="contained"
