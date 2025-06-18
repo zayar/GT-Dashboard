@@ -235,7 +235,7 @@ const WalletTransactionDetails: React.FC = () => {
         FROM 
           \`piti-pass.passdb_prod.wallettransaction\`
         WHERE 
-           MainAccountName = '${decodedOwnerName}'
+           MainAccountName = '${decodedOwnerName}' AND ClinicCode = '${currentClinic.pass_id}'
         ORDER BY 
           createddate_myanmar DESC
         LIMIT 200
