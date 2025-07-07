@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Box, 
   Typography, 
@@ -41,6 +41,20 @@ interface Customer {
   location: string;
 }
 
+// Custom hook for debouncing
+function useDebounce(value: string, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+  return debouncedValue;
+}
+
 const CustomersTable: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,18 +66,28 @@ const CustomersTable: React.FC = () => {
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
+  const debouncedSearchTerm = useDebounce(searchTerm, 500); // 500ms debounce delay
 
   useEffect(() => {
     if (currentClinic) {
       fetchCustomers();
     }
-  }, [currentClinic]);
+  }, [currentClinic, debouncedSearchTerm, page]); // Re-fetch when clinic, search term, or page changes
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = useCallback(async () => {
     if (!currentClinic) return;
     
     try {
       setLoading(true);
+      
+      // Search condition
+      const searchCondition = debouncedSearchTerm
+        ? `AND (
+            LOWER(i.CustomerName) LIKE '%${debouncedSearchTerm.toLowerCase()}%'
+            OR i.CustomerPhoneNumber LIKE '%${debouncedSearchTerm}%'
+            OR LOWER(COALESCE(s.MemberId, '')) LIKE '%${debouncedSearchTerm.toLowerCase()}%'
+          )`
+        : '';
       
       const query = `
       WITH CustomerPayments AS (
@@ -129,6 +153,7 @@ const CustomersTable: React.FC = () => {
         CustomerSpend s
       ON
         i.CustomerName = s.CustomerName AND i.CustomerPhoneNumber = s.CustomerPhoneNumber
+      WHERE 1=1 ${searchCondition}
       ORDER BY 
         s.TotalSpend DESC NULLS LAST
       LIMIT 100
@@ -189,7 +214,7 @@ const CustomersTable: React.FC = () => {
       setError(errorMessage);
       setLoading(false);
     }
-  };
+  }, [currentClinic, debouncedSearchTerm, page]);
 
   const handleViewCustomer = (customer: Customer) => {
     // Encode customer phone number for URL and navigate to details page
@@ -241,17 +266,8 @@ const CustomersTable: React.FC = () => {
     return 0;
   };
 
-  const filteredCustomers = customers.filter(customer =>
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.phoneNumber.includes(searchTerm) ||
-    customer.location.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // Sort the filtered customers
-  const sortedCustomers = React.useMemo(
-    () => [...filteredCustomers].sort(getComparator(order, orderBy)),
-    [filteredCustomers, order, orderBy]
-  );
+  // Sort the customers directly
+  const sortedCustomers = [...customers].sort(getComparator(order, orderBy));
 
   // Calculate pagination
   const startIndex = (page - 1) * rowsPerPage;
@@ -608,10 +624,10 @@ const CustomersTable: React.FC = () => {
               }}
             >
               <Typography sx={{ color: '#d1d5db' }}>
-                Showing {Math.min(filteredCustomers.length, startIndex + 1)}-{Math.min(filteredCustomers.length, endIndex)} of {filteredCustomers.length} customers
+                Showing {Math.min(customers.length, startIndex + 1)}-{Math.min(customers.length, endIndex)} of {customers.length} customers
               </Typography>
               <Pagination 
-                count={Math.ceil(filteredCustomers.length / rowsPerPage)} 
+                count={Math.ceil(customers.length / rowsPerPage)} 
                 page={page} 
                 onChange={handleChangePage}
                 color="primary"

@@ -7,7 +7,9 @@ import {
   AccountBalanceWallet as AccountBalanceWalletIcon,
   Payments as PaymentsIcon,
   ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon
+  ExpandLess as ExpandLessIcon,
+  Menu as MenuIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import { 
   ListSubheader, 
@@ -23,7 +25,8 @@ import {
   alpha,
   Divider,
   Button,
-  Typography
+  Typography,
+  Fab
 } from '@mui/material';
 
 // Interface for menu items
@@ -80,7 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     localStorage.setItem('sidebarMinimized', JSON.stringify(isMinimized));
   }, [isMinimized]);
   
-  // Close sidebar when screen resizes
+  // Close sidebar when screen resizes and handle initial state
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 1024) {
@@ -93,9 +96,22 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     // Set initial state based on screen size
     handleResize();
     
-    window.addEventListener('resize', handleResize);
+    // Add event listener with passive option for better performance
+    window.addEventListener('resize', handleResize, { passive: true });
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Handle escape key to close mobile sidebar
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isOpen && window.innerWidth < 1024) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen]);
 
   // Toggle sidebar on mobile
   const toggleSidebar = () => {
@@ -500,30 +516,92 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
 
   return (
     <>
-      {/* Mobile hamburger menu */}
-      <div className="lg:hidden fixed top-4 left-4 z-50">
-        <IconButton 
-          onClick={toggleSidebar} 
-          sx={{ 
-            color: theme.palette.common.white,
+      {/* Improved Mobile Toggle Button - Always visible */}
+      <Fab
+        onClick={toggleSidebar}
+        sx={{
+          position: 'fixed',
+          top: { xs: 16, sm: 20 },
+          left: { xs: 16, sm: 20 },
+          zIndex: 1300, // Higher than sidebar
+          display: { xs: 'flex', lg: 'none' },
+          width: { xs: 48, sm: 56 },
+          height: { xs: 48, sm: 56 },
+          backgroundColor: isDarkMode 
+            ? alpha(theme.palette.primary.dark, 0.9)
+            : alpha(theme.palette.primary.main, 0.9),
+          color: theme.palette.common.white,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          backdropFilter: 'blur(10px)',
+          border: `2px solid ${alpha(theme.palette.common.white, 0.1)}`,
+          '&:hover': {
             backgroundColor: isDarkMode 
-              ? alpha(theme.palette.primary.dark, 0.7)
-              : alpha(theme.palette.primary.main, 0.9),
-            '&:hover': {
-              backgroundColor: theme.palette.primary.main,
-            }
-          }}
-        >
-          <i className="fas fa-bars"></i>
-        </IconButton>
-      </div>
+              ? theme.palette.primary.dark
+              : theme.palette.primary.main,
+            transform: 'scale(1.05)',
+            boxShadow: '0 6px 25px rgba(0,0,0,0.4)',
+          },
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        {isOpen ? <CloseIcon /> : <MenuIcon />}
+      </Fab>
 
-      {/* Overlay for mobile */}
+      {/* Desktop Toggle Button - Floating on the right edge */}
+      <Fab
+        onClick={toggleMinimized}
+        sx={{
+          position: 'fixed',
+          top: '50%',
+          left: isMinimized ? 70 : 260,
+          transform: 'translateY(-50%)',
+          zIndex: 1200,
+          display: { xs: 'none', lg: 'flex' },
+          width: 40,
+          height: 40,
+          backgroundColor: isDarkMode 
+            ? alpha(theme.palette.background.paper, 0.9)
+            : alpha(theme.palette.primary.main, 0.9),
+          color: isDarkMode 
+            ? theme.palette.primary.light
+            : theme.palette.common.white,
+          boxShadow: '0 2px 15px rgba(0,0,0,0.2)',
+          backdropFilter: 'blur(10px)',
+          border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
+          '&:hover': {
+            backgroundColor: isDarkMode 
+              ? alpha(theme.palette.background.paper, 1)
+              : theme.palette.primary.main,
+            transform: 'translateY(-50%) scale(1.1)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          },
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        {isMinimized ? <ChevronRight fontSize="small" /> : <ChevronLeft fontSize="small" />}
+      </Fab>
+
+      {/* Improved Mobile Overlay */}
       {isOpen && (
-        <div 
-          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40" 
+        <Box
           onClick={toggleSidebar}
-        ></div>
+          sx={{
+            display: { xs: 'block', lg: 'none' },
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1250, // Between mobile toggle and sidebar
+            backdropFilter: 'blur(2px)',
+            animation: 'fadeIn 0.3s ease-in-out',
+            '@keyframes fadeIn': {
+              from: { opacity: 0 },
+              to: { opacity: 1 },
+            },
+          }}
+        />
       )}
 
       {/* Sidebar */}
@@ -536,7 +614,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           },
           insetY: 0,
           left: 0,
-          zIndex: 50,
+          zIndex: 1260, // Higher than overlay
           background: isDarkMode 
             ? 'linear-gradient(180deg, #151d30 0%, #0c1424 100%)' 
             : 'linear-gradient(180deg, #f0f5ff 0%, #edf2fc 100%)',
@@ -548,7 +626,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             xs: '250px',
             lg: isMinimized ? '70px' : '260px'
           },
-          transition: 'all 0.3s ease-in-out',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           boxShadow: '0 0 20px rgba(0,0,0,0.2)',
           display: 'flex',
           flexDirection: 'column',
@@ -614,20 +692,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             )}
           </Box>
           
-          <IconButton
-            onClick={toggleMinimized}
-            sx={{
-              display: { xs: 'none', lg: 'flex' },
-              color: isDarkMode ? theme.palette.common.white : theme.palette.primary.main,
-              '&:hover': {
-                backgroundColor: isDarkMode 
-                  ? alpha(theme.palette.common.white, 0.1) 
-                  : alpha(theme.palette.primary.main, 0.1),
-              }
-            }}
-          >
-            {isMinimized ? <ChevronRight /> : <ChevronLeft />}
-          </IconButton>
+
         </Box>
 
         {/* Menu items */}

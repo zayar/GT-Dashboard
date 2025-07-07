@@ -426,7 +426,7 @@ const WalletTransactionDetails: React.FC = () => {
     }
     
     // Apply sorting
-    if (sortConfig.key) {
+    if (sortConfig.key) { 
       filtered.sort((a, b) => 
         compareValues(sortConfig.key as keyof Transaction, a, b, sortConfig.direction)
       );
