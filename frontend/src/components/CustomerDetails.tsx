@@ -66,7 +66,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const [aiSummary, setAiSummary] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [rowsPerPage, setRowsPerPage] = React.useState(5);
-  const [serviceFilter, setServiceFilter] = React.useState<'remaining' | 'completed'>('remaining');
+  const [serviceFilter, setServiceFilter] = React.useState<'all' | 'remaining' | 'completed'>('all');
   const [selectedService, setSelectedService] = React.useState<string | null>(null);
   const [recommendedServices, setRecommendedServices] = useState<any[]>([]);
   
@@ -181,8 +181,8 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     setPage(0);
   };
 
-  const handleServiceFilterChange = (event: SelectChangeEvent<'remaining' | 'completed'>) => {
-    setServiceFilter(event.target.value as 'remaining' | 'completed');
+  const handleServiceFilterChange = (event: SelectChangeEvent<'all' | 'remaining' | 'completed'>) => {
+    setServiceFilter(event.target.value as 'all' | 'remaining' | 'completed');
   };
 
   const handleServiceNameClick = (serviceName: string) => {
@@ -573,7 +573,9 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const filteredPurchasedServices = useMemo(() => {
     if (!customerData) return [];
     return customerData.purchasedServices.filter((service: any) => {
-      if (serviceFilter === 'remaining') {
+      if (serviceFilter === 'all') {
+        return true; // Show all services
+      } else if (serviceFilter === 'remaining') {
         return service.remainingPackageCount > 0;
       } else {
         return service.remainingPackageCount === 0;
@@ -1585,6 +1587,7 @@ SELECT
               }}
               size="small"
             >
+                <MenuItem value="all" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>All</MenuItem>
                 <MenuItem value="remaining" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>Remaining</MenuItem>
                 <MenuItem value="completed" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>Completed</MenuItem>
             </Select>
