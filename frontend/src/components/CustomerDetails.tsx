@@ -65,7 +65,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const [error, setError] = React.useState('');
   const [aiSummary, setAiSummary] = React.useState('');
   const [page, setPage] = React.useState(0);
-  const [rowsPerPage, setRowsPerPage] = React.useState(5);
+  const [rowsPerPage, setRowsPerPage] = React.useState(25);
   const [serviceFilter, setServiceFilter] = React.useState<'all' | 'remaining' | 'completed'>('all');
   const [selectedService, setSelectedService] = React.useState<string | null>(null);
   const [recommendedServices, setRecommendedServices] = useState<any[]>([]);
