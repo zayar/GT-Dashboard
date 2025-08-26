@@ -591,7 +591,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     });
   }, [customerData, serviceFilter]);
 
-  // Filtered recent bookings based on the selected service
+  // Filtered all bookings based on the selected service
   const filteredBookings = useMemo(() => {
     console.log("filteredBookings useMemo called with sortedBookings:", sortedBookings);
     if (!customerData) {
@@ -1057,7 +1057,7 @@ GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
         console.log('Profile data fetched successfully:', profile);
         
         // Then fetch other data with phone number filter - simplified query
-        // Notice we're not filtering by year for purchased services and recent bookings
+        // Notice we're not filtering by year for purchased services and all bookings
         const dataQuery = `
 -- Monthly sales data (not filtered by year since it's just for display purposes)
 WITH MonthlySales AS (
@@ -1087,7 +1087,7 @@ FROM great_time.MainDataView
   GROUP BY service, PackageCount, RemainingPackageCount, Price
 ),
 
--- Recent bookings - not filtered by year
+-- All bookings - not filtered by year
 RecentBookings AS (
   SELECT
     BookingID,
@@ -1102,7 +1102,6 @@ RecentBookings AS (
     AND CheckInTime IS NOT NULL
     AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   ORDER BY CheckInTime DESC
-  LIMIT 10
 )
 
 -- Final result with all data
@@ -1455,42 +1454,6 @@ SELECT
         <Typography variant="h6" sx={{ ml: 1, color: '#f3f4f6', fontWeight: 500 }}>
           Customer Details
         </Typography>
-        
-        {/* Year Selector */}
-        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
-          <Typography variant="body2" sx={{ mr: 1, color: '#94a3b8' }}>
-            Year:
-          </Typography>
-          <Select
-            value={selectedYear}
-            onChange={handleYearChange}
-            size="small"
-            sx={{
-              height: '32px',
-              minWidth: '100px',
-              bgcolor: '#1e293b',
-              color: '#f1f5f9',
-              '& .MuiSelect-icon': {
-                color: '#94a3b8'
-              },
-              '&:hover': {
-                bgcolor: '#1e293b'
-              },
-              '& .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#2d3748'
-              },
-              '&:hover .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#3b82f6'
-              }
-            }}
-          >
-            {yearOptions.map((year) => (
-              <MenuItem key={year} value={year}>
-                {year}
-              </MenuItem>
-            ))}
-          </Select>
-      </Box>
       </Box>
 
       {/* Main content with proper scrolling */}
@@ -1681,7 +1644,7 @@ SELECT
             <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', height: '100%', borderRadius: '8px' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
-                  Recent Bookings
+                  All Bookings
                   {selectedService && (
                     <Typography component="span" sx={{ color: '#3b82f6', fontSize: '0.9em', ml: 1 }}>
                       (Filtered by: {selectedService})
@@ -1793,7 +1756,43 @@ SELECT
 
         {/* Service usage heatmap */}
         <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', mb: 3, borderRadius: '8px' }}>
-          <Typography variant="h6" sx={{ mb: 2, color: '#f3f4f6' }}>Service Usage Over Time</Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6" sx={{ color: '#f3f4f6' }}>Service Usage Over Time</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Typography variant="body2" sx={{ mr: 1, color: '#94a3b8' }}>
+                Year:
+              </Typography>
+              <Select
+                value={selectedYear}
+                onChange={handleYearChange}
+                size="small"
+                sx={{
+                  height: '32px',
+                  minWidth: '100px',
+                  bgcolor: '#1e293b',
+                  color: '#f1f5f9',
+                  '& .MuiSelect-icon': {
+                    color: '#94a3b8'
+                  },
+                  '&:hover': {
+                    bgcolor: '#1e293b'
+                  },
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#2d3748'
+                  },
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#3b82f6'
+                  }
+                }}
+              >
+                {yearOptions.map((year) => (
+                  <MenuItem key={year} value={year}>
+                    {year}
+                  </MenuItem>
+                ))}
+              </Select>
+            </Box>
+          </Box>
           <TableContainer sx={{ 
             maxHeight: '400px', 
             overflowY: 'auto',
