@@ -217,7 +217,6 @@ WITH ServiceStats AS (
     CAST(SUM(CAST(Price AS FLOAT64)) AS INT64) as total_revenue
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
-  AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
   AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY ServiceName, ServiceImage
 )
@@ -232,7 +231,6 @@ SELECT
 FROM great_time.MainDataView
 JOIN ServiceStats USING (ServiceName)
 WHERE ServiceName = '${escapedServiceName}'
-AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
 AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
 GROUP BY ServiceName, ServiceStats.ServiceImage, total_bookings, total_customers, total_revenue;`;
 
@@ -278,8 +276,6 @@ BoughtTogether AS (
     AND b2.ServiceName != '${escapedServiceName}'
     AND LOWER(b1.ClinicCode) = LOWER('${currentClinic.code}')
     AND LOWER(b2.ClinicCode) = LOWER('${currentClinic.code}')
-  WHERE EXTRACT(YEAR FROM b1.CheckInTime) = ${selectedYear}
-  AND EXTRACT(YEAR FROM b2.CheckInTime) = ${selectedYear}
   GROUP BY b2.ServiceName
   ORDER BY bought_together_count DESC
   LIMIT 10
@@ -292,7 +288,6 @@ Therapists AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
     AND PractitionerName IS NOT NULL
-    AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
     AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY PractitionerName
   ORDER BY service_count DESC
@@ -305,7 +300,6 @@ Customers AS (
     COUNT(*) as purchase_count
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
-  AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
   AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   GROUP BY CustomerName, CustomerPhoneNumber
   ORDER BY purchase_count DESC
@@ -320,7 +314,6 @@ ServiceRecords AS (
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) as month
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
-  AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
   AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   ORDER BY CheckInTime DESC
 )
@@ -390,7 +383,57 @@ SELECT
     };
 
     fetchServiceData();
-  }, [name, selectedYear, currentClinic]);
+  }, [name, currentClinic]); // Removed selectedYear dependency since most data is no longer year-filtered
+
+  // Separate effect for year-dependent data (MonthlySales chart only)
+  useEffect(() => {
+    if (!serviceData || !name || !currentClinic) return;
+
+    const fetchYearDependentData = async () => {
+      try {
+        const decodedServiceName = decodeURIComponent(name);
+        const escapedServiceName = decodedServiceName.replace(/'/g, "''");
+        
+        // Only fetch MonthlySales data with year filter
+        const monthlySalesQuery = `
+          SELECT
+            FORMAT_DATE('%Y-%m', DATE(CheckInTime)) AS month,
+            COUNT(*) as count
+          FROM great_time.MainDataView
+          WHERE ServiceName = '${escapedServiceName}'
+          AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          GROUP BY month
+          ORDER BY month DESC
+          LIMIT 18
+        `;
+
+        const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+          { query: monthlySalesQuery },
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            timeout: 10000
+          }
+        );
+
+        if (response.data.success && response.data.data) {
+          setServiceData(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              monthlySales: response.data.data
+            };
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching year-dependent data:', error);
+      }
+    };
+
+    fetchYearDependentData();
+  }, [selectedYear, name, currentClinic, serviceData]);
 
   if (loading) {
     return (
@@ -513,42 +556,6 @@ SELECT
         >
           <ArrowBackIcon />
         </IconButton>
-        
-        {/* Year Selector */}
-        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
-          <Typography variant="body2" sx={{ mr: 1, color: '#94a3b8' }}>
-            Year:
-          </Typography>
-          <Select
-            value={selectedYear}
-            onChange={handleYearChange}
-            size="small"
-            sx={{
-              height: '32px',
-              minWidth: '100px',
-              bgcolor: '#1e293b',
-              color: '#f1f5f9',
-              '& .MuiSelect-icon': {
-                color: '#94a3b8'
-              },
-              '&:hover': {
-                bgcolor: '#1e293b'
-              },
-              '& .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#2d3748'
-              },
-              '&:hover .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#3b82f6'
-              }
-            }}
-          >
-            {yearOptions.map((year) => (
-              <MenuItem key={year} value={year}>
-                {year}
-              </MenuItem>
-            ))}
-          </Select>
-        </Box>
       </Box>
       
       {/* Main scrollable content container */}
@@ -678,7 +685,44 @@ SELECT
           border: '1px solid #2d3748'
         }}
       >
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: '#f3f4f6' }}>Monthly Appointment</Typography>
+        {/* Year Filter moved here - only affects Monthly Appointment chart */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#f3f4f6' }}>Monthly Appointment</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Typography variant="body2" sx={{ mr: 1, color: '#94a3b8' }}>
+              Year:
+            </Typography>
+            <Select
+              value={selectedYear}
+              onChange={handleYearChange}
+              size="small"
+              sx={{
+                height: '32px',
+                minWidth: '100px',
+                bgcolor: '#1e293b',
+                color: '#f1f5f9',
+                '& .MuiSelect-icon': {
+                  color: '#94a3b8'
+                },
+                '&:hover': {
+                  bgcolor: '#1e293b'
+                },
+                '& .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#2d3748'
+                },
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#3b82f6'
+                }
+              }}
+            >
+              {yearOptions.map((year) => (
+                <MenuItem key={year} value={year}>
+                  {year}
+                </MenuItem>
+              ))}
+            </Select>
+          </Box>
+        </Box>
         <Box sx={{ height: 300 }}>
           <Bar
             data={chartData}

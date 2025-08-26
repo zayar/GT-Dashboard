@@ -186,7 +186,15 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   };
 
   const handleServiceNameClick = (serviceName: string) => {
-    navigate(`/services/${encodeURIComponent(serviceName)}`);
+    // If the same service is clicked again, clear the filter
+    if (selectedService === serviceName) {
+      setSelectedService(null);
+    } else {
+      // Set the selected service to filter bookings
+      setSelectedService(serviceName);
+    }
+    // Reset to first page when filtering
+    setPage(0);
   };
 
   // Add a function to handle invoice click
@@ -1572,44 +1580,67 @@ SELECT
         {/* Two column layout for services and bookings */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
-            <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', height: '100%', borderRadius: '8px' }}>
-              <Typography variant="h6" sx={{ mb: 2, color: '#f3f4f6' }}>Purchased Services</Typography>
-            <Select
-              value={serviceFilter}
-              onChange={handleServiceFilterChange}
-              sx={{
+          <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', height: '100%', borderRadius: '8px' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6" sx={{ color: '#f3f4f6' }}>Purchased Services</Typography>
+              {selectedService && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => {
+                    setSelectedService(null);
+                    setPage(0);
+                  }}
+                  sx={{
+                    color: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      bgcolor: 'rgba(59, 130, 246, 0.08)'
+                    }
+                  }}
+                >
+                  Show All
+                </Button>
+              )}
+            </Box>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel sx={{ color: '#94a3b8' }}>Filter</InputLabel>
+              <Select
+                value={serviceFilter}
+                onChange={handleServiceFilterChange}
+                sx={{
                   color: '#f3f4f6',
-                mb: 2,
                   bgcolor: '#101924',
                   '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
                   '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4a5568' },
                   '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' }
-              }}
-              size="small"
-            >
+                }}
+              >
                 <MenuItem value="all" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>All</MenuItem>
                 <MenuItem value="remaining" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>Remaining</MenuItem>
                 <MenuItem value="completed" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>Completed</MenuItem>
-            </Select>
-              <TableContainer sx={{ 
-                maxHeight: '400px', 
-                overflowY: 'auto',
-                '&::-webkit-scrollbar': {
-                  width: '8px',
-                  height: '8px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  backgroundColor: '#111923',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: '#2d3748',
-                  borderRadius: '4px',
-                },
-                '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: '#3b82f6',
-                }
-              }}>
-                <Table size="small" stickyHeader>
+              </Select>
+            </FormControl>
+            <TableContainer sx={{ 
+              maxHeight: '400px', 
+              overflowY: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+                height: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: '#111923',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: '#2d3748',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: '#3b82f6',
+              }
+            }}>
+              <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
                       <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Service Name</TableCell>
@@ -1622,13 +1653,15 @@ SELECT
                       <TableRow key={index} sx={{ '&:hover': { bgcolor: '#1a2234' } }}>
                       <TableCell 
                         sx={{ 
-                            color: '#f3f4f6',
+                            color: selectedService === service.service ? '#3b82f6' : '#f3f4f6',
                           cursor: 'pointer',
                             borderBottom: '1px solid #2d3748',
                           '&:hover': {
                               color: '#3b82f6',
                             textDecoration: 'underline'
-                          }
+                          },
+                          fontWeight: selectedService === service.service ? 600 : 400,
+                          bgcolor: selectedService === service.service ? 'rgba(59, 130, 246, 0.1)' : 'transparent'
                         }}
                         onClick={() => handleServiceNameClick(service.service)}
                       >
@@ -1646,7 +1679,21 @@ SELECT
 
         <Grid item xs={12} md={6}>
             <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', height: '100%', borderRadius: '8px' }}>
-              <Typography variant="h6" sx={{ mb: 2, color: '#f3f4f6' }}>Recent Bookings</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
+                  Recent Bookings
+                  {selectedService && (
+                    <Typography component="span" sx={{ color: '#3b82f6', fontSize: '0.9em', ml: 1 }}>
+                      (Filtered by: {selectedService})
+                    </Typography>
+                  )}
+                </Typography>
+                {selectedService && (
+                  <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+                    {filteredBookings.length} booking{filteredBookings.length !== 1 ? 's' : ''}
+                  </Typography>
+                )}
+              </Box>
               <TableContainer sx={{ 
                 maxHeight: '400px', 
                 overflowY: 'auto',
