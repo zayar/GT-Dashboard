@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
-  Paper,
   Typography,
   IconButton,
   Select,
@@ -9,8 +8,6 @@ import {
   SelectChangeEvent,
   Tooltip,
   CircularProgress,
-  FormControl,
-  InputLabel,
   Switch,
   FormControlLabel,
   TextField,
@@ -62,6 +59,7 @@ interface PaymentRecord {
   OrderCreditBalance: number | null;
   Discount: number | null;
   Tax: number | null;
+  payment_rank?: number;
 }
 
 const PaymentDetails: React.FC = () => {
@@ -174,37 +172,44 @@ const PaymentDetails: React.FC = () => {
       });
     }
     
-    // Reorder columns for both detailed and summary views
+        // Reorder columns for both detailed and summary views
     const result = filteredData.map((record, index) => {
+      // Check if this is the first occurrence of this item (not just invoice)
+      const isFirstItemRow = index === 0 || 
+        filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber ||
+        filteredData[index - 1].ServiceName !== record.ServiceName ||
+        filteredData[index - 1].ItemQuantity !== record.ItemQuantity ||
+        filteredData[index - 1].ItemPrice !== record.ItemPrice;
+      
       // Check if this is the first occurrence of this invoice number
       const isFirstInvoiceRow = index === 0 || filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber;
       
-              return {
-          Date: record.Date,
-          InvoiceNumber: record.InvoiceNumber,
-          CustomerName: record.CustomerName,
-          MemberId: record.MemberId,
-          SalePerson: record.SalePerson,
-          ServiceName: record.ServiceName,
-          ServicePackageName: record.ServicePackageName,
-          WalletTopUp: record.WalletTopUp,
-          ItemQuantity: record.ItemQuantity,
-          ItemPrice: record.ItemPrice,
-          ItemTotal: record.ItemTotal, // Use ItemTotal directly from BigQuery
-          SubTotal: record.SubTotal, // From database
-          Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
-          Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
-          NetTotal: isFirstInvoiceRow ? record.NetTotal : null, // Show only on first row of invoice
-          OrderBalance: isFirstInvoiceRow ? record.OrderBalance : null, // Show only on first row of invoice
-          OrderCreditBalance: isFirstInvoiceRow ? record.OrderCreditBalance : null, // Show only on first row of invoice
-          Tax: isFirstInvoiceRow ? record.Tax : null, // Show only on first row of invoice
-          InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
-          PaymentStatus: record.PaymentStatus,
-          PaymentMethod: record.PaymentMethod,
-          PaymentType: record.PaymentType,
-          PaymentAmount: record.PaymentAmount,
-          PaymentNote: record.PaymentNote
-        };
+      return {
+        Date: record.Date,
+        InvoiceNumber: record.InvoiceNumber,
+        CustomerName: record.CustomerName,
+        MemberId: record.MemberId,
+        SalePerson: record.SalePerson,
+        ServiceName: isFirstItemRow ? record.ServiceName : null, // Show service name only on first payment of each item
+        ServicePackageName: isFirstItemRow ? record.ServicePackageName : null,
+        WalletTopUp: isFirstItemRow ? record.WalletTopUp : null,
+        ItemQuantity: isFirstItemRow ? record.ItemQuantity : null, // Show item details only on first payment of each item
+        ItemPrice: isFirstItemRow ? record.ItemPrice : null,
+        ItemTotal: isFirstItemRow ? record.ItemTotal : null,
+        SubTotal: isFirstItemRow ? record.SubTotal : null,
+        Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
+        Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
+        NetTotal: isFirstInvoiceRow ? record.NetTotal : null, // Show only on first row of invoice
+        OrderBalance: isFirstInvoiceRow ? record.OrderBalance : null, // Show only on first row of invoice
+        OrderCreditBalance: isFirstInvoiceRow ? record.OrderCreditBalance : null, // Show only on first row of invoice
+        Tax: isFirstInvoiceRow ? record.Tax : null, // Show only on first row of invoice
+        InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
+        PaymentStatus: record.PaymentStatus, // Always show payment details
+        PaymentMethod: record.PaymentMethod,
+        PaymentType: record.PaymentType,
+        PaymentAmount: record.PaymentAmount,
+        PaymentNote: record.PaymentNote
+      };
     });
     
 
@@ -228,8 +233,10 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
-        WITH DeduplicatedData AS (
-          SELECT 
+        WITH 
+        -- Get unique invoice items
+        UniqueItems AS (
+          SELECT DISTINCT
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
             CustomerName,
@@ -238,7 +245,6 @@ const PaymentDetails: React.FC = () => {
             ServiceName,
             ServicePackageName,
             WalletTopUp,
-            PaymentStatus,
             CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
@@ -250,22 +256,48 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
-            OrderCreatedDate,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
-              ORDER BY OrderCreatedDate DESC, PaymentAmount DESC
-            ) as rn
+            OrderCreatedDate
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
             : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
           }
-          AND PaymentMethod != 'PASS'  /* Filter out transactions with PASS payment method */
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')  /* Filter by selected clinic */
+          AND PaymentMethod != 'PASS'
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+        ),
+        -- Get unique payments per invoice
+        UniquePayments AS (
+          SELECT DISTINCT
+            InvoiceNumber,
+            PaymentStatus,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote
+          FROM great_time.MainPaymentView
+          WHERE ${filterType === 'day' 
+            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
+            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
+          }
+          AND PaymentMethod != 'PASS'
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+        ),
+        -- Create the Cartesian product but with row numbers to control display
+        ItemsWithPayments AS (
+          SELECT 
+            i.*,
+            p.PaymentStatus,
+            p.PaymentMethod,
+            p.PaymentType,
+            p.PaymentAmount,
+            p.PaymentNote,
+            ROW_NUMBER() OVER (
+              PARTITION BY i.InvoiceNumber, i.ServiceName, i.ServicePackageName, i.ItemQuantity, i.ItemPrice
+              ORDER BY p.PaymentAmount DESC, p.PaymentMethod
+            ) as payment_rank
+          FROM UniqueItems i
+          CROSS JOIN UniquePayments p 
+          WHERE i.InvoiceNumber = p.InvoiceNumber
         )
         SELECT 
           Date,
@@ -291,10 +323,10 @@ const PaymentDetails: React.FC = () => {
           PaymentMethod,
           PaymentType,
           PaymentAmount,
-          PaymentNote
-        FROM DeduplicatedData
-        WHERE rn = 1
-        ORDER BY OrderCreatedDate DESC
+          PaymentNote,
+          payment_rank
+        FROM ItemsWithPayments
+        ORDER BY OrderCreatedDate DESC, InvoiceNumber, ServiceName, payment_rank
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
@@ -405,192 +437,52 @@ const PaymentDetails: React.FC = () => {
     setSearchTerm(event.target.value);
   };
 
-  const exportToCSV = () => {
-    if (data.length === 0) return;
-    
-    const headers = [
-      'Date', 
-      'Invoice Number', 
-      'Customer Name', 
-      'Member ID', 
-      'Sale Person', 
-      'Service Name', 
-      'Service Package',
-      'Wallet',
-      'Item Quantity',
-      'Item Price',
-      'Item Total',
-      'Sub Total',
-      'Total',
-      'Discount',
-      'Net Total',
-      'Order Balance',
-      'Order Credit Balance',
-      'Tax',
-      'Invoice Total',
-      'Payment Status',
-      'Payment Method',
-      'Payment Type',
-      'Payment Amount',
-      'Payment Note'
-    ];
-    
-    // Create a map to group rows by invoice number
-    const invoiceGroups: Record<string, Array<PaymentRecord>> = {};
-    
-    // Group data by invoice number
-    data.forEach(row => {
-      if (!invoiceGroups[row.InvoiceNumber]) {
-        invoiceGroups[row.InvoiceNumber] = [];
-      }
-      invoiceGroups[row.InvoiceNumber].push(row);
-    });
-    
-    // Prepare rows for CSV, ensuring only the first occurrence of each invoice shows the total
-    const processedRows: string[] = [];
-    
-    Object.entries(invoiceGroups).forEach(([invoiceNumber, rows]) => {
-      rows.forEach((record, index) => {
-        // Format the wallet value
-        let walletValue = '';
-        if (record.WalletTopUp) {
-          if (String(record.WalletTopUp).includes('*Point') || (typeof record.WalletTopUp === 'number' && record.WalletTopUp > 0)) {
-            walletValue = 'Topup';
-          } else {
-            walletValue = String(record.WalletTopUp);
-          }
-        }
-        
-        // Only show invoice total for the first row of each invoice
-        const isFirstRow = index === 0;
-        const invoiceTotal = isFirstRow ? record.InvoiceNetTotal.toString() : '"-"';
-        
-        // Calculate SubTotal for this record
-        const subTotal = (typeof record.ItemQuantity === 'number' && typeof record.ItemPrice === 'number') ? 
-                        record.ItemQuantity * record.ItemPrice : 
-                        (record.ItemQuantity && record.ItemPrice) ? 
-                        Number(record.ItemQuantity) * Number(record.ItemPrice) : 0;
-        
-        processedRows.push([
-          record.Date,
-          `"${record.InvoiceNumber}"`,
-          `"${record.CustomerName}"`,
-          `"${record.MemberId || ''}"`,
-          `"${record.SalePerson}"`,
-          `"${record.ServiceName || ''}"`,
-          `"${record.ServicePackageName || ''}"`,
-          `"${walletValue}"`,
-          record.ItemQuantity || '',
-          record.ItemPrice || '',
-          record.ItemTotal || '',
-          record.SubTotal || '',
-          isFirstRow ? (record.Total || '') : '',
-          isFirstRow ? (record.Discount || '') : '',
-          isFirstRow ? (record.NetTotal || '') : '',
-          isFirstRow ? (record.OrderBalance || '') : '',
-          isFirstRow ? (record.OrderCreditBalance || '') : '',
-          isFirstRow ? (record.Tax || '') : '',
-          isFirstRow ? (record.InvoiceNetTotal || '') : '',
-          `"${record.PaymentStatus}"`,
-          `"${record.PaymentMethod}"`,
-          `"${record.PaymentType || ''}"`,
-          `"${record.PaymentAmount || ''}"`,
-          `"${record.PaymentNote || ''}"`
-        ].join(','));
-      });
-    });
-    
-    // Create CSV with headers and processed rows
-    const csvString = headers.join(',') + '\n' + processedRows.join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    // Generate filename based on filter type and date
-    let dateStr = '';
-    if (filterType === 'month') {
-      dateStr = selectedDate ? format(selectedDate, 'yyyy-MM') : format(new Date(), 'yyyy-MM');
-    } else {
-      // For daily range
-      const start = startDate ? format(startDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-      const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-      dateStr = start === end ? start : `${start}_to_${end}`;
-    }
-    link.setAttribute('download', `payment_details_${dateStr}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
 
   // Function to export data to Excel
   const exportToExcel = () => {
-    if (data.length === 0) return;
+    if (dataToDisplay.length === 0) return;
     
     const workbook = XLSX.utils.book_new();
     
-    // Create a map to group rows by invoice number
-    const invoiceGroups: Record<string, Array<PaymentRecord>> = {};
-    
-    // Group data by invoice number
-    data.forEach(row => {
-      if (!invoiceGroups[row.InvoiceNumber]) {
-        invoiceGroups[row.InvoiceNumber] = [];
-      }
-      invoiceGroups[row.InvoiceNumber].push(row);
-    });
-    
-    // Prepare rows for Excel, ensuring only the first occurrence of each invoice shows the total
+    // Use the processed dataToDisplay which already handles the logic for showing/hiding fields
     const processedRows: any[] = [];
     
-    Object.entries(invoiceGroups).forEach(([invoiceNumber, rows]) => {
-      rows.forEach((record, index) => {
-        // Format the wallet value
-        let walletValue = '';
-        if (record.WalletTopUp) {
-          if (String(record.WalletTopUp).includes('*Point') || (typeof record.WalletTopUp === 'number' && record.WalletTopUp > 0)) {
-            walletValue = 'Topup';
-          } else {
-            walletValue = String(record.WalletTopUp);
-          }
+    dataToDisplay.forEach((record) => {
+      // Format the wallet value
+      let walletValue = '';
+      if (record.WalletTopUp) {
+        if (String(record.WalletTopUp).includes('*Point') || (typeof record.WalletTopUp === 'number' && record.WalletTopUp > 0)) {
+          walletValue = 'Topup';
+        } else {
+          walletValue = String(record.WalletTopUp);
         }
-        
-        // Only show invoice total for the first row of each invoice
-        const isFirstRow = index === 0;
-        const invoiceTotal = isFirstRow ? record.InvoiceNetTotal : null;
-        
-        // Calculate SubTotal for this record
-        const subTotal = (typeof record.ItemQuantity === 'number' && typeof record.ItemPrice === 'number') ? 
-                        record.ItemQuantity * record.ItemPrice : 
-                        (record.ItemQuantity && record.ItemPrice) ? 
-                        Number(record.ItemQuantity) * Number(record.ItemPrice) : 0;
-        
-        processedRows.push({
-          'Date': record.Date,
-          'Invoice Number': record.InvoiceNumber,
-          'Customer Name': record.CustomerName,
-          'Member ID': record.MemberId || '',
-          'Sale Person': record.SalePerson,
-          'Service Name': record.ServiceName || '',
-          'Service Package': record.ServicePackageName || '',
-          'Wallet': walletValue,
-          'Item Quantity': record.ItemQuantity || '',
-          'Item Price': record.ItemPrice || '',
-          'Item Total': record.ItemTotal || '',
-          'Sub Total': record.SubTotal || '',
-          'Total': isFirstRow ? (record.Total || '') : '',
-          'Discount': isFirstRow ? (record.Discount || '') : '',
-          'Net Total': isFirstRow ? (record.NetTotal || '') : '',
-          'Order Balance': isFirstRow ? (record.OrderBalance || '') : '',
-          'Order Credit Balance': isFirstRow ? (record.OrderCreditBalance || '') : '',
-          'Tax': isFirstRow ? (record.Tax || '') : '',
-          'Invoice Total': isFirstRow ? (record.InvoiceNetTotal || '') : '',
-          'Payment Status': record.PaymentStatus,
-          'Payment Method': record.PaymentMethod,
-          'Payment Type': record.PaymentType || '',
-          'Payment Amount': record.PaymentAmount || '',
-          'Payment Note': record.PaymentNote || ''
-        });
+      }
+      
+      processedRows.push({
+        'Date': record.Date,
+        'Invoice Number': record.InvoiceNumber,
+        'Customer Name': record.CustomerName,
+        'Member ID': record.MemberId || '',
+        'Sale Person': record.SalePerson || '',
+        'Service Name': record.ServiceName || '',
+        'Service Package': record.ServicePackageName || '',
+        'Wallet': walletValue,
+        'Item Quantity': record.ItemQuantity || '',
+        'Item Price': record.ItemPrice || '',
+        'Item Total': record.ItemTotal || '',
+        'Sub Total': record.SubTotal || '',
+        'Total': record.Total || '',
+        'Discount': record.Discount || '',
+        'Net Total': record.NetTotal || '',
+        'Order Balance': record.OrderBalance || '',
+        'Order Credit Balance': record.OrderCreditBalance || '',
+        'Tax': record.Tax || '',
+        'Invoice Total': record.InvoiceNetTotal || '',
+        'Payment Status': record.PaymentStatus || '',
+        'Payment Method': record.PaymentMethod || '',
+        'Payment Type': record.PaymentType || '',
+        'Payment Amount': record.PaymentAmount || '',
+        'Payment Note': record.PaymentNote || ''
       });
     });
     
