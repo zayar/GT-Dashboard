@@ -272,16 +272,7 @@ const PaymentDetails: React.FC = () => {
         throw new Error(result.error || 'Failed to fetch payment data');
       }
 
-      // Debug: Log the first few records to see what data is received
-      if (result.data && result.data.length > 0) {
-        console.log('Raw data from BigQuery:', result.data.slice(0, 3));
-        console.log('First record fields:', Object.keys(result.data[0]));
-        if (result.data[0].ItemTotal !== undefined) {
-          console.log('ItemTotal value from BigQuery:', result.data[0].ItemTotal);
-        } else {
-          console.log('ItemTotal field is missing from BigQuery response');
-        }
-      }
+
 
       setRawData(result.data);
     } catch (err) {
