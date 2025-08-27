@@ -46,6 +46,7 @@ interface PaymentRecord {
   ServiceName: string | null;
   ServicePackageName: string | null;
   WalletTopUp: number | null;
+  PaymentStatus: string;
   PaymentMethod: string;
   PaymentType: string | null;
   PaymentAmount: number | null;
@@ -198,6 +199,7 @@ const PaymentDetails: React.FC = () => {
           OrderCreditBalance: isFirstInvoiceRow ? record.OrderCreditBalance : null, // Show only on first row of invoice
           Tax: isFirstInvoiceRow ? record.Tax : null, // Show only on first row of invoice
           InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
+          PaymentStatus: record.PaymentStatus,
           PaymentMethod: record.PaymentMethod,
           PaymentType: record.PaymentType,
           PaymentAmount: record.PaymentAmount,
@@ -236,6 +238,7 @@ const PaymentDetails: React.FC = () => {
             ServiceName,
             ServicePackageName,
             WalletTopUp,
+            PaymentStatus,
             CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
@@ -273,6 +276,7 @@ const PaymentDetails: React.FC = () => {
           ServiceName,
           ServicePackageName,
           WalletTopUp,
+          PaymentStatus,
           InvoiceNetTotal,
           ItemQuantity,
           ItemPrice,
@@ -424,6 +428,7 @@ const PaymentDetails: React.FC = () => {
       'Order Credit Balance',
       'Tax',
       'Invoice Total',
+      'Payment Status',
       'Payment Method',
       'Payment Type',
       'Payment Amount',
@@ -486,6 +491,7 @@ const PaymentDetails: React.FC = () => {
           isFirstRow ? (record.OrderCreditBalance || '') : '',
           isFirstRow ? (record.Tax || '') : '',
           isFirstRow ? (record.InvoiceNetTotal || '') : '',
+          `"${record.PaymentStatus}"`,
           `"${record.PaymentMethod}"`,
           `"${record.PaymentType || ''}"`,
           `"${record.PaymentAmount || ''}"`,
@@ -579,6 +585,7 @@ const PaymentDetails: React.FC = () => {
           'Order Credit Balance': isFirstRow ? (record.OrderCreditBalance || '') : '',
           'Tax': isFirstRow ? (record.Tax || '') : '',
           'Invoice Total': isFirstRow ? (record.InvoiceNetTotal || '') : '',
+          'Payment Status': record.PaymentStatus,
           'Payment Method': record.PaymentMethod,
           'Payment Type': record.PaymentType || '',
           'Payment Amount': record.PaymentAmount || '',
@@ -611,6 +618,7 @@ const PaymentDetails: React.FC = () => {
       { wch: 18 },  // Order Credit Balance
       { wch: 10 },  // Tax
       { wch: 15 },  // Invoice Total
+      { wch: 12 },  // Payment Status
       { wch: 15 },  // Payment Method
       { wch: 15 },  // Payment Type
       { wch: 15 },  // Payment Amount
@@ -1183,6 +1191,7 @@ const PaymentDetails: React.FC = () => {
           Tax: 'Tax',
           Discount: 'Discount',
           InvoiceNetTotal: 'Invoice Total',
+          PaymentStatus: 'Payment Status',
           PaymentMethod: 'Payment Method',
           PaymentType: 'Payment Type',
           PaymentAmount: 'Payment Amount',
