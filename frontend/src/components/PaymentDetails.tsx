@@ -188,6 +188,10 @@ const PaymentDetails: React.FC = () => {
         PaymentMethod: record.PaymentMethod,
         ItemQuantity: record.ItemQuantity,
         ItemPrice: record.ItemPrice,
+        ItemTotal: record.ItemQuantity && record.ItemPrice ? 
+          (typeof record.ItemQuantity === 'number' && typeof record.ItemPrice === 'number' ? 
+            record.ItemQuantity * record.ItemPrice : 
+            Number(record.ItemQuantity) * Number(record.ItemPrice)) : null,
         SubTotal: record.SubTotal, // From database
         Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
         Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
