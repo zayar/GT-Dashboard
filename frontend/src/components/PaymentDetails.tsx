@@ -1121,6 +1121,7 @@ const PaymentDetails: React.FC = () => {
           PaymentMethod: 'Payment Method',
           ItemQuantity: 'Item Quantity',
           ItemPrice: 'Item Price',
+          ItemTotal: 'Item Total',
           SubTotal: 'Sub Total',
           Total: 'Total',
           NetTotal: 'Net Total',
