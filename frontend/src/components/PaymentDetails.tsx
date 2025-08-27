@@ -46,7 +46,6 @@ interface PaymentRecord {
   ServiceName: string | null;
   ServicePackageName: string | null;
   WalletTopUp: number | null;
-  PaymentStatus: string;
   PaymentMethod: string;
   PaymentType: string | null;
   PaymentAmount: number | null;
@@ -179,32 +178,31 @@ const PaymentDetails: React.FC = () => {
       // Check if this is the first occurrence of this invoice number
       const isFirstInvoiceRow = index === 0 || filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber;
       
-      return {
-        Date: record.Date,
-        InvoiceNumber: record.InvoiceNumber,
-        CustomerName: record.CustomerName,
-        MemberId: record.MemberId,
-        SalePerson: record.SalePerson,
-        ServiceName: record.ServiceName,
-        ServicePackageName: record.ServicePackageName,
-        WalletTopUp: record.WalletTopUp,
-        PaymentStatus: record.PaymentStatus,
-        PaymentMethod: record.PaymentMethod,
-        PaymentType: record.PaymentType,
-        PaymentAmount: record.PaymentAmount,
-        PaymentNote: record.PaymentNote,
-        ItemQuantity: record.ItemQuantity,
-        ItemPrice: record.ItemPrice,
-        ItemTotal: record.ItemTotal, // Use ItemTotal directly from BigQuery
-        SubTotal: record.SubTotal, // From database
-        Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
-        Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
-        NetTotal: isFirstInvoiceRow ? record.NetTotal : null, // Show only on first row of invoice
-        OrderBalance: isFirstInvoiceRow ? record.OrderBalance : null, // Show only on first row of invoice
-        OrderCreditBalance: isFirstInvoiceRow ? record.OrderCreditBalance : null, // Show only on first row of invoice
-        Tax: isFirstInvoiceRow ? record.Tax : null, // Show only on first row of invoice
-        InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null // Show only on first row of invoice
-      };
+              return {
+          Date: record.Date,
+          InvoiceNumber: record.InvoiceNumber,
+          CustomerName: record.CustomerName,
+          MemberId: record.MemberId,
+          SalePerson: record.SalePerson,
+          ServiceName: record.ServiceName,
+          ServicePackageName: record.ServicePackageName,
+          WalletTopUp: record.WalletTopUp,
+          ItemQuantity: record.ItemQuantity,
+          ItemPrice: record.ItemPrice,
+          ItemTotal: record.ItemTotal, // Use ItemTotal directly from BigQuery
+          SubTotal: record.SubTotal, // From database
+          Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
+          Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
+          NetTotal: isFirstInvoiceRow ? record.NetTotal : null, // Show only on first row of invoice
+          OrderBalance: isFirstInvoiceRow ? record.OrderBalance : null, // Show only on first row of invoice
+          OrderCreditBalance: isFirstInvoiceRow ? record.OrderCreditBalance : null, // Show only on first row of invoice
+          Tax: isFirstInvoiceRow ? record.Tax : null, // Show only on first row of invoice
+          InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
+          PaymentMethod: record.PaymentMethod,
+          PaymentType: record.PaymentType,
+          PaymentAmount: record.PaymentAmount,
+          PaymentNote: record.PaymentNote
+        };
     });
     
 
@@ -238,11 +236,6 @@ const PaymentDetails: React.FC = () => {
             ServiceName,
             ServicePackageName,
             WalletTopUp,
-            PaymentStatus,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
             CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
@@ -254,6 +247,10 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote,
             OrderCreatedDate,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
@@ -276,11 +273,6 @@ const PaymentDetails: React.FC = () => {
           ServiceName,
           ServicePackageName,
           WalletTopUp,
-          PaymentStatus,
-          PaymentMethod,
-          PaymentType,
-          PaymentAmount,
-          PaymentNote,
           InvoiceNetTotal,
           ItemQuantity,
           ItemPrice,
@@ -291,7 +283,11 @@ const PaymentDetails: React.FC = () => {
           OrderBalance,
           OrderCreditBalance,
           Discount,
-          Tax
+          Tax,
+          PaymentMethod,
+          PaymentType,
+          PaymentAmount,
+          PaymentNote
         FROM DeduplicatedData
         WHERE rn = 1
         ORDER BY OrderCreatedDate DESC
@@ -417,11 +413,6 @@ const PaymentDetails: React.FC = () => {
       'Service Name', 
       'Service Package',
       'Wallet',
-      'Payment Status',
-      'Payment Method',
-      'Payment Type',
-      'Payment Amount',
-      'Payment Note',
       'Item Quantity',
       'Item Price',
       'Item Total',
@@ -432,7 +423,11 @@ const PaymentDetails: React.FC = () => {
       'Order Balance',
       'Order Credit Balance',
       'Tax',
-      'Invoice Total'
+      'Invoice Total',
+      'Payment Method',
+      'Payment Type',
+      'Payment Amount',
+      'Payment Note'
     ];
     
     // Create a map to group rows by invoice number
@@ -480,11 +475,6 @@ const PaymentDetails: React.FC = () => {
           `"${record.ServiceName || ''}"`,
           `"${record.ServicePackageName || ''}"`,
           `"${walletValue}"`,
-          `"${record.PaymentStatus}"`,
-          `"${record.PaymentMethod}"`,
-          `"${record.PaymentType || ''}"`,
-          `"${record.PaymentAmount || ''}"`,
-          `"${record.PaymentNote || ''}"`,
           record.ItemQuantity || '',
           record.ItemPrice || '',
           record.ItemTotal || '',
@@ -495,7 +485,11 @@ const PaymentDetails: React.FC = () => {
           isFirstRow ? (record.OrderBalance || '') : '',
           isFirstRow ? (record.OrderCreditBalance || '') : '',
           isFirstRow ? (record.Tax || '') : '',
-          isFirstRow ? (record.InvoiceNetTotal || '') : ''
+          isFirstRow ? (record.InvoiceNetTotal || '') : '',
+          `"${record.PaymentMethod}"`,
+          `"${record.PaymentType || ''}"`,
+          `"${record.PaymentAmount || ''}"`,
+          `"${record.PaymentNote || ''}"`
         ].join(','));
       });
     });
@@ -574,11 +568,6 @@ const PaymentDetails: React.FC = () => {
           'Service Name': record.ServiceName || '',
           'Service Package': record.ServicePackageName || '',
           'Wallet': walletValue,
-          'Payment Status': record.PaymentStatus,
-          'Payment Method': record.PaymentMethod,
-          'Payment Type': record.PaymentType || '',
-          'Payment Amount': record.PaymentAmount || '',
-          'Payment Note': record.PaymentNote || '',
           'Item Quantity': record.ItemQuantity || '',
           'Item Price': record.ItemPrice || '',
           'Item Total': record.ItemTotal || '',
@@ -589,7 +578,11 @@ const PaymentDetails: React.FC = () => {
           'Order Balance': isFirstRow ? (record.OrderBalance || '') : '',
           'Order Credit Balance': isFirstRow ? (record.OrderCreditBalance || '') : '',
           'Tax': isFirstRow ? (record.Tax || '') : '',
-          'Invoice Total': isFirstRow ? (record.InvoiceNetTotal || '') : ''
+          'Invoice Total': isFirstRow ? (record.InvoiceNetTotal || '') : '',
+          'Payment Method': record.PaymentMethod,
+          'Payment Type': record.PaymentType || '',
+          'Payment Amount': record.PaymentAmount || '',
+          'Payment Note': record.PaymentNote || ''
         });
       });
     });
@@ -607,11 +600,6 @@ const PaymentDetails: React.FC = () => {
       { wch: 25 },  // Service Name
       { wch: 25 },  // Service Package
       { wch: 10 },  // Wallet
-      { wch: 12 },  // Payment Status
-      { wch: 15 },  // Payment Method
-      { wch: 15 },  // Payment Type
-      { wch: 15 },  // Payment Amount
-      { wch: 20 },  // Payment Note
       { wch: 12 },  // Item Quantity
       { wch: 12 },  // Item Price
       { wch: 12 },  // Item Total
@@ -622,7 +610,11 @@ const PaymentDetails: React.FC = () => {
       { wch: 15 },  // Order Balance
       { wch: 18 },  // Order Credit Balance
       { wch: 10 },  // Tax
-      { wch: 15 }   // Invoice Total
+      { wch: 15 },  // Invoice Total
+      { wch: 15 },  // Payment Method
+      { wch: 15 },  // Payment Type
+      { wch: 15 },  // Payment Amount
+      { wch: 20 }   // Payment Note
     ];
     worksheet['!cols'] = colWidths;
     
@@ -1180,11 +1172,6 @@ const PaymentDetails: React.FC = () => {
           ServiceName: 'Service Name',
           ServicePackageName: 'Service Package',
           WalletTopUp: 'Wallet',
-          PaymentStatus: 'Payment Status',
-          PaymentMethod: 'Payment Method',
-          PaymentType: 'Payment Type',
-          PaymentAmount: 'Payment Amount',
-          PaymentNote: 'Payment Note',
           ItemQuantity: 'Item Quantity',
           ItemPrice: 'Item Price',
           ItemTotal: 'Item Total',
@@ -1195,7 +1182,11 @@ const PaymentDetails: React.FC = () => {
           OrderCreditBalance: 'Order Credit Balance',
           Tax: 'Tax',
           Discount: 'Discount',
-          InvoiceNetTotal: 'Invoice Total'
+          InvoiceNetTotal: 'Invoice Total',
+          PaymentMethod: 'Payment Method',
+          PaymentType: 'Payment Type',
+          PaymentAmount: 'Payment Amount',
+          PaymentNote: 'Payment Note'
         }}
       />
     </Box>
