@@ -48,6 +48,9 @@ interface PaymentRecord {
   WalletTopUp: number | null;
   PaymentStatus: string;
   PaymentMethod: string;
+  PaymentType: string | null;
+  PaymentAmount: number | null;
+  PaymentNote: string | null;
   InvoiceNetTotal: number;
   ItemQuantity: number | null;
   ItemPrice: number | null;
@@ -187,6 +190,9 @@ const PaymentDetails: React.FC = () => {
         WalletTopUp: record.WalletTopUp,
         PaymentStatus: record.PaymentStatus,
         PaymentMethod: record.PaymentMethod,
+        PaymentType: record.PaymentType,
+        PaymentAmount: record.PaymentAmount,
+        PaymentNote: record.PaymentNote,
         ItemQuantity: record.ItemQuantity,
         ItemPrice: record.ItemPrice,
         ItemTotal: record.ItemTotal, // Use ItemTotal directly from BigQuery
@@ -233,6 +239,9 @@ const PaymentDetails: React.FC = () => {
           WalletTopUp,
           PaymentStatus,
           PaymentMethod,
+          PaymentType,
+          PaymentAmount,
+          PaymentNote,
           CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
           ItemQuantity,
           ItemPrice,
@@ -377,6 +386,9 @@ const PaymentDetails: React.FC = () => {
       'Wallet',
       'Payment Status',
       'Payment Method',
+      'Payment Type',
+      'Payment Amount',
+      'Payment Note',
       'Item Quantity',
       'Item Price',
       'Item Total',
@@ -437,6 +449,9 @@ const PaymentDetails: React.FC = () => {
           `"${walletValue}"`,
           `"${record.PaymentStatus}"`,
           `"${record.PaymentMethod}"`,
+          `"${record.PaymentType || ''}"`,
+          `"${record.PaymentAmount || ''}"`,
+          `"${record.PaymentNote || ''}"`,
           record.ItemQuantity || '',
           record.ItemPrice || '',
           record.ItemTotal || '',
@@ -528,6 +543,9 @@ const PaymentDetails: React.FC = () => {
           'Wallet': walletValue,
           'Payment Status': record.PaymentStatus,
           'Payment Method': record.PaymentMethod,
+          'Payment Type': record.PaymentType || '',
+          'Payment Amount': record.PaymentAmount || '',
+          'Payment Note': record.PaymentNote || '',
           'Item Quantity': record.ItemQuantity || '',
           'Item Price': record.ItemPrice || '',
           'Item Total': record.ItemTotal || '',
@@ -558,6 +576,9 @@ const PaymentDetails: React.FC = () => {
       { wch: 10 },  // Wallet
       { wch: 12 },  // Payment Status
       { wch: 15 },  // Payment Method
+      { wch: 15 },  // Payment Type
+      { wch: 15 },  // Payment Amount
+      { wch: 20 },  // Payment Note
       { wch: 12 },  // Item Quantity
       { wch: 12 },  // Item Price
       { wch: 12 },  // Item Total
@@ -1128,6 +1149,9 @@ const PaymentDetails: React.FC = () => {
           WalletTopUp: 'Wallet',
           PaymentStatus: 'Payment Status',
           PaymentMethod: 'Payment Method',
+          PaymentType: 'Payment Type',
+          PaymentAmount: 'Payment Amount',
+          PaymentNote: 'Payment Note',
           ItemQuantity: 'Item Quantity',
           ItemPrice: 'Item Price',
           ItemTotal: 'Item Total',
