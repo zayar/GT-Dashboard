@@ -228,12 +228,51 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
+        WITH DeduplicatedData AS (
+          SELECT 
+            FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
+            InvoiceNumber,
+            CustomerName,
+            MemberId,
+            SellerName as SalePerson,
+            ServiceName,
+            ServicePackageName,
+            WalletTopUp,
+            PaymentStatus,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote,
+            CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
+            ItemQuantity,
+            ItemPrice,
+            ItemTotal,
+            SubTotal,
+            Total,
+            NetTotal,
+            OrderBalance,
+            OrderCreditBalance,
+            Discount,
+            Tax,
+            OrderCreatedDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice 
+              ORDER BY OrderCreatedDate DESC
+            ) as rn
+          FROM great_time.MainPaymentView
+          WHERE ${filterType === 'day' 
+            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
+            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
+          }
+          AND PaymentMethod != 'PASS'  /* Filter out transactions with PASS payment method */
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')  /* Filter by selected clinic */
+        )
         SELECT 
-          FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
+          Date,
           InvoiceNumber,
           CustomerName,
           MemberId,
-          SellerName as SalePerson,
+          SalePerson,
           ServiceName,
           ServicePackageName,
           WalletTopUp,
@@ -242,7 +281,7 @@ const PaymentDetails: React.FC = () => {
           PaymentType,
           PaymentAmount,
           PaymentNote,
-          CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
+          InvoiceNetTotal,
           ItemQuantity,
           ItemPrice,
           ItemTotal,
@@ -253,14 +292,8 @@ const PaymentDetails: React.FC = () => {
           OrderCreditBalance,
           Discount,
           Tax
-        FROM great_time.MainPaymentView
-        WHERE ${filterType === 'day' 
-          ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-          : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-        }
-
-        AND PaymentMethod != 'PASS'  /* Filter out transactions with PASS payment method */
-        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')  /* Filter by selected clinic */
+        FROM DeduplicatedData
+        WHERE rn = 1
         ORDER BY OrderCreatedDate DESC
       `;
 
