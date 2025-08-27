@@ -61,6 +61,7 @@ const DataTable: React.FC<DataTableProps> = ({
   // Dynamically generate headCells based on the first data item
   const headCells: HeadCell[] = useMemo(() => {
     if (data.length === 0) return [];
+    
     return Object.keys(data[0]).map(key => ({
       id: key,
       label: columnAliases[key] || key.replace(/([A-Z])/g, ' $1').trim(), // Use alias if available

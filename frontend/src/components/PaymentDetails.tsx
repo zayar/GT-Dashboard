@@ -51,6 +51,7 @@ interface PaymentRecord {
   InvoiceNetTotal: number;
   ItemQuantity: number | null;
   ItemPrice: number | null;
+  ItemTotal: number | null;
   SubTotal: number | null;
   Total: number | null;
   NetTotal: number | null;
@@ -171,7 +172,7 @@ const PaymentDetails: React.FC = () => {
     }
     
     // Reorder columns for both detailed and summary views
-    return filteredData.map((record, index) => {
+    const result = filteredData.map((record, index) => {
       // Check if this is the first occurrence of this invoice number
       const isFirstInvoiceRow = index === 0 || filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber;
       
@@ -188,10 +189,7 @@ const PaymentDetails: React.FC = () => {
         PaymentMethod: record.PaymentMethod,
         ItemQuantity: record.ItemQuantity,
         ItemPrice: record.ItemPrice,
-        ItemTotal: record.ItemQuantity && record.ItemPrice ? 
-          (typeof record.ItemQuantity === 'number' && typeof record.ItemPrice === 'number' ? 
-            record.ItemQuantity * record.ItemPrice : 
-            Number(record.ItemQuantity) * Number(record.ItemPrice)) : null,
+        ItemTotal: record.ItemTotal, // Use ItemTotal directly from BigQuery
         SubTotal: record.SubTotal, // From database
         Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
         Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
@@ -202,6 +200,10 @@ const PaymentDetails: React.FC = () => {
         InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null // Show only on first row of invoice
       };
     });
+    
+
+    
+    return result;
   }, [data, viewMode]);
 
   useEffect(() => {
