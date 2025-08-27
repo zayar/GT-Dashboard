@@ -256,8 +256,8 @@ const PaymentDetails: React.FC = () => {
             Tax,
             OrderCreatedDate,
             ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice 
-              ORDER BY OrderCreatedDate DESC
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
+              ORDER BY OrderCreatedDate DESC, PaymentAmount DESC
             ) as rn
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
@@ -314,7 +314,9 @@ const PaymentDetails: React.FC = () => {
         throw new Error(result.error || 'Failed to fetch payment data');
       }
 
-
+      // Debug: Log raw data to see what's coming from BigQuery
+      console.log('Raw data from BigQuery:', result.data.length, 'rows');
+      console.log('Sample data:', result.data.slice(0, 3));
 
       setRawData(result.data);
     } catch (err) {
