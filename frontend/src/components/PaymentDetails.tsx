@@ -376,6 +376,7 @@ const PaymentDetails: React.FC = () => {
       'Payment Method',
       'Item Quantity',
       'Item Price',
+      'Item Total',
       'Sub Total',
       'Total',
       'Discount',
@@ -435,6 +436,7 @@ const PaymentDetails: React.FC = () => {
           `"${record.PaymentMethod}"`,
           record.ItemQuantity || '',
           record.ItemPrice || '',
+          record.ItemTotal || '',
           record.SubTotal || '',
           isFirstRow ? (record.Total || '') : '',
           isFirstRow ? (record.Discount || '') : '',
@@ -525,6 +527,7 @@ const PaymentDetails: React.FC = () => {
           'Payment Method': record.PaymentMethod,
           'Item Quantity': record.ItemQuantity || '',
           'Item Price': record.ItemPrice || '',
+          'Item Total': record.ItemTotal || '',
           'Sub Total': record.SubTotal || '',
           'Total': isFirstRow ? (record.Total || '') : '',
           'Discount': isFirstRow ? (record.Discount || '') : '',
@@ -554,6 +557,7 @@ const PaymentDetails: React.FC = () => {
       { wch: 15 },  // Payment Method
       { wch: 12 },  // Item Quantity
       { wch: 12 },  // Item Price
+      { wch: 12 },  // Item Total
       { wch: 12 },  // Sub Total
       { wch: 12 },  // Total
       { wch: 10 },  // Discount
