@@ -314,9 +314,7 @@ const PaymentDetails: React.FC = () => {
         throw new Error(result.error || 'Failed to fetch payment data');
       }
 
-      // Debug: Log raw data to see what's coming from BigQuery
-      console.log('Raw data from BigQuery:', result.data.length, 'rows');
-      console.log('Sample data:', result.data.slice(0, 3));
+
 
       setRawData(result.data);
     } catch (err) {
