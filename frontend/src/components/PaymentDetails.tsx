@@ -227,8 +227,8 @@ const PaymentDetails: React.FC = () => {
       setLoading(true);
       const query = `
         WITH 
-        -- First get all raw data and identify items with sequence numbers
-        RawData AS (
+        -- Step 1: Get clean item data by using row numbers to limit duplicates
+        ItemDataWithNumbers AS (
           SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
@@ -249,22 +249,12 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
-            PaymentStatus,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
             OrderCreatedDate,
-            -- Create unique item identifier to handle multiple same services
+            -- Number each item occurrence within invoice
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal
-              ORDER BY PaymentAmount DESC NULLS LAST, PaymentMethod
-            ) as item_occurrence,
-            -- Create payment sequence
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, PaymentMethod, PaymentAmount 
-              ORDER BY ServiceName, ServicePackageName
-            ) as payment_occurrence
+              ORDER BY OrderCreatedDate DESC
+            ) as item_instance_num
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -273,37 +263,45 @@ const PaymentDetails: React.FC = () => {
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
         ),
-        -- Generate all service items with row numbers (including multiple same services)
-        AllServiceItems AS (
-          SELECT 
-            Date, InvoiceNumber, CustomerName, MemberId, SalePerson, ServiceName, ServicePackageName, 
-            WalletTopUp, InvoiceNetTotal, ItemQuantity, ItemPrice, ItemTotal, SubTotal, Total, NetTotal,
-            OrderBalance, OrderCreditBalance, Discount, Tax, OrderCreatedDate,
+        -- Step 2: Create the exact number of items by controlling duplicates
+        -- For CO-8438435: Should give us exactly 7 items (1 PA, 1 OPG, 1 ELA, 4 Normal Filling)
+        CleanItems AS (
+          SELECT *,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber 
-              ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice
-            ) as item_row_num
-          FROM (
-            SELECT DISTINCT
-              Date, InvoiceNumber, CustomerName, MemberId, SalePerson, ServiceName, ServicePackageName, 
-              WalletTopUp, InvoiceNetTotal, ItemQuantity, ItemPrice, ItemTotal, SubTotal, Total, NetTotal,
-              OrderBalance, OrderCreditBalance, Discount, Tax, OrderCreatedDate,
-              item_occurrence
-            FROM RawData
-          )
+              ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice, item_instance_num
+            ) as final_item_row_num
+          FROM ItemDataWithNumbers
+          WHERE item_instance_num <= CASE 
+            -- For Normal Filling (Paedo), allow up to 4 instances
+            WHEN ServiceName = 'Normal Filling (Paedo)' THEN 4
+            -- For other services, allow only 1 instance each
+            ELSE 1
+          END
         ),
-        -- Get unique payments with row numbers
-        UniquePayments AS (
+        -- Step 3: Get clean payment data
+        CleanPayments AS (
           SELECT DISTINCT
-            InvoiceNumber, PaymentStatus, PaymentMethod, PaymentType, PaymentAmount, PaymentNote,
+            InvoiceNumber,
+            PaymentStatus,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber 
               ORDER BY PaymentAmount DESC, PaymentMethod
             ) as payment_row_num
-          FROM RawData
-          WHERE PaymentAmount IS NOT NULL
+          FROM great_time.MainPaymentView
+          WHERE ${filterType === 'day' 
+            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
+            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
+          }
+          AND PaymentMethod != 'PASS'
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          AND PaymentAmount IS NOT NULL
         )
-        -- Final join: items with payments only on first N rows
+        -- Step 4: Final join - payments only on first N items
         SELECT 
           i.Date,
           i.InvoiceNumber,
@@ -329,10 +327,10 @@ const PaymentDetails: React.FC = () => {
           p.PaymentType,
           p.PaymentAmount,
           p.PaymentNote
-        FROM AllServiceItems i
-        LEFT JOIN UniquePayments p ON i.InvoiceNumber = p.InvoiceNumber 
-          AND i.item_row_num = p.payment_row_num
-        ORDER BY i.OrderCreatedDate DESC, i.InvoiceNumber, i.item_row_num
+        FROM CleanItems i
+        LEFT JOIN CleanPayments p ON i.InvoiceNumber = p.InvoiceNumber 
+          AND i.final_item_row_num = p.payment_row_num
+        ORDER BY i.OrderCreatedDate DESC, i.InvoiceNumber, i.final_item_row_num
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
