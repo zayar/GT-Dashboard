@@ -279,7 +279,7 @@ const PaymentDetails: React.FC = () => {
             ELSE 1
           END
         ),
-        -- Step 3: Get clean payment data
+        -- Step 3: Get clean payment data with proper ordering
         CleanPayments AS (
           SELECT DISTINCT
             InvoiceNumber,
@@ -290,7 +290,13 @@ const PaymentDetails: React.FC = () => {
             PaymentNote,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber 
-              ORDER BY PaymentAmount DESC, PaymentMethod
+              ORDER BY 
+                CASE PaymentMethod 
+                  WHEN 'KPAY' THEN 1
+                  WHEN 'CASH' THEN 2
+                  ELSE 3
+                END,
+                PaymentAmount DESC
             ) as payment_row_num
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
@@ -340,6 +346,7 @@ const PaymentDetails: React.FC = () => {
         FROM CleanItems i
         LEFT JOIN CleanPayments p ON i.InvoiceNumber = p.InvoiceNumber 
           AND i.final_item_row_num = p.payment_row_num
+          AND i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber)
         ORDER BY i.OrderCreatedDate DESC, i.InvoiceNumber, i.final_item_row_num
       `;
 
