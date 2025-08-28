@@ -261,22 +261,58 @@ const PaymentDetails: React.FC = () => {
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
         ),
-        -- Get unique services per invoice with numbering for duplicates
-        UniqueServices AS (
+        -- Preserve per-item occurrences across repeated payments by assigning an instance number first
+        ItemInstances AS (
           SELECT 
+            Date,
             InvoiceNumber,
+            CustomerName,
+            MemberId,
+            SalePerson,
             ServiceName,
             ServicePackageName,
+            WalletTopUp,
+            InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
             ItemTotal,
             SubTotal,
+            Total,
+            NetTotal,
+            OrderBalance,
+            OrderCreditBalance,
+            Discount,
+            Tax,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
-              ORDER BY MIN(OrderCreatedDate) DESC
-            ) as service_instance
+              ORDER BY OrderCreatedDate
+            ) as item_instance
           FROM RawData
-          GROUP BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
+        ),
+        -- Collapse duplicates caused by multiple payments while keeping each item occurrence via item_instance
+        UniqueServices AS (
+          SELECT DISTINCT
+            Date,
+            InvoiceNumber,
+            CustomerName,
+            MemberId,
+            SalePerson,
+            ServiceName,
+            ServicePackageName,
+            WalletTopUp,
+            InvoiceNetTotal,
+            ItemQuantity,
+            ItemPrice,
+            ItemTotal,
+            SubTotal,
+            Total,
+            NetTotal,
+            OrderBalance,
+            OrderCreditBalance,
+            Discount,
+            Tax,
+            item_instance
+          FROM ItemInstances
         ),
         -- Get unique payments per invoice (deduplicate exact combos first, then rank)
         DedupPayments AS (
@@ -308,19 +344,15 @@ const PaymentDetails: React.FC = () => {
         ServiceWithNames AS (
           SELECT *,
             CASE 
-              WHEN service_instance > 1 
-              THEN CONCAT(ServiceName, ' #', CAST(service_instance AS STRING))
+              WHEN item_instance > 1 
+              THEN CONCAT(ServiceName, ' #', CAST(item_instance AS STRING))
               ELSE ServiceName 
             END as DisplayServiceName,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber 
-              ORDER BY ServiceName, ServicePackageName, service_instance
+              ORDER BY ServiceName, ServicePackageName, item_instance
             ) as item_rank
           FROM UniqueServices
-          WHERE service_instance <= CASE 
-            WHEN ServiceName = 'Normal Filling (Paedo)' THEN 4
-            ELSE 1
-          END
         ),
         -- Get invoice level data
         InvoiceData AS (
