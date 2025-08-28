@@ -227,9 +227,9 @@ const PaymentDetails: React.FC = () => {
       setLoading(true);
       const query = `
         WITH 
-        -- Get unique items for each invoice
-        UniqueItems AS (
-          SELECT DISTINCT
+        -- First get all raw data and identify items with sequence numbers
+        RawData AS (
+          SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
             CustomerName,
@@ -249,30 +249,22 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
-            OrderCreatedDate
-          FROM great_time.MainPaymentView
-          WHERE ${filterType === 'day' 
-            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-          }
-          AND PaymentMethod != 'PASS'
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ),
-        -- Add row numbers to items to identify which ones get payments
-        ItemsWithRowNumbers AS (
-          SELECT *,
-            ROW_NUMBER() OVER (PARTITION BY InvoiceNumber ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice) as item_row_num
-          FROM UniqueItems
-        ),
-        -- Get unique payments per invoice
-        UniquePayments AS (
-          SELECT DISTINCT
-            InvoiceNumber,
             PaymentStatus,
             PaymentMethod,
             PaymentType,
             PaymentAmount,
-            PaymentNote
+            PaymentNote,
+            OrderCreatedDate,
+            -- Create unique item identifier to handle multiple same services
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal
+              ORDER BY PaymentAmount DESC NULLS LAST, PaymentMethod
+            ) as item_occurrence,
+            -- Create payment sequence
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber, PaymentMethod, PaymentAmount 
+              ORDER BY ServiceName, ServicePackageName
+            ) as payment_occurrence
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -281,13 +273,37 @@ const PaymentDetails: React.FC = () => {
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
         ),
-        -- Add row numbers to payments
-        PaymentsWithRowNumbers AS (
-          SELECT *,
-            ROW_NUMBER() OVER (PARTITION BY InvoiceNumber ORDER BY PaymentAmount DESC, PaymentMethod) as payment_row_num
-          FROM UniquePayments
+        -- Generate all service items with row numbers (including multiple same services)
+        AllServiceItems AS (
+          SELECT 
+            Date, InvoiceNumber, CustomerName, MemberId, SalePerson, ServiceName, ServicePackageName, 
+            WalletTopUp, InvoiceNetTotal, ItemQuantity, ItemPrice, ItemTotal, SubTotal, Total, NetTotal,
+            OrderBalance, OrderCreditBalance, Discount, Tax, OrderCreatedDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber 
+              ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice
+            ) as item_row_num
+          FROM (
+            SELECT DISTINCT
+              Date, InvoiceNumber, CustomerName, MemberId, SalePerson, ServiceName, ServicePackageName, 
+              WalletTopUp, InvoiceNetTotal, ItemQuantity, ItemPrice, ItemTotal, SubTotal, Total, NetTotal,
+              OrderBalance, OrderCreditBalance, Discount, Tax, OrderCreatedDate,
+              item_occurrence
+            FROM RawData
+          )
+        ),
+        -- Get unique payments with row numbers
+        UniquePayments AS (
+          SELECT DISTINCT
+            InvoiceNumber, PaymentStatus, PaymentMethod, PaymentType, PaymentAmount, PaymentNote,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber 
+              ORDER BY PaymentAmount DESC, PaymentMethod
+            ) as payment_row_num
+          FROM RawData
+          WHERE PaymentAmount IS NOT NULL
         )
-        -- Join items with payments - only first N items get payments (where N = number of payments)
+        -- Final join: items with payments only on first N rows
         SELECT 
           i.Date,
           i.InvoiceNumber,
@@ -313,8 +329,8 @@ const PaymentDetails: React.FC = () => {
           p.PaymentType,
           p.PaymentAmount,
           p.PaymentNote
-        FROM ItemsWithRowNumbers i
-        LEFT JOIN PaymentsWithRowNumbers p ON i.InvoiceNumber = p.InvoiceNumber 
+        FROM AllServiceItems i
+        LEFT JOIN UniquePayments p ON i.InvoiceNumber = p.InvoiceNumber 
           AND i.item_row_num = p.payment_row_num
         ORDER BY i.OrderCreatedDate DESC, i.InvoiceNumber, i.item_row_num
       `;
