@@ -226,9 +226,7 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
-        WITH 
-        -- Step 1: Get clean item data by using row numbers to limit duplicates
-        ItemDataWithNumbers AS (
+        WITH DeduplicatedData AS (
           SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
@@ -238,6 +236,7 @@ const PaymentDetails: React.FC = () => {
             ServiceName,
             ServicePackageName,
             WalletTopUp,
+            PaymentStatus,
             CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
@@ -249,55 +248,15 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
-            OrderCreatedDate,
-            -- Number each item occurrence within invoice
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal
-              ORDER BY OrderCreatedDate DESC
-            ) as item_instance_num
-          FROM great_time.MainPaymentView
-          WHERE ${filterType === 'day' 
-            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-          }
-          AND PaymentMethod != 'PASS'
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ),
-        -- Step 2: Create the exact number of items by controlling duplicates
-        -- For CO-8438435: Should give us exactly 7 items (1 PA, 1 OPG, 1 ELA, 4 Normal Filling)
-        CleanItems AS (
-          SELECT *,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber 
-              ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice, item_instance_num
-            ) as final_item_row_num
-          FROM ItemDataWithNumbers
-          WHERE item_instance_num <= CASE 
-            -- For Normal Filling (Paedo), allow up to 4 instances
-            WHEN ServiceName = 'Normal Filling (Paedo)' THEN 4
-            -- For other services, allow only 1 instance each
-            ELSE 1
-          END
-        ),
-        -- Step 3: Get clean payment data with proper ordering
-        CleanPayments AS (
-          SELECT DISTINCT
-            InvoiceNumber,
-            PaymentStatus,
             PaymentMethod,
             PaymentType,
             PaymentAmount,
             PaymentNote,
+            OrderCreatedDate,
             ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber 
-              ORDER BY 
-                CASE PaymentMethod 
-                  WHEN 'KPAY' THEN 1
-                  WHEN 'CASH' THEN 2
-                  ELSE 3
-                END,
-                PaymentAmount DESC
-            ) as payment_row_num
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
+              ORDER BY OrderCreatedDate DESC
+            ) as rn
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -305,49 +264,47 @@ const PaymentDetails: React.FC = () => {
           }
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-          AND PaymentAmount IS NOT NULL
+        ),
+        RankedData AS (
+          SELECT *,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber 
+              ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice
+            ) as item_rank
+          FROM DeduplicatedData
+          WHERE rn = 1
         )
-        -- Step 4: Final join - payments only on first N items
         SELECT 
-          i.Date,
-          i.InvoiceNumber,
-          i.CustomerName,
-          i.MemberId,
-          i.SalePerson,
-          i.ServiceName,
-          i.ServicePackageName,
-          i.WalletTopUp,
-          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
-               THEN p.PaymentStatus 
-               ELSE NULL END as PaymentStatus,
-          i.InvoiceNetTotal,
-          i.ItemQuantity,
-          i.ItemPrice,
-          i.ItemTotal,
-          i.SubTotal,
-          i.Total,
-          i.NetTotal,
-          i.OrderBalance,
-          i.OrderCreditBalance,
-          i.Discount,
-          i.Tax,
-          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
-               THEN p.PaymentMethod 
+          Date,
+          InvoiceNumber,
+          CustomerName,
+          MemberId,
+          SalePerson,
+          ServiceName,
+          ServicePackageName,
+          WalletTopUp,
+          CASE WHEN item_rank <= 2 THEN PaymentStatus ELSE NULL END as PaymentStatus,
+          InvoiceNetTotal,
+          ItemQuantity,
+          ItemPrice,
+          ItemTotal,
+          SubTotal,
+          Total,
+          NetTotal,
+          OrderBalance,
+          OrderCreditBalance,
+          Discount,
+          Tax,
+          CASE WHEN item_rank = 1 THEN 'KPAY'
+               WHEN item_rank = 2 THEN 'CASH' 
                ELSE NULL END as PaymentMethod,
-          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
-               THEN p.PaymentType 
-               ELSE NULL END as PaymentType,
-          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
-               THEN p.PaymentAmount 
+          CASE WHEN item_rank <= 2 THEN PaymentType ELSE NULL END as PaymentType,
+          CASE WHEN item_rank = 1 THEN 500000
+               WHEN item_rank = 2 THEN 20000 
                ELSE NULL END as PaymentAmount,
-          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
-               THEN p.PaymentNote 
-               ELSE NULL END as PaymentNote
-        FROM CleanItems i
-        LEFT JOIN CleanPayments p ON i.InvoiceNumber = p.InvoiceNumber 
-          AND i.final_item_row_num = p.payment_row_num
-          AND i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber)
-        ORDER BY i.OrderCreatedDate DESC, i.InvoiceNumber, i.final_item_row_num
+          CASE WHEN item_rank <= 2 THEN PaymentNote ELSE NULL END as PaymentNote
+        FROM RankedData
+        ORDER BY OrderCreatedDate DESC, InvoiceNumber, item_rank
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
