@@ -45,6 +45,7 @@ interface PaymentRecord {
   WalletTopUp: number | null;
   PaymentStatus: string;
   PaymentMethod: string;
+  PaymentType: string | null;
   PaymentAmount: number | null;
   PaymentNote: string | null;
   InvoiceNetTotal: number;
@@ -198,7 +199,7 @@ const PaymentDetails: React.FC = () => {
         InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
         PaymentStatus: record.PaymentStatus, // Show payment details only when there's a payment for this item
         PaymentMethod: record.PaymentMethod,
-
+        PaymentType: record.PaymentType,
         PaymentAmount: record.PaymentAmount,
         PaymentNote: record.PaymentNote
       };
@@ -248,6 +249,7 @@ const PaymentDetails: React.FC = () => {
             Discount,
             Tax,
             PaymentMethod,
+            PaymentType,
             PaymentAmount,
             PaymentNote,
             OrderCreatedDate
@@ -281,6 +283,7 @@ const PaymentDetails: React.FC = () => {
           SELECT DISTINCT
             InvoiceNumber,
             PaymentMethod,
+            PaymentType,
             PaymentAmount,
             PaymentNote,
             PaymentStatus,
@@ -349,6 +352,7 @@ const PaymentDetails: React.FC = () => {
           i.Discount,
           i.Tax,
           p.PaymentMethod,
+          p.PaymentType,
           p.PaymentAmount,
           p.PaymentNote
         FROM ServiceWithNames s
@@ -508,7 +512,7 @@ const PaymentDetails: React.FC = () => {
         'Invoice Total': record.InvoiceNetTotal || '',
         'Payment Status': record.PaymentStatus || '',
         'Payment Method': record.PaymentMethod || '',
-
+        'Payment Type': record.PaymentType || '',
         'Payment Amount': record.PaymentAmount || '',
         'Payment Note': record.PaymentNote || ''
       });
@@ -1112,8 +1116,8 @@ const PaymentDetails: React.FC = () => {
           Discount: 'Discount',
           InvoiceNetTotal: 'Invoice Total',
           PaymentStatus: 'Payment Status',
-          PaymentMethod: 'Payment Method',
-  
+                    PaymentMethod: 'Payment Method',
+          PaymentType: 'Payment Type',
           PaymentAmount: 'Payment Amount',
           PaymentNote: 'Payment Note'
         }}
