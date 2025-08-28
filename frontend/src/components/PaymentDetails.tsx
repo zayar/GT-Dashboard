@@ -45,7 +45,6 @@ interface PaymentRecord {
   WalletTopUp: number | null;
   PaymentStatus: string;
   PaymentMethod: string;
-  PaymentType: string | null;
   PaymentAmount: number | null;
   PaymentNote: string | null;
   InvoiceNetTotal: number;
@@ -199,7 +198,7 @@ const PaymentDetails: React.FC = () => {
         InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
         PaymentStatus: record.PaymentStatus, // Show payment details only when there's a payment for this item
         PaymentMethod: record.PaymentMethod,
-        PaymentType: record.PaymentType,
+
         PaymentAmount: record.PaymentAmount,
         PaymentNote: record.PaymentNote
       };
@@ -249,7 +248,6 @@ const PaymentDetails: React.FC = () => {
             Discount,
             Tax,
             PaymentMethod,
-            PaymentType,
             PaymentAmount,
             PaymentNote,
             OrderCreatedDate,
@@ -311,7 +309,7 @@ const PaymentDetails: React.FC = () => {
           CASE WHEN item_rank = 1 THEN 'KPAY'
                WHEN item_rank = 2 THEN 'CASH' 
                ELSE NULL END as PaymentMethod,
-          CASE WHEN item_rank <= 2 THEN PaymentType ELSE NULL END as PaymentType,
+
           CASE WHEN item_rank = 1 THEN 500000
                WHEN item_rank = 2 THEN 20000 
                ELSE NULL END as PaymentAmount,
@@ -471,7 +469,7 @@ const PaymentDetails: React.FC = () => {
         'Invoice Total': record.InvoiceNetTotal || '',
         'Payment Status': record.PaymentStatus || '',
         'Payment Method': record.PaymentMethod || '',
-        'Payment Type': record.PaymentType || '',
+
         'Payment Amount': record.PaymentAmount || '',
         'Payment Note': record.PaymentNote || ''
       });
@@ -1076,7 +1074,7 @@ const PaymentDetails: React.FC = () => {
           InvoiceNetTotal: 'Invoice Total',
           PaymentStatus: 'Payment Status',
           PaymentMethod: 'Payment Method',
-          PaymentType: 'Payment Type',
+  
           PaymentAmount: 'Payment Amount',
           PaymentNote: 'Payment Note'
         }}
