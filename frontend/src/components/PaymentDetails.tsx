@@ -278,9 +278,20 @@ const PaymentDetails: React.FC = () => {
           FROM RawData
           GROUP BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
         ),
-        -- Get unique payments per invoice  
-        UniquePayments AS (
+        -- Get unique payments per invoice (deduplicate exact combos first, then rank)
+        DedupPayments AS (
           SELECT DISTINCT
+            InvoiceNumber,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote,
+            PaymentStatus
+          FROM RawData
+          WHERE PaymentAmount IS NOT NULL AND PaymentAmount > 0
+        ),
+        UniquePayments AS (
+          SELECT 
             InvoiceNumber,
             PaymentMethod,
             PaymentType,
@@ -291,8 +302,7 @@ const PaymentDetails: React.FC = () => {
               PARTITION BY InvoiceNumber 
               ORDER BY PaymentAmount DESC, PaymentMethod
             ) as payment_rank
-          FROM RawData
-          WHERE PaymentAmount IS NOT NULL AND PaymentAmount > 0
+          FROM DedupPayments
         ),
         -- Create numbered service names for duplicates
         ServiceWithNames AS (
