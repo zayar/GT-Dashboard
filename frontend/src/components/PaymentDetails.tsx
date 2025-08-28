@@ -226,7 +226,7 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
-        WITH DeduplicatedData AS (
+        WITH RawItemData AS (
           SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
@@ -253,10 +253,11 @@ const PaymentDetails: React.FC = () => {
             PaymentAmount,
             PaymentNote,
             OrderCreatedDate,
+            -- Create instance number for same services
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
-              ORDER BY OrderCreatedDate DESC
-            ) as rn
+              ORDER BY OrderCreatedDate DESC, PaymentMethod, PaymentAmount DESC
+            ) as service_instance
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -265,14 +266,26 @@ const PaymentDetails: React.FC = () => {
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
         ),
+        ServiceItems AS (
+          SELECT *,
+            CASE 
+              WHEN ServiceName = 'Normal Filling (Paedo)' AND service_instance > 1 
+              THEN CONCAT(ServiceName, ' #', CAST(service_instance AS STRING))
+              ELSE ServiceName 
+            END as DisplayServiceName
+          FROM RawItemData
+          WHERE service_instance <= CASE 
+            WHEN ServiceName = 'Normal Filling (Paedo)' THEN 4
+            ELSE 1
+          END
+        ),
         RankedData AS (
           SELECT *,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber 
-              ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice
+              ORDER BY ServiceName, ServicePackageName, service_instance
             ) as item_rank
-          FROM DeduplicatedData
-          WHERE rn = 1
+          FROM ServiceItems
         )
         SELECT 
           Date,
@@ -280,7 +293,7 @@ const PaymentDetails: React.FC = () => {
           CustomerName,
           MemberId,
           SalePerson,
-          ServiceName,
+          DisplayServiceName as ServiceName,
           ServicePackageName,
           WalletTopUp,
           CASE WHEN item_rank <= 2 THEN PaymentStatus ELSE NULL END as PaymentStatus,
