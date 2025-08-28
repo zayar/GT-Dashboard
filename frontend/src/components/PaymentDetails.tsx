@@ -225,7 +225,7 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
-        WITH RawItemData AS (
+        WITH RawData AS (
           SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
@@ -250,12 +250,7 @@ const PaymentDetails: React.FC = () => {
             PaymentMethod,
             PaymentAmount,
             PaymentNote,
-            OrderCreatedDate,
-            -- Create instance number for same services
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
-              ORDER BY OrderCreatedDate DESC, PaymentMethod, PaymentAmount DESC
-            ) as service_instance
+            OrderCreatedDate
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -264,58 +259,102 @@ const PaymentDetails: React.FC = () => {
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
         ),
-        ServiceItems AS (
+        -- Get unique services per invoice with numbering for duplicates
+        UniqueServices AS (
+          SELECT 
+            InvoiceNumber,
+            ServiceName,
+            ServicePackageName,
+            ItemQuantity,
+            ItemPrice,
+            ItemTotal,
+            SubTotal,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
+              ORDER BY MIN(OrderCreatedDate) DESC
+            ) as service_instance
+          FROM RawData
+          GROUP BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
+        ),
+        -- Get unique payments per invoice  
+        UniquePayments AS (
+          SELECT DISTINCT
+            InvoiceNumber,
+            PaymentMethod,
+            PaymentAmount,
+            PaymentNote,
+            PaymentStatus,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber 
+              ORDER BY PaymentAmount DESC, PaymentMethod
+            ) as payment_rank
+          FROM RawData
+          WHERE PaymentAmount IS NOT NULL AND PaymentAmount > 0
+        ),
+        -- Create numbered service names for duplicates
+        ServiceWithNames AS (
           SELECT *,
             CASE 
-              WHEN ServiceName = 'Normal Filling (Paedo)' AND service_instance > 1 
+              WHEN service_instance > 1 
               THEN CONCAT(ServiceName, ' #', CAST(service_instance AS STRING))
               ELSE ServiceName 
-            END as DisplayServiceName
-          FROM RawItemData
+            END as DisplayServiceName,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber 
+              ORDER BY ServiceName, ServicePackageName, service_instance
+            ) as item_rank
+          FROM UniqueServices
           WHERE service_instance <= CASE 
             WHEN ServiceName = 'Normal Filling (Paedo)' THEN 4
             ELSE 1
           END
         ),
-        RankedData AS (
-          SELECT *,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber 
-              ORDER BY ServiceName, ServicePackageName, service_instance
-            ) as item_rank
-          FROM ServiceItems
+        -- Get invoice level data
+        InvoiceData AS (
+          SELECT DISTINCT
+            InvoiceNumber,
+            Date,
+            CustomerName,
+            MemberId,
+            SalePerson,
+            WalletTopUp,
+            InvoiceNetTotal,
+            Total,
+            NetTotal,
+            OrderBalance,
+            OrderCreditBalance,
+            Discount,
+            Tax
+          FROM RawData
         )
         SELECT 
-          Date,
-          InvoiceNumber,
-          CustomerName,
-          MemberId,
-          SalePerson,
-          DisplayServiceName as ServiceName,
-          ServicePackageName,
-          WalletTopUp,
-          CASE WHEN item_rank <= 2 THEN PaymentStatus ELSE NULL END as PaymentStatus,
-          InvoiceNetTotal,
-          ItemQuantity,
-          ItemPrice,
-          ItemTotal,
-          SubTotal,
-          Total,
-          NetTotal,
-          OrderBalance,
-          OrderCreditBalance,
-          Discount,
-          Tax,
-          CASE WHEN item_rank = 1 THEN 'KPAY'
-               WHEN item_rank = 2 THEN 'CASH' 
-               ELSE NULL END as PaymentMethod,
-
-          CASE WHEN item_rank = 1 THEN 500000
-               WHEN item_rank = 2 THEN 20000 
-               ELSE NULL END as PaymentAmount,
-          CASE WHEN item_rank <= 2 THEN PaymentNote ELSE NULL END as PaymentNote
-        FROM RankedData
-        ORDER BY OrderCreatedDate DESC, InvoiceNumber, item_rank
+          i.Date,
+          i.InvoiceNumber,
+          i.CustomerName,
+          i.MemberId,
+          i.SalePerson,
+          s.DisplayServiceName as ServiceName,
+          s.ServicePackageName,
+          i.WalletTopUp,
+          p.PaymentStatus,
+          i.InvoiceNetTotal,
+          s.ItemQuantity,
+          s.ItemPrice,
+          s.ItemTotal,
+          s.SubTotal,
+          i.Total,
+          i.NetTotal,
+          i.OrderBalance,
+          i.OrderCreditBalance,
+          i.Discount,
+          i.Tax,
+          p.PaymentMethod,
+          p.PaymentAmount,
+          p.PaymentNote
+        FROM ServiceWithNames s
+        JOIN InvoiceData i ON s.InvoiceNumber = i.InvoiceNumber
+        LEFT JOIN UniquePayments p ON s.InvoiceNumber = p.InvoiceNumber AND s.item_rank = p.payment_rank
+        ORDER BY i.Date DESC, i.InvoiceNumber, s.item_rank
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
