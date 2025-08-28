@@ -226,8 +226,10 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
-        WITH DeduplicatedData AS (
-          SELECT 
+        WITH 
+        -- Get unique items for each invoice
+        UniqueItems AS (
+          SELECT DISTINCT
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
             CustomerName,
@@ -236,7 +238,6 @@ const PaymentDetails: React.FC = () => {
             ServiceName,
             ServicePackageName,
             WalletTopUp,
-            PaymentStatus,
             CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
@@ -248,15 +249,7 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
-            OrderCreatedDate,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal, PaymentMethod, PaymentAmount
-              ORDER BY OrderCreatedDate DESC
-            ) as rn
+            OrderCreatedDate
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -264,35 +257,66 @@ const PaymentDetails: React.FC = () => {
           }
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+        ),
+        -- Add row numbers to items to identify which ones get payments
+        ItemsWithRowNumbers AS (
+          SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY InvoiceNumber ORDER BY ServiceName, ServicePackageName, ItemQuantity, ItemPrice) as item_row_num
+          FROM UniqueItems
+        ),
+        -- Get unique payments per invoice
+        UniquePayments AS (
+          SELECT DISTINCT
+            InvoiceNumber,
+            PaymentStatus,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote
+          FROM great_time.MainPaymentView
+          WHERE ${filterType === 'day' 
+            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
+            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
+          }
+          AND PaymentMethod != 'PASS'
+          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+        ),
+        -- Add row numbers to payments
+        PaymentsWithRowNumbers AS (
+          SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY InvoiceNumber ORDER BY PaymentAmount DESC, PaymentMethod) as payment_row_num
+          FROM UniquePayments
         )
+        -- Join items with payments - only first N items get payments (where N = number of payments)
         SELECT 
-          Date,
-          InvoiceNumber,
-          CustomerName,
-          MemberId,
-          SalePerson,
-          ServiceName,
-          ServicePackageName,
-          WalletTopUp,
-          PaymentStatus,
-          InvoiceNetTotal,
-          ItemQuantity,
-          ItemPrice,
-          ItemTotal,
-          SubTotal,
-          Total,
-          NetTotal,
-          OrderBalance,
-          OrderCreditBalance,
-          Discount,
-          Tax,
-          PaymentMethod,
-          PaymentType,
-          PaymentAmount,
-          PaymentNote
-        FROM DeduplicatedData
-        WHERE rn = 1
-        ORDER BY OrderCreatedDate DESC, InvoiceNumber, ServiceName
+          i.Date,
+          i.InvoiceNumber,
+          i.CustomerName,
+          i.MemberId,
+          i.SalePerson,
+          i.ServiceName,
+          i.ServicePackageName,
+          i.WalletTopUp,
+          p.PaymentStatus,
+          i.InvoiceNetTotal,
+          i.ItemQuantity,
+          i.ItemPrice,
+          i.ItemTotal,
+          i.SubTotal,
+          i.Total,
+          i.NetTotal,
+          i.OrderBalance,
+          i.OrderCreditBalance,
+          i.Discount,
+          i.Tax,
+          p.PaymentMethod,
+          p.PaymentType,
+          p.PaymentAmount,
+          p.PaymentNote
+        FROM ItemsWithRowNumbers i
+        LEFT JOIN PaymentsWithRowNumbers p ON i.InvoiceNumber = p.InvoiceNumber 
+          AND i.item_row_num = p.payment_row_num
+        ORDER BY i.OrderCreatedDate DESC, i.InvoiceNumber, i.item_row_num
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
