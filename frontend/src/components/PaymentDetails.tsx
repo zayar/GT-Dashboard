@@ -311,7 +311,9 @@ const PaymentDetails: React.FC = () => {
           i.ServiceName,
           i.ServicePackageName,
           i.WalletTopUp,
-          p.PaymentStatus,
+          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
+               THEN p.PaymentStatus 
+               ELSE NULL END as PaymentStatus,
           i.InvoiceNetTotal,
           i.ItemQuantity,
           i.ItemPrice,
@@ -323,10 +325,18 @@ const PaymentDetails: React.FC = () => {
           i.OrderCreditBalance,
           i.Discount,
           i.Tax,
-          p.PaymentMethod,
-          p.PaymentType,
-          p.PaymentAmount,
-          p.PaymentNote
+          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
+               THEN p.PaymentMethod 
+               ELSE NULL END as PaymentMethod,
+          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
+               THEN p.PaymentType 
+               ELSE NULL END as PaymentType,
+          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
+               THEN p.PaymentAmount 
+               ELSE NULL END as PaymentAmount,
+          CASE WHEN i.final_item_row_num <= (SELECT COUNT(*) FROM CleanPayments cp WHERE cp.InvoiceNumber = i.InvoiceNumber) 
+               THEN p.PaymentNote 
+               ELSE NULL END as PaymentNote
         FROM CleanItems i
         LEFT JOIN CleanPayments p ON i.InvoiceNumber = p.InvoiceNumber 
           AND i.final_item_row_num = p.payment_row_num
