@@ -59,7 +59,7 @@ interface PaymentRecord {
   OrderCreditBalance: number | null;
   Discount: number | null;
   Tax: number | null;
-  payment_rank?: number;
+  item_sequence?: number;
 }
 
 const PaymentDetails: React.FC = () => {
@@ -174,13 +174,6 @@ const PaymentDetails: React.FC = () => {
     
         // Reorder columns for both detailed and summary views
     const result = filteredData.map((record, index) => {
-      // Check if this is the first occurrence of this item (not just invoice)
-      const isFirstItemRow = index === 0 || 
-        filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber ||
-        filteredData[index - 1].ServiceName !== record.ServiceName ||
-        filteredData[index - 1].ItemQuantity !== record.ItemQuantity ||
-        filteredData[index - 1].ItemPrice !== record.ItemPrice;
-      
       // Check if this is the first occurrence of this invoice number
       const isFirstInvoiceRow = index === 0 || filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber;
       
@@ -190,13 +183,13 @@ const PaymentDetails: React.FC = () => {
         CustomerName: record.CustomerName,
         MemberId: record.MemberId,
         SalePerson: record.SalePerson,
-        ServiceName: isFirstItemRow ? record.ServiceName : null, // Show service name only on first payment of each item
-        ServicePackageName: isFirstItemRow ? record.ServicePackageName : null,
-        WalletTopUp: isFirstItemRow ? record.WalletTopUp : null,
-        ItemQuantity: isFirstItemRow ? record.ItemQuantity : null, // Show item details only on first payment of each item
-        ItemPrice: isFirstItemRow ? record.ItemPrice : null,
-        ItemTotal: isFirstItemRow ? record.ItemTotal : null,
-        SubTotal: isFirstItemRow ? record.SubTotal : null,
+        ServiceName: record.ServiceName, // Always show service name for each item
+        ServicePackageName: record.ServicePackageName,
+        WalletTopUp: record.WalletTopUp,
+        ItemQuantity: record.ItemQuantity, // Always show item details for each item
+        ItemPrice: record.ItemPrice,
+        ItemTotal: record.ItemTotal,
+        SubTotal: record.SubTotal,
         Total: isFirstInvoiceRow ? record.Total : null, // Show only on first row of invoice
         Discount: isFirstInvoiceRow ? record.Discount : null, // Show only on first row of invoice
         NetTotal: isFirstInvoiceRow ? record.NetTotal : null, // Show only on first row of invoice
@@ -204,7 +197,7 @@ const PaymentDetails: React.FC = () => {
         OrderCreditBalance: isFirstInvoiceRow ? record.OrderCreditBalance : null, // Show only on first row of invoice
         Tax: isFirstInvoiceRow ? record.Tax : null, // Show only on first row of invoice
         InvoiceNetTotal: isFirstInvoiceRow ? record.InvoiceNetTotal : null, // Show only on first row of invoice
-        PaymentStatus: record.PaymentStatus, // Always show payment details
+        PaymentStatus: record.PaymentStatus, // Show payment details only when there's a payment for this item
         PaymentMethod: record.PaymentMethod,
         PaymentType: record.PaymentType,
         PaymentAmount: record.PaymentAmount,
@@ -234,9 +227,9 @@ const PaymentDetails: React.FC = () => {
       setLoading(true);
       const query = `
         WITH 
-        -- Get unique invoice items
+        -- Get unique invoice items with proper identification
         UniqueItems AS (
-          SELECT DISTINCT
+          SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
             CustomerName,
@@ -256,7 +249,12 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
-            OrderCreatedDate
+            OrderCreatedDate,
+            -- Create a unique identifier for each item row to handle duplicates
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal
+              ORDER BY OrderCreatedDate DESC
+            ) as item_sequence
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -267,22 +265,35 @@ const PaymentDetails: React.FC = () => {
         ),
         -- Get unique payments per invoice
         UniquePayments AS (
-          SELECT DISTINCT
+          SELECT 
             InvoiceNumber,
             PaymentStatus,
             PaymentMethod,
             PaymentType,
             PaymentAmount,
-            PaymentNote
-          FROM great_time.MainPaymentView
-          WHERE ${filterType === 'day' 
-            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-          }
-          AND PaymentMethod != 'PASS'
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+            PaymentNote,
+            ROW_NUMBER() OVER (
+              PARTITION BY InvoiceNumber
+              ORDER BY PaymentAmount DESC, PaymentMethod
+            ) as payment_sequence
+          FROM (
+            SELECT DISTINCT
+              InvoiceNumber,
+              PaymentStatus,
+              PaymentMethod,
+              PaymentType,
+              PaymentAmount,
+              PaymentNote
+            FROM great_time.MainPaymentView
+            WHERE ${filterType === 'day' 
+              ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
+              : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
+            }
+            AND PaymentMethod != 'PASS'
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          )
         ),
-        -- Create the Cartesian product but with row numbers to control display
+        -- Combine items with payments - each item gets paired with one payment
         ItemsWithPayments AS (
           SELECT 
             i.*,
@@ -291,13 +302,10 @@ const PaymentDetails: React.FC = () => {
             p.PaymentType,
             p.PaymentAmount,
             p.PaymentNote,
-            ROW_NUMBER() OVER (
-              PARTITION BY i.InvoiceNumber, i.ServiceName, i.ServicePackageName, i.ItemQuantity, i.ItemPrice
-              ORDER BY p.PaymentAmount DESC, p.PaymentMethod
-            ) as payment_rank
+            p.payment_sequence
           FROM UniqueItems i
-          CROSS JOIN UniquePayments p 
-          WHERE i.InvoiceNumber = p.InvoiceNumber
+          LEFT JOIN UniquePayments p ON i.InvoiceNumber = p.InvoiceNumber 
+            AND ((i.item_sequence - 1) % (SELECT COUNT(*) FROM UniquePayments p2 WHERE p2.InvoiceNumber = i.InvoiceNumber)) + 1 = p.payment_sequence
         )
         SELECT 
           Date,
@@ -324,9 +332,9 @@ const PaymentDetails: React.FC = () => {
           PaymentType,
           PaymentAmount,
           PaymentNote,
-          payment_rank
+          item_sequence
         FROM ItemsWithPayments
-        ORDER BY OrderCreatedDate DESC, InvoiceNumber, ServiceName, payment_rank
+        ORDER BY OrderCreatedDate DESC, InvoiceNumber, item_sequence
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
