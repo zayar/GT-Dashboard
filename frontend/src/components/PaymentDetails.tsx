@@ -262,57 +262,77 @@ const PaymentDetails: React.FC = () => {
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
         ),
         -- Preserve per-item occurrences across repeated payments by assigning an instance number first
-        ItemInstances AS (
+        -- Count payments per invoice to de-cartesian items x payments
+        PaymentsPerInvoice AS (
           SELECT 
-            Date,
             InvoiceNumber,
-            CustomerName,
-            MemberId,
-            SalePerson,
-            ServiceName,
-            ServicePackageName,
-            WalletTopUp,
-            InvoiceNetTotal,
-            ItemQuantity,
-            ItemPrice,
-            ItemTotal,
-            SubTotal,
-            Total,
-            NetTotal,
-            OrderBalance,
-            OrderCreditBalance,
-            Discount,
-            Tax,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal
-              ORDER BY OrderCreatedDate
-            ) as item_instance
+            COUNT(DISTINCT CONCAT(COALESCE(PaymentMethod,''),'|',COALESCE(CAST(PaymentAmount AS STRING),''),'|',COALESCE(PaymentNote,''))) AS payments_count
           FROM RawData
+          WHERE PaymentAmount IS NOT NULL AND PaymentAmount > 0
+          GROUP BY InvoiceNumber
         ),
-        -- Collapse duplicates caused by multiple payments while keeping each item occurrence via item_instance
+        -- Group items ignoring payments but keep how many raw rows we saw (items x payments)
+        ItemGroups AS (
+          SELECT 
+            r.InvoiceNumber,
+            r.ServiceName,
+            r.ServicePackageName,
+            r.ItemQuantity,
+            r.ItemPrice,
+            r.ItemTotal,
+            r.SubTotal,
+            MIN(r.OrderCreatedDate) AS item_sort_key,
+            COUNT(*) AS raw_count
+          FROM RawData r
+          GROUP BY r.InvoiceNumber, r.ServiceName, r.ServicePackageName, r.ItemQuantity, r.ItemPrice, r.ItemTotal, r.SubTotal
+        ),
+        -- Expand each grouped item back to the real number of occurrences: raw_count / payments_count
+        ExpandedItems AS (
+          SELECT 
+            g.InvoiceNumber,
+            g.ServiceName,
+            g.ServicePackageName,
+            g.ItemQuantity,
+            g.ItemPrice,
+            g.ItemTotal,
+            g.SubTotal,
+            g.item_sort_key,
+            instance_num
+          FROM ItemGroups g
+          LEFT JOIN PaymentsPerInvoice p USING (InvoiceNumber)
+          , UNNEST(GENERATE_ARRAY(1, GREATEST(1, CAST(ROUND(SAFE_DIVIDE(g.raw_count, IFNULL(p.payments_count, 1))) AS INT64)))) AS instance_num
+        ),
+        -- Join expanded items back with invoice-level fields
         UniqueServices AS (
-          SELECT DISTINCT
-            Date,
-            InvoiceNumber,
-            CustomerName,
-            MemberId,
-            SalePerson,
-            ServiceName,
-            ServicePackageName,
-            WalletTopUp,
-            InvoiceNetTotal,
-            ItemQuantity,
-            ItemPrice,
-            ItemTotal,
-            SubTotal,
-            Total,
-            NetTotal,
-            OrderBalance,
-            OrderCreditBalance,
-            Discount,
-            Tax,
-            item_instance
-          FROM ItemInstances
+          SELECT 
+            r.Date,
+            r.InvoiceNumber,
+            r.CustomerName,
+            r.MemberId,
+            r.SalePerson,
+            e.ServiceName,
+            e.ServicePackageName,
+            r.WalletTopUp,
+            r.InvoiceNetTotal,
+            e.ItemQuantity,
+            e.ItemPrice,
+            e.ItemTotal,
+            e.SubTotal,
+            r.Total,
+            r.NetTotal,
+            r.OrderBalance,
+            r.OrderCreditBalance,
+            r.Discount,
+            r.Tax,
+            e.item_sort_key,
+            e.instance_num
+          FROM ExpandedItems e
+          JOIN RawData r
+            ON r.InvoiceNumber = e.InvoiceNumber
+          GROUP BY 
+            r.Date, r.InvoiceNumber, r.CustomerName, r.MemberId, r.SalePerson, r.WalletTopUp, r.InvoiceNetTotal,
+            r.Total, r.NetTotal, r.OrderBalance, r.OrderCreditBalance, r.Discount, r.Tax,
+            e.ServiceName, e.ServicePackageName, e.ItemQuantity, e.ItemPrice, e.ItemTotal, e.SubTotal, e.item_sort_key, e.instance_num
         ),
         -- Get unique payments per invoice (deduplicate exact combos first, then rank)
         DedupPayments AS (
@@ -344,13 +364,13 @@ const PaymentDetails: React.FC = () => {
         ServiceWithNames AS (
           SELECT *,
             CASE 
-              WHEN item_instance > 1 
-              THEN CONCAT(ServiceName, ' #', CAST(item_instance AS STRING))
+              WHEN instance_num > 1 
+              THEN CONCAT(ServiceName, ' #', CAST(instance_num AS STRING))
               ELSE ServiceName 
             END as DisplayServiceName,
             ROW_NUMBER() OVER (
               PARTITION BY InvoiceNumber 
-              ORDER BY ServiceName, ServicePackageName, item_instance
+              ORDER BY item_sort_key, ServiceName, ServicePackageName, instance_num
             ) as item_rank
           FROM UniqueServices
         ),
