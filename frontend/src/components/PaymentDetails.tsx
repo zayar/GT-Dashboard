@@ -59,7 +59,7 @@ interface PaymentRecord {
   OrderCreditBalance: number | null;
   Discount: number | null;
   Tax: number | null;
-  item_sequence?: number;
+
 }
 
 const PaymentDetails: React.FC = () => {
@@ -226,9 +226,7 @@ const PaymentDetails: React.FC = () => {
     try {
       setLoading(true);
       const query = `
-        WITH 
-        -- Get unique invoice items with proper identification
-        UniqueItems AS (
+        WITH DeduplicatedData AS (
           SELECT 
             FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
             InvoiceNumber,
@@ -238,6 +236,7 @@ const PaymentDetails: React.FC = () => {
             ServiceName,
             ServicePackageName,
             WalletTopUp,
+            PaymentStatus,
             CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
             ItemQuantity,
             ItemPrice,
@@ -249,12 +248,15 @@ const PaymentDetails: React.FC = () => {
             OrderCreditBalance,
             Discount,
             Tax,
+            PaymentMethod,
+            PaymentType,
+            PaymentAmount,
+            PaymentNote,
             OrderCreatedDate,
-            -- Create a unique identifier for each item row to handle duplicates
             ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal
+              PARTITION BY InvoiceNumber, ServiceName, ServicePackageName, ItemQuantity, ItemPrice, ItemTotal, SubTotal, PaymentMethod, PaymentAmount
               ORDER BY OrderCreatedDate DESC
-            ) as item_sequence
+            ) as rn
           FROM great_time.MainPaymentView
           WHERE ${filterType === 'day' 
             ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
@@ -262,50 +264,6 @@ const PaymentDetails: React.FC = () => {
           }
           AND PaymentMethod != 'PASS'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ),
-        -- Get unique payments per invoice
-        UniquePayments AS (
-          SELECT 
-            InvoiceNumber,
-            PaymentStatus,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber
-              ORDER BY PaymentAmount DESC, PaymentMethod
-            ) as payment_sequence
-          FROM (
-            SELECT DISTINCT
-              InvoiceNumber,
-              PaymentStatus,
-              PaymentMethod,
-              PaymentType,
-              PaymentAmount,
-              PaymentNote
-            FROM great_time.MainPaymentView
-            WHERE ${filterType === 'day' 
-              ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-              : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-            }
-            AND PaymentMethod != 'PASS'
-            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-          )
-        ),
-        -- Combine items with payments - each item gets paired with one payment
-        ItemsWithPayments AS (
-          SELECT 
-            i.*,
-            p.PaymentStatus,
-            p.PaymentMethod,
-            p.PaymentType,
-            p.PaymentAmount,
-            p.PaymentNote,
-            p.payment_sequence
-          FROM UniqueItems i
-          LEFT JOIN UniquePayments p ON i.InvoiceNumber = p.InvoiceNumber 
-            AND ((i.item_sequence - 1) % (SELECT COUNT(*) FROM UniquePayments p2 WHERE p2.InvoiceNumber = i.InvoiceNumber)) + 1 = p.payment_sequence
         )
         SELECT 
           Date,
@@ -331,10 +289,10 @@ const PaymentDetails: React.FC = () => {
           PaymentMethod,
           PaymentType,
           PaymentAmount,
-          PaymentNote,
-          item_sequence
-        FROM ItemsWithPayments
-        ORDER BY OrderCreatedDate DESC, InvoiceNumber, item_sequence
+          PaymentNote
+        FROM DeduplicatedData
+        WHERE rn = 1
+        ORDER BY OrderCreatedDate DESC, InvoiceNumber, ServiceName
       `;
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
