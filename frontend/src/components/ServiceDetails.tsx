@@ -294,15 +294,41 @@ Therapists AS (
 ),
 
 Customers AS (
+  -- Get count of purchases per customer for the service
+  WITH Purchases AS (
+    SELECT
+      CustomerName AS name,
+      CustomerPhoneNumber AS phone,
+      COUNT(*) AS purchase_count
+    FROM great_time.MainDataView
+    WHERE ServiceName = '${escapedServiceName}'
+      AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+    GROUP BY name, phone
+  ),
+  -- Get the latest package/remaining counts per customer for this service
+  LatestCounts AS (
+    SELECT
+      CustomerName AS name,
+      CustomerPhoneNumber AS phone,
+      ARRAY_AGG(STRUCT(
+        PackageCount AS pkg,
+        RemainingPackageCount AS rem,
+        CheckInTime
+      ) ORDER BY CheckInTime DESC LIMIT 1)[OFFSET(0)] AS latest
+    FROM great_time.MainDataView
+    WHERE ServiceName = '${escapedServiceName}'
+      AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+    GROUP BY name, phone
+  )
   SELECT
-    CustomerName as name,
-    CustomerPhoneNumber as phone,
-    COUNT(*) as purchase_count
-  FROM great_time.MainDataView
-  WHERE ServiceName = '${escapedServiceName}'
-  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-  GROUP BY CustomerName, CustomerPhoneNumber
-  ORDER BY purchase_count DESC
+    p.name,
+    p.phone,
+    p.purchase_count,
+    l.latest.pkg AS package_count,
+    l.latest.rem AS remaining_count
+  FROM Purchases p
+  LEFT JOIN LatestCounts l USING (name, phone)
+  ORDER BY p.purchase_count DESC
   LIMIT 100
 ),
 
@@ -768,7 +794,19 @@ SELECT
                   color: '#94a3b8',
                   fontWeight: 600,
                   borderBottom: '1px solid #2d3748'
-                }}>Purchase Count</TableCell>
+                }}>Package Count</TableCell>
+                <TableCell sx={{ 
+                  bgcolor: '#1e293b',
+                  color: '#94a3b8',
+                  fontWeight: 600,
+                  borderBottom: '1px solid #2d3748'
+                }}>Used</TableCell>
+                <TableCell sx={{ 
+                  bgcolor: '#1e293b',
+                  color: '#94a3b8',
+                  fontWeight: 600,
+                  borderBottom: '1px solid #2d3748'
+                }}>Remaining</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -791,7 +829,9 @@ SELECT
                     {customer.name}
                   </TableCell>
                   <TableCell sx={{ color: '#e2e8f0', borderBottom: '1px solid #2d3748' }}>{customer.phone}</TableCell>
+                  <TableCell sx={{ color: '#e2e8f0', borderBottom: '1px solid #2d3748' }}>{customer.package_count ?? '-'}</TableCell>
                   <TableCell sx={{ color: '#e2e8f0', borderBottom: '1px solid #2d3748' }}>{customer.purchase_count}</TableCell>
+                  <TableCell sx={{ color: '#e2e8f0', borderBottom: '1px solid #2d3748' }}>{customer.remaining_count ?? '-'}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

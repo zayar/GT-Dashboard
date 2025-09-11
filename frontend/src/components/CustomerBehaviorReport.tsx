@@ -18,13 +18,20 @@ import {
   SelectChangeEvent,
   Button,
   TextField,
-  InputAdornment
+  InputAdornment,
+  ToggleButton,
+  ToggleButtonGroup
 } from '@mui/material';
 import axios from 'axios';
 import ReactApexChart from 'react-apexcharts';
 import { ApexOptions } from 'apexcharts';
 import SearchIcon from '@mui/icons-material/Search';
 import { useClinic } from '../contexts/ClinicContext';
+import { useNavigate } from 'react-router-dom';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 
 // Define period type for time selection
 type PeriodType = 'monthly' | 'quarterly' | 'annual';
@@ -47,6 +54,7 @@ interface MonthlyCustomers {
 
 const CustomerBehaviorReport: React.FC = () => {
   const { currentClinic } = useClinic();
+  const navigate = useNavigate();
   const [period, setPeriod] = useState<PeriodType>('monthly');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +63,62 @@ const CustomerBehaviorReport: React.FC = () => {
   const [customerVisits, setCustomerVisits] = useState<CustomerVisit[]>([]);
   const [yearSelection, setYearSelection] = useState<number>(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState<string>('');
+  // Top 10 filter controls
+  const [topMode, setTopMode] = useState<'single' | 'range'>('single');
+  const [topStartMonth, setTopStartMonth] = useState<Date>(() => {
+    const now = new Date();
+    // Default to LAST month
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return lastMonth;
+  });
+  const [topEndMonth, setTopEndMonth] = useState<Date>(() => {
+    const now = new Date();
+    // Default to LAST month
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return lastMonth;
+  });
+  const [topLoading, setTopLoading] = useState<boolean>(false);
+  const [topCustomersRows, setTopCustomersRows] = useState<Array<{ name: string; phone: string; memberId: string; visits: number; purchases: number; spend: number }>>([]);
+  const [rankBy, setRankBy] = useState<'visits' | 'purchases' | 'spend'>('spend');
+
+  const formatMonthRange = (): string => {
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (topMode === 'single') return fmt(topStartMonth);
+    return `${fmt(topStartMonth)}_to_${fmt(topEndMonth)} }`;
+  };
+
+  const handleExportTopCsv = () => {
+    const headers = ['Name','Phone','Member ID','Visits','Purchases','Spend','Rank By','Period'];
+    const rows = topCustomersRows.map(r => [
+      r.name,
+      r.phone,
+      r.memberId,
+      r.visits,
+      r.purchases,
+      r.spend,
+      rankBy,
+      topMode === 'single' 
+        ? `${topStartMonth.getFullYear()}-${String(topStartMonth.getMonth()+1).padStart(2,'0')}`
+        : `${topStartMonth.getFullYear()}-${String(topStartMonth.getMonth()+1).padStart(2,'0')} to ${topEndMonth.getFullYear()}-${String(topEndMonth.getMonth()+1).padStart(2,'0')}`
+    ]);
+
+    const csv = [headers, ...rows]
+      .map(cols => cols.map(v => {
+        const val = v === null || v === undefined ? '' : String(v);
+        // escape quotes and wrap if contains comma or newline
+        const escaped = val.replace(/"/g, '""');
+        return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+      }).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `top10_customers_${rankBy}_${formatMonthRange().replace(/\s+/g,'')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   
   const years = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -68,6 +132,21 @@ const CustomerBehaviorReport: React.FC = () => {
   useEffect(() => {
     fetchCustomerActivityData();
   }, [period, yearSelection]);
+
+  useEffect(() => {
+    fetchTopCustomers();
+  }, [currentClinic, topMode, topStartMonth, topEndMonth, rankBy]);
+  
+  // Keep end month in sync when switching to single mode or when start > end
+  useEffect(() => {
+    if (topMode === 'single') {
+      if (topEndMonth.getTime() !== topStartMonth.getTime()) {
+        setTopEndMonth(topStartMonth);
+      }
+    } else if (topEndMonth < topStartMonth) {
+      setTopEndMonth(topStartMonth);
+    }
+  }, [topMode, topStartMonth, topEndMonth]);
 
   const fetchCustomerActivityData = async () => {
     setLoading(true);
@@ -221,6 +300,97 @@ const CustomerBehaviorReport: React.FC = () => {
       setError(errorMessage);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Fetch Top 10 customers within month or month range
+  const fetchTopCustomers = async () => {
+    if (!currentClinic) return;
+    try {
+      setTopLoading(true);
+      // Determine date range (inclusive)
+      const start = new Date(topStartMonth.getFullYear(), topStartMonth.getMonth(), 1);
+      const endBase = topMode === 'single' ? topStartMonth : topEndMonth;
+      const end = new Date(endBase.getFullYear(), endBase.getMonth() + 1, 0); // last day of month
+
+      const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-01`;
+      const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+
+      const query = `
+        -- Visits within selected range from appointment data
+        WITH Visits AS (
+          SELECT 
+            CustomerName,
+            CustomerPhoneNumber,
+            COUNT(*) AS visits
+          FROM great_time.MainDataView
+          WHERE CustomerName IS NOT NULL
+            AND CustomerPhoneNumber IS NOT NULL
+            AND DATE(CheckInTime) BETWEEN DATE('${startStr}') AND DATE('${endStr}')
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          GROUP BY CustomerName, CustomerPhoneNumber
+        ),
+        -- Member ID from payments if available
+        Member AS (
+          SELECT 
+            CustomerName,
+            CustomerPhoneNumber,
+            ANY_VALUE(MemberId) AS MemberId
+          FROM great_time.MainPaymentView
+          WHERE CustomerName IS NOT NULL
+            AND CustomerPhoneNumber IS NOT NULL
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          GROUP BY CustomerName, CustomerPhoneNumber
+        ),
+        -- Purchases and spend within selected range from payments
+        Purchases AS (
+          SELECT 
+            CustomerName,
+            CustomerPhoneNumber,
+            COUNT(DISTINCT InvoiceNumber) AS purchases,
+            CAST(SUM(CAST(NetTotal AS FLOAT64)) AS INT64) AS spend
+          FROM great_time.MainPaymentView
+          WHERE CustomerName IS NOT NULL
+            AND CustomerPhoneNumber IS NOT NULL
+            AND PaymentStatus = 'PAID'
+            AND PaymentMethod != 'PASS'
+            AND DATE(OrderCreatedDate) BETWEEN DATE('${startStr}') AND DATE('${endStr}')
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          GROUP BY CustomerName, CustomerPhoneNumber
+        )
+        SELECT 
+          v.CustomerName AS name,
+          v.CustomerPhoneNumber AS phone,
+          COALESCE(m.MemberId, 'N/A') AS memberId,
+          v.visits,
+          COALESCE(p.purchases, 0) AS purchases,
+          COALESCE(p.spend, 0) AS spend
+        FROM Visits v
+        LEFT JOIN Member m
+          ON v.CustomerName = m.CustomerName
+         AND v.CustomerPhoneNumber = m.CustomerPhoneNumber
+        LEFT JOIN Purchases p
+          ON v.CustomerName = p.CustomerName
+         AND v.CustomerPhoneNumber = p.CustomerPhoneNumber
+        ORDER BY ${rankBy === 'visits' ? 'v.visits' : rankBy === 'purchases' ? 'p.purchases' : 'p.spend'} DESC
+        LIMIT 10
+      `;
+
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query }, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 15000
+      });
+
+      if (!response.data.success) {
+        throw new Error(response.data.error || 'Failed to fetch top customers');
+      }
+
+      setTopCustomersRows(response.data.data || []);
+    } catch (e) {
+      console.error('Top Customers Error:', e);
+      setTopCustomersRows([]);
+    } finally {
+      setTopLoading(false);
     }
   };
   
@@ -417,7 +587,7 @@ const CustomerBehaviorReport: React.FC = () => {
         Customer Behavior Report
       </Typography>
 
-      {/* Filter controls */}
+      {/* Filters header */}
       <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
         <FormControl sx={{ minWidth: 120, bgcolor: '#1e293b', borderRadius: 1 }}>
           <InputLabel id="period-select-label" sx={{ color: '#94a3b8' }}>Period</InputLabel>
@@ -539,6 +709,104 @@ const CustomerBehaviorReport: React.FC = () => {
                   height={350} 
                 />
               </Box>
+            </Paper>
+          </Grid>
+
+          {/* Top 10 Customers with month or range filter - full width */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3, bgcolor: '#111827', borderRadius: 2, border: '1px solid #334155' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 500, color: '#e2e8f0' }}>Top 10 Customers</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+                <ToggleButtonGroup
+                  exclusive
+                  value={topMode}
+                  onChange={(_e, v) => v && setTopMode(v)}
+                  size="small"
+                >
+                  <ToggleButton value="single">Single Month</ToggleButton>
+                  <ToggleButton value="range">Month Range</ToggleButton>
+                </ToggleButtonGroup>
+                <LocalizationProvider dateAdapter={AdapterDateFns}>
+                  <DatePicker
+                    label={topMode === 'single' ? 'Month' : 'Start Month'}
+                    views={['year','month']}
+                    value={topStartMonth}
+                    onChange={(d) => {
+                      if (!d) return;
+                      const normalized = new Date(d.getFullYear(), d.getMonth(), 1);
+                      setTopStartMonth(normalized);
+                    }}
+                    slotProps={{ textField: { size: 'small', sx: { bgcolor: '#1e293b', '& .MuiInputBase-input': { color: '#e2e8f0' } } } }}
+                  />
+                  {topMode === 'range' && (
+                    <DatePicker
+                      label={'End Month'}
+                      views={['year','month']}
+                      value={topEndMonth}
+                      onChange={(d) => {
+                        if (!d) return;
+                        const normalized = new Date(d.getFullYear(), d.getMonth(), 1);
+                        setTopEndMonth(normalized);
+                      }}
+                      minDate={topStartMonth}
+                      slotProps={{ textField: { size: 'small', sx: { bgcolor: '#1e293b', '& .MuiInputBase-input': { color: '#e2e8f0' } } } }}
+                    />
+                  )}
+                </LocalizationProvider>
+                <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 500 }}>
+                  Ranked by: Spend
+                </Typography>
+                <Button 
+                  variant="outlined"
+                  size="small"
+                  startIcon={<FileDownloadIcon />}
+                  onClick={handleExportTopCsv}
+                  sx={{ borderColor: '#2d3748', color: '#e2e8f0' }}
+                >
+                  Export CSV
+                </Button>
+              </Box>
+              <TableContainer sx={{ maxHeight: 360 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Name</TableCell>
+                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Phone</TableCell>
+                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Member ID</TableCell>
+                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Visits</TableCell>
+                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Purchases</TableCell>
+                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Spend</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={6} sx={{ color: '#e2e8f0' }}>Loading...</TableCell>
+                      </TableRow>
+                    ) : topCustomersRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} sx={{ color: '#e2e8f0' }}>No data for the selected period.</TableCell>
+                      </TableRow>
+                    ) : topCustomersRows.map((row, idx) => (
+                      <TableRow
+                        key={idx}
+                        hover
+                        sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#1c2a41' } }}
+                        onClick={() => navigate(`/customers/${encodeURIComponent(row.phone)}`)}
+                      >
+                        <TableCell sx={{ color: '#e2e8f0' }}>{row.name}</TableCell>
+                        <TableCell sx={{ color: '#e2e8f0' }}>{row.phone}</TableCell>
+                        <TableCell sx={{ color: '#e2e8f0' }}>{row.memberId}</TableCell>
+                        <TableCell sx={{ color: '#e2e8f0' }}>{row.visits}</TableCell>
+                        <TableCell sx={{ color: '#e2e8f0' }}>{row.purchases}</TableCell>
+                        <TableCell sx={{ color: '#e2e8f0' }}>{row.spend.toLocaleString('en-US')} MMK</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </Paper>
           </Grid>
           
