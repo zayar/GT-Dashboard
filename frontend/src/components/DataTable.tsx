@@ -40,10 +40,23 @@ const COLUMN_WIDTHS: { [key: string]: string } = {
   MemberId: '90px',
   SalePerson: '110px',
   ServicePackageName: '130px',
-  WalletTopUp: '70px',
-  PaymentStatus: '90px',
-  PaymentMethod: '90px',
-  InvoiceNetTotal: '90px'
+  WalletTopUp: '80px',
+  ItemQuantity: '50px',
+  ItemPrice: '90px',
+  ItemTotal: '100px',
+  SubTotal: '100px',
+  Total: '100px',
+  NetTotal: '100px',
+  Discount: '90px',
+  OrderBalance: '110px',
+  OrderCreditBalance: '130px',
+  Tax: '80px',
+  InvoiceNetTotal: '110px',
+  PaymentStatus: '100px',
+  PaymentMethod: '110px',
+  PaymentType: '100px',
+  PaymentAmount: '110px',
+  PaymentNote: '140px'
 };
 
 const DataTable: React.FC<DataTableProps> = ({ 
@@ -239,7 +252,7 @@ const DataTable: React.FC<DataTableProps> = ({
             stickyHeader 
             size="small"
             sx={{ 
-              minWidth: '1200px', // Set minimum width to ensure proper column spacing
+              minWidth: '2400px', // Set minimum width to ensure proper column spacing for all columns
               width: '100%',
               tableLayout: 'fixed' // Makes columns respect their width settings
             }}
@@ -255,7 +268,8 @@ const DataTable: React.FC<DataTableProps> = ({
                       bgcolor: '#101924',
                       color: '#d1d5db',
                       fontWeight: 600,
-                      width: COLUMN_WIDTHS[headCell.id] || 'auto',
+                      width: COLUMN_WIDTHS[headCell.id] || '120px', // Fallback to 120px for undefined columns
+                      minWidth: COLUMN_WIDTHS[headCell.id] || '120px',
                       borderBottom: '1px solid #2d3748',
                       whiteSpace: 'nowrap',
                       padding: '8px 12px',
@@ -310,6 +324,12 @@ const DataTable: React.FC<DataTableProps> = ({
                           borderBottom: '1px solid #2d3748',
                           padding: '6px 12px',
                           fontSize: '0.85rem',
+                          width: COLUMN_WIDTHS[key] || '120px',
+                          minWidth: COLUMN_WIDTHS[key] || '120px',
+                          maxWidth: COLUMN_WIDTHS[key] || '120px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                           cursor: (key === 'CustomerName' && onCustomerClick) ||
                                   (key === 'ServiceName' && onServiceClick) ||
                                   (key === 'TherapistName' && onTherapistClick)

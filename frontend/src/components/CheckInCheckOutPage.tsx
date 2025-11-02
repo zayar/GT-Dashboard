@@ -48,6 +48,7 @@ interface CheckInOutRecord {
   PaymentMethod: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER' | null; // Adjust enum values if needed
   PaymentStatus: 'PAID' | 'PENDING' | 'CANCELLED' | 'REFUNDED' | null; // Adjust enum values if needed
   Total: number | null;
+  SellerName: string | null;
   // Add other fields from inoutview if needed for display or filtering
 }
 
@@ -136,7 +137,7 @@ const CheckInCheckOutPage: React.FC = () => {
     let query = `
       SELECT 
         OrderId, CheckInTime, CheckOutTime, Servicename, TherapicName, HelperName, 
-        CustomerName, CustomerPhoneNumber, PaymentMethod, PaymentStatus, Total 
+        CustomerName, CustomerPhoneNumber, PaymentMethod, PaymentStatus, Total, SellerName
       FROM inoutview 
       WHERE CheckInTime >= '${formatDateForSQL(calculatedStartDate)}' 
         AND CheckInTime <= '${formatDateForSQL(calculatedEndDate)}'
@@ -189,7 +190,8 @@ const CheckInCheckOutPage: React.FC = () => {
       record.CustomerName?.toLowerCase().includes(lowerSearchTerm) ||
       record.Servicename?.toLowerCase().includes(lowerSearchTerm) ||
       record.TherapicName?.toLowerCase().includes(lowerSearchTerm) ||
-      record.CustomerPhoneNumber?.includes(searchTerm) // Keep phone number search exact or partial? Using includes for now.
+      record.CustomerPhoneNumber?.includes(searchTerm) ||
+      record.SellerName?.toLowerCase().includes(lowerSearchTerm)
     );
   }, [records, searchTerm]);
 
@@ -216,7 +218,7 @@ const CheckInCheckOutPage: React.FC = () => {
   const handleExportCSV = () => {
     if (!filteredRecords.length) return;
 
-    const headers = ['Order ID', 'Check-In Time', 'Check-Out Time', 'Service', 'Therapist', 'Helper', 'Customer', 'Phone', 'Payment Method', 'Status', 'Total'];
+    const headers = ['Order ID', 'Check-In Time', 'Check-Out Time', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Total'];
     const rows = filteredRecords.map(record => [
       record.OrderId ?? '-',
       formatDisplayDateTime(record.CheckInTime),
@@ -225,6 +227,7 @@ const CheckInCheckOutPage: React.FC = () => {
       record.TherapicName ?? '-',
       record.HelperName ?? '-',
       record.CustomerName ?? '-',
+      record.SellerName ?? '-',
       record.CustomerPhoneNumber ?? '-',
       record.PaymentMethod ?? '-',
       record.PaymentStatus ?? '-',
@@ -335,7 +338,7 @@ const CheckInCheckOutPage: React.FC = () => {
             <Grid item xs={12} sm={6} md={3}>
               <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Search Records</Typography>
               <TextField
-                placeholder="Customer, service, therapist..."
+                placeholder="Customer, service, therapist, seller..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 size="small"
@@ -361,8 +364,8 @@ const CheckInCheckOutPage: React.FC = () => {
         </Box>
 
         {/* Data Table */}
-        <TableContainer component={Paper} elevation={1} sx={{ maxHeight: '65vh' }}>
-          <Table stickyHeader size="small">
+        <TableContainer component={Paper} elevation={1} sx={{ maxHeight: '65vh', overflowX: 'auto' }}>
+          <Table stickyHeader size="small" sx={{ minWidth: 1400 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Order ID</TableCell>
@@ -372,6 +375,7 @@ const CheckInCheckOutPage: React.FC = () => {
                 <TableCell>Therapist</TableCell>
                 <TableCell>Helper</TableCell>
                 <TableCell>Customer</TableCell>
+                <TableCell sx={{ bgcolor: '#2563eb', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Seller Name</TableCell>
                 <TableCell>Phone</TableCell>
                 <TableCell>Payment Method</TableCell>
                 <TableCell>Status</TableCell>
@@ -381,13 +385,13 @@ const CheckInCheckOutPage: React.FC = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={12} align="center">
                     <CircularProgress sx={{ my: 4 }} />
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length === 0 && !error ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={12} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>No records match the current filters.</Typography>
                   </TableCell>
                 </TableRow>
@@ -405,6 +409,7 @@ const CheckInCheckOutPage: React.FC = () => {
                     <TableCell>{record.TherapicName}</TableCell>
                     <TableCell>{record.HelperName ?? '-'}</TableCell>
                     <TableCell>{record.CustomerName ?? '-'}</TableCell>
+                    <TableCell sx={{ bgcolor: '#1e40af', color: 'white', fontWeight: 'bold', minWidth: 130 }}>{record.SellerName ?? '-'}</TableCell>
                     <TableCell>{record.CustomerPhoneNumber}</TableCell>
                     <TableCell>{record.PaymentMethod ?? '-'}</TableCell>
                     <TableCell>

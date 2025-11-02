@@ -53,6 +53,7 @@ interface CheckInOutRecord {
   PaymentMethod: string;
   PaymentStatus: string;
   HelperName: string;
+  SellerName: string;
 }
 
 const CheckInOut: React.FC = () => {
@@ -129,7 +130,8 @@ const CheckInOut: React.FC = () => {
           NetTotal,
           PaymentMethod,
           PaymentStatus,
-          HelperName
+          HelperName,
+          SellerName
         FROM great_time.CheckInOutView
         WHERE ${dateCondition}
         AND ClinicCode = '${currentClinic?.code}'
@@ -151,6 +153,8 @@ const CheckInOut: React.FC = () => {
           .sort();
         
         console.log('Available payment status values:', paymentStatuses);
+        console.log('Sample record with SellerName:', data[0]?.SellerName);
+        console.log('Full sample record:', data[0]);
         setAvailablePaymentStatuses(paymentStatuses);
       } else {
         setAvailablePaymentStatuses([]);
@@ -189,7 +193,8 @@ const CheckInOut: React.FC = () => {
         record.HelperName?.toLowerCase().includes(query) ||
         record.ClinicName?.toLowerCase().includes(query) ||
         record.PaymentMethod?.toLowerCase().includes(query) ||
-        record.OrderId?.toLowerCase().includes(query)
+        record.OrderId?.toLowerCase().includes(query) ||
+        record.SellerName?.toLowerCase().includes(query)
       );
     }
     
@@ -299,7 +304,8 @@ const CheckInOut: React.FC = () => {
             NetTotal,
             PaymentMethod,
             PaymentStatus,
-            HelperName
+            HelperName,
+            SellerName
           FROM great_time.CheckInOutView
           WHERE ${dateCondition}
           AND ClinicCode = '${currentClinic?.code}'
@@ -338,6 +344,7 @@ const CheckInOut: React.FC = () => {
         'Service', 
         'Therapist', 
         'Customer',
+        'Seller Name',
         'Phone Number',
         'Order ID',
         'Payment Method',
@@ -355,6 +362,7 @@ const CheckInOut: React.FC = () => {
         record.Servicename || '',
         record.TherapicName || '',
         record.CustomerName || '',
+        record.SellerName || '',
         record.CustomerPhoneNumber || '',
         record.OrderId || '',
         record.PaymentMethod || '',
@@ -606,44 +614,46 @@ const CheckInOut: React.FC = () => {
             </Typography>
           </Box>
 
-          <Paper sx={{ bgcolor: '#1a2234', overflow: 'hidden', borderRadius: 2 }}>
-            <TableContainer sx={{ maxHeight: 'calc(100vh - 300px)' }}>
-              <Table stickyHeader>
+          <Paper sx={{ bgcolor: '#1a2234', overflowX: 'auto', borderRadius: 2 }}>
+            <TableContainer sx={{ maxHeight: 'calc(100vh - 300px)', overflowX: 'auto', width: '100%' }}>
+              <Table stickyHeader sx={{ minWidth: 1500 }}>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Order ID</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Check-In Time</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Check-Out Time</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Service</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Therapist</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Helper</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Customer</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Phone</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Payment Method</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold' }}>Total</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 100 }}>Order ID</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Check-In Time</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Check-Out Time</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Service</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 120 }}>Therapist</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 120 }}>Helper</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Customer</TableCell>
+                    <TableCell sx={{ bgcolor: '#2563eb', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Seller Name</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Phone</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Payment Method</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 100 }}>Status</TableCell>
+                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 100 }}>Total</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {paginatedRecords.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} align="center" sx={{ color: 'rgba(255,255,255,0.7)' }}>
+                      <TableCell colSpan={12} align="center" sx={{ color: 'rgba(255,255,255,0.7)' }}>
                         No records found
                       </TableCell>
                     </TableRow>
                   ) : (
                     paginatedRecords.map((record, index) => (
                       <TableRow key={`${record.OrderId}-${index}`} hover sx={{ '&:hover': { bgcolor: '#1e293b !important' } }}>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.OrderId}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.CheckInTime}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.CheckOutTime || '-'}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.Servicename}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.TherapicName}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.HelperName || '-'}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.CustomerName}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.CustomerPhoneNumber}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>{record.PaymentMethod}</TableCell>
-                        <TableCell sx={{ borderBottom: '1px solid #1e293b' }}>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 100 }}>{record.OrderId}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.CheckInTime}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.CheckOutTime || '-'}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.Servicename}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 120 }}>{record.TherapicName}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 120 }}>{record.HelperName || '-'}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.CustomerName}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 130, bgcolor: '#1e40af' }}>{record.SellerName || 'NO SELLER'}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 130 }}>{record.CustomerPhoneNumber}</TableCell>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 130 }}>{record.PaymentMethod}</TableCell>
+                        <TableCell sx={{ borderBottom: '1px solid #1e293b', minWidth: 100 }}>
                           <Chip 
                             label={record.PaymentStatus} 
                             size="small"
@@ -654,7 +664,7 @@ const CheckInOut: React.FC = () => {
                             }}
                           />
                         </TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b' }}>
+                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 100 }}>
                           {formatCurrency(record.Total)}
                         </TableCell>
                       </TableRow>

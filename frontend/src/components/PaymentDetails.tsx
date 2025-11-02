@@ -107,7 +107,9 @@ const PaymentDetails: React.FC = () => {
     
     // Apply zero value filter
     if (!showZeroValues) {
-      filteredData = filteredData.filter(record => record.InvoiceNetTotal !== 0);
+      filteredData = filteredData.filter(record => 
+        record.InvoiceNetTotal != null && record.InvoiceNetTotal !== 0
+      );
     }
     
     // Apply search filter across multiple fields
