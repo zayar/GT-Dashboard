@@ -147,6 +147,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     },
     { id: 'appointments-list-mysql', label: 'Appointments List', icon: 'fas fa-list', path: '/appointments-list' },
     { id: 'checkin-records', label: 'CheckIn/Out Records', icon: 'fas fa-clipboard-list', path: '/checkin-checkout-page' },
+    { id: 'daily-report', label: 'Daily Report', icon: 'fas fa-calendar-day', path: '/daily-report' },
     { id: 'conversational-ai', label: 'Conversational AI', icon: 'fas fa-robot', path: '/conversational-ai', isAiFeature: true },
     { 
       id: 'sales', 

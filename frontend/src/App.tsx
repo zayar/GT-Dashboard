@@ -10,6 +10,7 @@ import { Link, Navigate, Route, BrowserRouter as Router, Routes, useNavigate } f
 import AppointmentsListPage from './components/AppointmentsListPage';
 import BankingDetails from './components/BankingDetails';
 import CheckInCheckOutPage from './components/CheckInCheckOutPage';
+import DailyReport from './components/DailyReport';
 import ClinicSelector from './components/ClinicSelector';
 import Commission from './components/Commission';
 import ConversationalAI from './components/ConversationalAI'; // Import our new component
@@ -2147,6 +2148,7 @@ const AppContent = () => {
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
             {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
             <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
+            <Route path="/daily-report" element={<DailyReport />} />
             <Route path="/transactions" element={<Transaction />} />
             <Route path="/wallet" element={<Wallet />} />
             <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
