@@ -38,6 +38,9 @@ interface DailyReportData {
   PractitionerName: string;
   HelperName: string | null;
   IsNewCustomer: string;
+  TotalPaymentAmount: number | null;
+  PaymentMethods: string | null;
+  PaymentNotes: string | null;
 }
 
 const DailyReport: React.FC = () => {
@@ -85,15 +88,30 @@ const DailyReport: React.FC = () => {
           WHERE LOWER(ClinicCode) = LOWER('${currentClinic.code}')
             AND CustomerName IS NOT NULL
           GROUP BY CustomerPhoneNumber
+        ),
+        PaymentData AS (
+          SELECT
+            CustomerPhoneNumber,
+            SUM(PaymentAmount) AS TotalPaymentAmount,
+            STRING_AGG(DISTINCT PaymentMethod, ', ') AS PaymentMethods,
+            STRING_AGG(DISTINCT CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END, ' | ') AS PaymentNotes
+          FROM great_time.MainPaymentView
+          WHERE DATE(OrderCreatedDate) = '${selectedDateStr}'
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          GROUP BY CustomerPhoneNumber
         )
         SELECT
           t.*,
           CASE 
             WHEN f.first_visit_date = '${selectedDateStr}' THEN 'Yes'
             ELSE 'No'
-          END AS IsNewCustomer
+          END AS IsNewCustomer,
+          p.TotalPaymentAmount,
+          p.PaymentMethods,
+          p.PaymentNotes
         FROM TodayVisits t
         LEFT JOIN FirstVisits f ON t.CustomerPhoneNumber = f.CustomerPhoneNumber
+        LEFT JOIN PaymentData p ON t.CustomerPhoneNumber = p.CustomerPhoneNumber
         ORDER BY t.CustomerName, t.ServiceName
       `;
 
@@ -112,6 +130,7 @@ const DailyReport: React.FC = () => {
       );
 
       if (!response.data.success) {
+        console.error('BigQuery Error:', response.data.error);
         throw new Error(response.data.error || 'Failed to fetch daily report data');
       }
 
@@ -120,7 +139,8 @@ const DailyReport: React.FC = () => {
       setRawData(data);
     } catch (err: any) {
       console.error('Error fetching daily report:', err);
-      setError(err.message || 'Failed to fetch daily report data');
+      console.error('Full error details:', err.response?.data);
+      setError(err.response?.data?.error || err.message || 'Failed to fetch daily report data');
     } finally {
       setLoading(false);
     }
@@ -157,6 +177,9 @@ const DailyReport: React.FC = () => {
     const customerPractitionerMap: { [customer: string]: Set<string> } = {};
     const customerHelperMap: { [customer: string]: Set<string> } = {};
     const customerNewStatusMap: { [customer: string]: string } = {};
+    const customerPaymentAmountMap: { [customer: string]: number } = {};
+    const customerPaymentMethodMap: { [customer: string]: string } = {};
+    const customerPaymentNoteMap: { [customer: string]: string } = {};
 
     rawData.forEach(record => {
       const customer = record.CustomerName;
@@ -168,6 +191,11 @@ const DailyReport: React.FC = () => {
       
       // Store new customer status
       customerNewStatusMap[customer] = record.IsNewCustomer;
+      
+      // Store payment information (same for all records of a customer)
+      customerPaymentAmountMap[customer] = record.TotalPaymentAmount || 0;
+      customerPaymentMethodMap[customer] = record.PaymentMethods || '-';
+      customerPaymentNoteMap[customer] = record.PaymentNotes || '-';
 
       // Store practitioners and helpers
       if (!customerPractitionerMap[customer]) {
@@ -216,7 +244,10 @@ const DailyReport: React.FC = () => {
       customerIdMap,
       practitionerMap,
       helperMap,
-      newCustomerMap: customerNewStatusMap
+      newCustomerMap: customerNewStatusMap,
+      paymentAmountMap: customerPaymentAmountMap,
+      paymentMethodMap: customerPaymentMethodMap,
+      paymentNoteMap: customerPaymentNoteMap
     };
   }, [rawData]);
 
@@ -260,7 +291,10 @@ const DailyReport: React.FC = () => {
         'Phone Number': heatmapData.phoneMap[customer],
         'New Customer': heatmapData.newCustomerMap[customer],
         'Practitioner(s)': heatmapData.practitionerMap[customer],
-        'Helper(s)': heatmapData.helperMap[customer]
+        'Helper(s)': heatmapData.helperMap[customer],
+        'Payment Amount': heatmapData.paymentAmountMap[customer] || 0,
+        'Payment Method(s)': heatmapData.paymentMethodMap[customer],
+        'Payment Note(s)': heatmapData.paymentNoteMap[customer]
       };
       
       // Add service columns
@@ -271,28 +305,8 @@ const DailyReport: React.FC = () => {
       return row;
     });
 
-    // Count new customers
-    const newCustomerCount = heatmapData.customers.filter(customer => 
-      heatmapData.newCustomerMap[customer] === 'Yes'
-    ).length;
-
-    // Add summary row at the top
-    const summaryRow: any = {
-      'Customer Name': 'SUMMARY',
-      'Customer ID': '',
-      'Phone Number': `${summary.totalCustomers} Customers`,
-      'New Customer': `${newCustomerCount} New`,
-      'Practitioner(s)': `${summary.totalServices} Services`,
-      'Helper(s)': `${summary.totalVisits} Visits`
-    };
-    heatmapData.services.forEach(service => {
-      const total = heatmapData.customers.reduce((sum, customer) => {
-        return sum + (heatmapData.data[customer]?.[service] || 0);
-      }, 0);
-      summaryRow[service] = total;
-    });
-
-    const dataWithSummary = [summaryRow, ...exportData];
+    // Export data without summary row
+    const dataWithSummary = exportData;
 
     // Create worksheet
     const ws = XLSX.utils.json_to_sheet(dataWithSummary);
@@ -305,6 +319,9 @@ const DailyReport: React.FC = () => {
       { wch: 15 }, // New Customer
       { wch: 25 }, // Practitioner(s)
       { wch: 25 }, // Helper(s)
+      { wch: 15 }, // Payment Amount
+      { wch: 20 }, // Payment Method(s)
+      { wch: 30 }, // Payment Note(s)
       ...heatmapData.services.map(() => ({ wch: 20 })) // Service columns
     ];
     ws['!cols'] = colWidths;
@@ -561,10 +578,7 @@ const DailyReport: React.FC = () => {
 
       {/* Customer-Service Heatmap */}
       <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h6" sx={{ color: '#f3f4f6', fontWeight: 600 }}>
-            Customer-Service Usage Today
-          </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 3 }}>
           <Button
             variant="outlined"
             size="small"
@@ -646,6 +660,22 @@ const DailyReport: React.FC = () => {
                       zIndex: 3,
                       borderRight: '1px solid #2d3748',
                       borderBottom: '1px solid #2d3748',
+                      minWidth: 120,
+                      textAlign: 'center'
+                    }}
+                  >
+                    Customer ID
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      bgcolor: '#101924',
+                      color: '#d1d5db',
+                      fontWeight: 600,
+                      position: 'sticky',
+                      left: 320,
+                      zIndex: 3,
+                      borderRight: '1px solid #2d3748',
+                      borderBottom: '1px solid #2d3748',
                       minWidth: 100,
                       textAlign: 'center'
                     }}
@@ -658,7 +688,7 @@ const DailyReport: React.FC = () => {
                       color: '#d1d5db',
                       fontWeight: 600,
                       position: 'sticky',
-                      left: 300,
+                      left: 420,
                       zIndex: 3,
                       borderRight: '1px solid #2d3748',
                       borderBottom: '1px solid #2d3748',
@@ -673,7 +703,7 @@ const DailyReport: React.FC = () => {
                       color: '#d1d5db',
                       fontWeight: 600,
                       position: 'sticky',
-                      left: 450,
+                      left: 570,
                       zIndex: 3,
                       borderRight: '1px solid #2d3748',
                       borderBottom: '1px solid #2d3748',
@@ -681,6 +711,52 @@ const DailyReport: React.FC = () => {
                     }}
                   >
                     Helper(s)
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      bgcolor: '#101924',
+                      color: '#d1d5db',
+                      fontWeight: 600,
+                      position: 'sticky',
+                      left: 720,
+                      zIndex: 3,
+                      borderRight: '1px solid #2d3748',
+                      borderBottom: '1px solid #2d3748',
+                      minWidth: 120,
+                      textAlign: 'right'
+                    }}
+                  >
+                    Payment
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      bgcolor: '#101924',
+                      color: '#d1d5db',
+                      fontWeight: 600,
+                      position: 'sticky',
+                      left: 840,
+                      zIndex: 3,
+                      borderRight: '1px solid #2d3748',
+                      borderBottom: '1px solid #2d3748',
+                      minWidth: 130
+                    }}
+                  >
+                    Method(s)
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      bgcolor: '#101924',
+                      color: '#d1d5db',
+                      fontWeight: 600,
+                      position: 'sticky',
+                      left: 970,
+                      zIndex: 3,
+                      borderRight: '1px solid #2d3748',
+                      borderBottom: '1px solid #2d3748',
+                      minWidth: 200
+                    }}
+                  >
+                    Note(s)
                   </TableCell>
                   {heatmapData.services.map((service) => (
                     <TableCell
@@ -736,14 +812,30 @@ const DailyReport: React.FC = () => {
                           {customer}
                         </Typography>
                         <Typography sx={{ color: '#9ca3af', fontSize: '0.75rem', mt: 0.5 }}>
-                          ID: {heatmapData.customerIdMap[customer]} | {heatmapData.phoneMap[customer]}
+                          {heatmapData.phoneMap[customer]}
                         </Typography>
                       </Box>
                     </TableCell>
                     <TableCell
                       sx={{
+                        color: '#d1d5db',
                         position: 'sticky',
                         left: 200,
+                        bgcolor: '#1a2234',
+                        borderRight: '1px solid #2d3748',
+                        borderBottom: '1px solid #2d3748',
+                        padding: '12px 16px',
+                        textAlign: 'center',
+                        fontSize: '0.85rem',
+                        fontWeight: 500
+                      }}
+                    >
+                      {heatmapData.customerIdMap[customer]}
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        position: 'sticky',
+                        left: 320,
                         bgcolor: '#1a2234',
                         borderRight: '1px solid #2d3748',
                         borderBottom: '1px solid #2d3748',
@@ -766,7 +858,7 @@ const DailyReport: React.FC = () => {
                       sx={{
                         color: '#d1d5db',
                         position: 'sticky',
-                        left: 300,
+                        left: 420,
                         bgcolor: '#1a2234',
                         borderRight: '1px solid #2d3748',
                         borderBottom: '1px solid #2d3748',
@@ -780,7 +872,7 @@ const DailyReport: React.FC = () => {
                       sx={{
                         color: '#d1d5db',
                         position: 'sticky',
-                        left: 450,
+                        left: 570,
                         bgcolor: '#1a2234',
                         borderRight: '1px solid #2d3748',
                         borderBottom: '1px solid #2d3748',
@@ -789,6 +881,58 @@ const DailyReport: React.FC = () => {
                       }}
                     >
                       {heatmapData.helperMap[customer]}
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        color: '#10b981',
+                        position: 'sticky',
+                        left: 720,
+                        bgcolor: '#1a2234',
+                        borderRight: '1px solid #2d3748',
+                        borderBottom: '1px solid #2d3748',
+                        padding: '12px 16px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        textAlign: 'right'
+                      }}
+                    >
+                      {heatmapData.paymentAmountMap[customer] 
+                        ? heatmapData.paymentAmountMap[customer].toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : '0.00'
+                      }
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        color: '#d1d5db',
+                        position: 'sticky',
+                        left: 840,
+                        bgcolor: '#1a2234',
+                        borderRight: '1px solid #2d3748',
+                        borderBottom: '1px solid #2d3748',
+                        padding: '12px 16px',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      {heatmapData.paymentMethodMap[customer]}
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        color: '#d1d5db',
+                        position: 'sticky',
+                        left: 970,
+                        bgcolor: '#1a2234',
+                        borderRight: '1px solid #2d3748',
+                        borderBottom: '1px solid #2d3748',
+                        padding: '12px 16px',
+                        fontSize: '0.85rem',
+                        maxWidth: 200,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                      title={heatmapData.paymentNoteMap[customer]}
+                    >
+                      {heatmapData.paymentNoteMap[customer]}
                     </TableCell>
                     {heatmapData.services.map((service) => {
                       const count = heatmapData.data[customer]?.[service] || 0;
