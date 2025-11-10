@@ -1,13 +1,15 @@
 import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, TablePagination, useTheme } from '@mui/material';
+import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, TablePagination, useTheme, Button } from '@mui/material';
 import { Bar } from 'react-chartjs-2';
 import { ChartData } from 'chart.js';
 import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useClinic } from '../contexts/ClinicContext';
+import * as XLSX from 'xlsx';
 
 interface ServiceDetailsProps {}
 
@@ -770,9 +772,71 @@ SELECT
           border: '1px solid #2d3748'
         }}
       >
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: '#f3f4f6' }}>
-          Customers who bought "{decodeURIComponent(name || '')}"
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#f3f4f6' }}>
+            Customers who bought "{decodeURIComponent(name || '')}"
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<FileDownloadIcon />}
+            onClick={() => {
+              if (!serviceData?.customers || serviceData.customers.length === 0) {
+                return;
+              }
+
+              // Prepare data for Excel export
+              const exportData = serviceData.customers.map((customer: any) => ({
+                'Name': customer.name || '-',
+                'Phone': customer.phone || '-',
+                'Package Count': customer.package_count ?? '-',
+                'Used': customer.purchase_count || 0,
+                'Remaining': customer.remaining_count ?? '-'
+              }));
+
+              // Create worksheet
+              const ws = XLSX.utils.json_to_sheet(exportData);
+
+              // Set column widths
+              const colWidths = [
+                { wch: 30 }, // Name
+                { wch: 15 }, // Phone
+                { wch: 15 }, // Package Count
+                { wch: 10 }, // Used
+                { wch: 15 }  // Remaining
+              ];
+              ws['!cols'] = colWidths;
+
+              // Create workbook
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, 'Customers');
+
+              // Generate filename with service name
+              const serviceName = decodeURIComponent(name || 'service').replace(/[^a-z0-9]/gi, '_');
+              const filename = `customers_${serviceName}_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+              // Download file
+              XLSX.writeFile(wb, filename);
+            }}
+            disabled={!serviceData?.customers || serviceData.customers.length === 0}
+            sx={{
+              borderColor: '#2d3748',
+              color: '#d1d5db',
+              bgcolor: '#1a2635',
+              '&:hover': {
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                bgcolor: 'rgba(59, 130, 246, 0.08)'
+              },
+              '&.Mui-disabled': {
+                borderColor: '#1f2937',
+                color: '#4b5563'
+              }
+            }}
+          >
+            Export to Excel
+          </Button>
+        </Box>
         <TableContainer sx={{ maxHeight: 400 }}>
           <Table size="small" stickyHeader>
             <TableHead>
