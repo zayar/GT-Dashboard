@@ -41,6 +41,7 @@ interface DailyReportData {
   TotalPaymentAmount: number | null;
   PaymentMethods: string | null;
   PaymentNotes: string | null;
+  SellerNames?: string | null;
 }
 
 const DailyReport: React.FC = () => {
@@ -94,7 +95,8 @@ const DailyReport: React.FC = () => {
             CustomerPhoneNumber,
             SUM(PaymentAmount) AS TotalPaymentAmount,
             STRING_AGG(DISTINCT PaymentMethod, ', ') AS PaymentMethods,
-            STRING_AGG(DISTINCT CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END, ' | ') AS PaymentNotes
+            STRING_AGG(DISTINCT CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END, ' | ') AS PaymentNotes,
+            STRING_AGG(DISTINCT SellerName, ', ') AS SellerNames
           FROM great_time.MainPaymentView
           WHERE DATE(OrderCreatedDate) = '${selectedDateStr}'
             AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
@@ -108,7 +110,8 @@ const DailyReport: React.FC = () => {
           END AS IsNewCustomer,
           p.TotalPaymentAmount,
           p.PaymentMethods,
-          p.PaymentNotes
+          p.PaymentNotes,
+          p.SellerNames
         FROM TodayVisits t
         LEFT JOIN FirstVisits f ON t.CustomerPhoneNumber = f.CustomerPhoneNumber
         LEFT JOIN PaymentData p ON t.CustomerPhoneNumber = p.CustomerPhoneNumber
@@ -180,6 +183,7 @@ const DailyReport: React.FC = () => {
     const customerPaymentAmountMap: { [customer: string]: number } = {};
     const customerPaymentMethodMap: { [customer: string]: string } = {};
     const customerPaymentNoteMap: { [customer: string]: string } = {};
+    const customerSellerMap: { [customer: string]: string } = {};
 
     rawData.forEach(record => {
       const customer = record.CustomerName;
@@ -196,6 +200,7 @@ const DailyReport: React.FC = () => {
       customerPaymentAmountMap[customer] = record.TotalPaymentAmount || 0;
       customerPaymentMethodMap[customer] = record.PaymentMethods || '-';
       customerPaymentNoteMap[customer] = record.PaymentNotes || '-';
+      customerSellerMap[customer] = record.SellerNames || '-';
 
       // Store practitioners and helpers
       if (!customerPractitionerMap[customer]) {
@@ -247,7 +252,8 @@ const DailyReport: React.FC = () => {
       newCustomerMap: customerNewStatusMap,
       paymentAmountMap: customerPaymentAmountMap,
       paymentMethodMap: customerPaymentMethodMap,
-      paymentNoteMap: customerPaymentNoteMap
+      paymentNoteMap: customerPaymentNoteMap,
+      sellerMap: customerSellerMap
     };
   }, [rawData]);
 
@@ -292,6 +298,7 @@ const DailyReport: React.FC = () => {
         'New Customer': heatmapData.newCustomerMap[customer],
         'Practitioner(s)': heatmapData.practitionerMap[customer],
         'Helper(s)': heatmapData.helperMap[customer],
+        'Seller(s)': (heatmapData as any).sellerMap[customer],
         'Payment Amount': heatmapData.paymentAmountMap[customer] || 0,
         'Payment Method(s)': heatmapData.paymentMethodMap[customer],
         'Payment Note(s)': heatmapData.paymentNoteMap[customer]
@@ -319,6 +326,7 @@ const DailyReport: React.FC = () => {
       { wch: 15 }, // New Customer
       { wch: 25 }, // Practitioner(s)
       { wch: 25 }, // Helper(s)
+      { wch: 25 }, // Seller(s)
       { wch: 15 }, // Payment Amount
       { wch: 20 }, // Payment Method(s)
       { wch: 30 }, // Payment Note(s)
@@ -722,6 +730,21 @@ const DailyReport: React.FC = () => {
                       zIndex: 3,
                       borderRight: '1px solid #2d3748',
                       borderBottom: '1px solid #2d3748',
+                      minWidth: 150
+                    }}
+                  >
+                    Seller(s)
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      bgcolor: '#101924',
+                      color: '#d1d5db',
+                      fontWeight: 600,
+                      position: 'sticky',
+                      left: 870,
+                      zIndex: 3,
+                      borderRight: '1px solid #2d3748',
+                      borderBottom: '1px solid #2d3748',
                       minWidth: 120,
                       textAlign: 'right'
                     }}
@@ -734,7 +757,7 @@ const DailyReport: React.FC = () => {
                       color: '#d1d5db',
                       fontWeight: 600,
                       position: 'sticky',
-                      left: 840,
+                      left: 990,
                       zIndex: 3,
                       borderRight: '1px solid #2d3748',
                       borderBottom: '1px solid #2d3748',
@@ -749,7 +772,7 @@ const DailyReport: React.FC = () => {
                       color: '#d1d5db',
                       fontWeight: 600,
                       position: 'sticky',
-                      left: 970,
+                      left: 1120,
                       zIndex: 3,
                       borderRight: '1px solid #2d3748',
                       borderBottom: '1px solid #2d3748',
@@ -884,9 +907,23 @@ const DailyReport: React.FC = () => {
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#10b981',
+                        color: '#d1d5db',
                         position: 'sticky',
                         left: 720,
+                        bgcolor: '#1a2234',
+                        borderRight: '1px solid #2d3748',
+                        borderBottom: '1px solid #2d3748',
+                        padding: '12px 16px',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      {(heatmapData as any).sellerMap[customer]}
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        color: '#10b981',
+                        position: 'sticky',
+                        left: 870,
                         bgcolor: '#1a2234',
                         borderRight: '1px solid #2d3748',
                         borderBottom: '1px solid #2d3748',
@@ -905,7 +942,7 @@ const DailyReport: React.FC = () => {
                       sx={{
                         color: '#d1d5db',
                         position: 'sticky',
-                        left: 840,
+                        left: 990,
                         bgcolor: '#1a2234',
                         borderRight: '1px solid #2d3748',
                         borderBottom: '1px solid #2d3748',
@@ -919,7 +956,7 @@ const DailyReport: React.FC = () => {
                       sx={{
                         color: '#d1d5db',
                         position: 'sticky',
-                        left: 970,
+                        left: 1120,
                         bgcolor: '#1a2234',
                         borderRight: '1px solid #2d3748',
                         borderBottom: '1px solid #2d3748',
