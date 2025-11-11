@@ -5,7 +5,6 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import RecommendIcon from '@mui/icons-material/Recommend';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Button, Chip, FormControl, InputLabel } from '@mui/material';
 import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
@@ -118,10 +117,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const [walletPage, setWalletPage] = React.useState(0);
   const [walletRowsPerPage, setWalletRowsPerPage] = React.useState(5);
 
-  // Add state for wallet balance
-  const [walletBalance, setWalletBalance] = React.useState<string>('0');
-  const [walletBalanceLoading, setWalletBalanceLoading] = React.useState(true);
-  const [walletBalanceError, setWalletBalanceError] = React.useState('');
 
   // Generate array of years for the dropdown (from 5 years ago to current year)
   const yearOptions = useMemo(() => {
@@ -501,7 +496,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           }
           
           // Safely add the amount, defaulting to 0 if undefined/NaN
-          const amount = payment.InvoiceNetTotal ? Number(payment.InvoiceNetTotal) : 0;
+          const amount = payment.amount ? Number(payment.amount) : 0;
           paymentsByMonth[monthKey] += isNaN(amount) ? 0 : amount;
         } catch (err) {
           console.error('Error processing payment for chart:', err);
@@ -641,7 +636,7 @@ WITH CustomerPayments AS (
     OrderCreatedDate,
     InvoiceNumber,
     PaymentMethod,
-    NetTotal,
+    ItemTotal,
     PaymentStatus,
     ServiceName,
     ServicePackageName,
@@ -660,7 +655,7 @@ SELECT
   ServiceName,
   ServicePackageName,
   SellerName,
-  CAST(NetTotal AS INT64) AS amount,
+  CAST(ItemTotal AS INT64) AS amount,
   PaymentStatus AS status
 FROM CustomerPayments
 ORDER BY OrderCreatedDate DESC;
@@ -790,81 +785,6 @@ ORDER BY OrderCreatedDate DESC;
       setPaymentFetched(true); // Mark as fetched to prevent retries
     }
   };
-
-  const fetchWalletBalance = useCallback(async (customerPhoneNumber: string) => {
-    console.log('Starting fetchWalletBalance for:', customerPhoneNumber);
-    
-    if (!currentClinic || !customerPhoneNumber) {
-      setWalletBalanceError('No clinic selected or phone number missing.');
-      setWalletBalanceLoading(false);
-      return;
-    }
-    
-    setWalletBalanceLoading(true);
-    setWalletBalanceError('');
-
-    try {
-      const decodedPhoneNumber = decodeURIComponent(customerPhoneNumber);
-      const sanitizeForSQL = (input: string): string => {
-        return input.replace(/'/g, "''");
-      };
-      const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
-
-      // Query to get the latest wallet balance for the customer
-      const query = `
-        SELECT 
-          accountbalance,
-          MainAccountName,
-          createddate_myanmar
-        FROM 
-          \`piti-pass.passdb_prod.wallettransaction\`
-        WHERE 
-          ClinicCode = '${currentClinic.pass_id}'
-          AND (
-            REPLACE(COALESCE(senderPhone, ''), '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-            OR REPLACE(COALESCE(recipientPhone, ''), '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-          )
-          AND accountbalance IS NOT NULL
-        ORDER BY 
-          createddate_myanmar DESC
-        LIMIT 1
-      `;
-
-      console.log('Executing wallet balance query for phone:', escapedPhoneNumber);
-
-      const searchQuery = new URLSearchParams({
-        projectId: "piti-pass",
-        location: "us-central1",
-      });
-
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/query2?${searchQuery}`, 
-        { query },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-          },
-          timeout: 30000
-        }
-      );
-
-      if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
-        const balanceData = response.data.data[0];
-        console.log('Fetched wallet balance:', balanceData.accountbalance);
-        setWalletBalance(balanceData.accountbalance || '0');
-      } else {
-        console.log('No wallet balance found for customer');
-        setWalletBalance('0');
-      }
-    } catch (err: any) {
-      console.error('Error fetching wallet balance:', err);
-      setWalletBalanceError(err.response?.data?.error || err.message || 'An error occurred while fetching wallet balance.');
-      setWalletBalance('0');
-    } finally {
-      setWalletBalanceLoading(false);
-    }
-  }, [currentClinic]);
 
   const fetchWalletTransactions = useCallback(async (customerName: string) => {
     console.log('Starting fetchWalletTransactions for:', customerName);
@@ -1203,10 +1123,9 @@ SELECT
         setRetryCount(0);
         setIsInRetryMode(false);
         
-        // New call to fetch wallet transactions and balance
+        // New call to fetch wallet transactions
         if (profile.name) {
           fetchWalletTransactions(profile.name);
-          fetchWalletBalance(phoneNumber);
         }
         
       } catch (axiosError: any) {
@@ -2208,155 +2127,6 @@ SELECT
             </>
           )}
         </Box>
-
-        {/* Wallet Balance Card */}
-        <Grid item xs={12}>
-          <Paper 
-            elevation={3} 
-            sx={{ 
-              p: 3, 
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              color: 'white',
-              borderRadius: 3,
-              boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)',
-              position: 'relative',
-              overflow: 'hidden',
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                top: -50,
-                right: -50,
-                width: 100,
-                height: 100,
-                background: 'rgba(255, 255, 255, 0.1)',
-                borderRadius: '50%',
-                zIndex: 0
-              },
-              '&::after': {
-                content: '""',
-                position: 'absolute',
-                bottom: -30,
-                left: -30,
-                width: 80,
-                height: 80,
-                background: 'rgba(255, 255, 255, 0.05)',
-                borderRadius: '50%',
-                zIndex: 0
-              }
-            }}
-          >
-            <Box sx={{ position: 'relative', zIndex: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <AccountBalanceWalletIcon sx={{ fontSize: 40, mr: 2, opacity: 0.9 }} />
-                <Typography variant="h5" sx={{ fontWeight: 600, textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>
-                  Wallet Balance
-                </Typography>
-              </Box>
-              
-              {walletBalanceLoading ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
-                  <CircularProgress size={24} sx={{ color: 'white', mr: 2 }} />
-                  <Typography variant="body1" sx={{ opacity: 0.9 }}>
-                    Loading wallet balance...
-                  </Typography>
-                </Box>
-              ) : walletBalanceError ? (
-                <Box sx={{ 
-                  bgcolor: 'rgba(255, 255, 255, 0.1)', 
-                  borderRadius: 2, 
-                  p: 2, 
-                  mt: 2,
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}>
-                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                    {walletBalanceError}
-                  </Typography>
-                </Box>
-              ) : (
-                <Box sx={{ mt: 2 }}>
-                  <Typography 
-                    variant="h3" 
-                    sx={{ 
-                      fontWeight: 'bold',
-                      textShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                      mb: 1
-                    }}
-                  >
-                    {parseFloat(walletBalance).toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })} MMK
-                  </Typography>
-                  <Typography 
-                    variant="body1" 
-                    sx={{ 
-                      opacity: 0.8,
-                      fontSize: '0.9rem',
-                      fontWeight: 500
-                    }}
-                  >
-                    Current available balance
-                  </Typography>
-                  
-                  {/* Balance Status Indicator */}
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    mt: 2,
-                    bgcolor: 'rgba(255, 255, 255, 0.1)',
-                    borderRadius: 2,
-                    p: 1.5,
-                    border: '1px solid rgba(255, 255, 255, 0.2)'
-                  }}>
-                    {parseFloat(walletBalance) > 0 ? (
-                      <>
-                        <Box sx={{ 
-                          width: 8, 
-                          height: 8, 
-                          borderRadius: '50%', 
-                          bgcolor: '#4ade80',
-                          mr: 1,
-                          boxShadow: '0 0 8px rgba(74, 222, 128, 0.6)'
-                        }} />
-                        <Typography variant="body2" sx={{ opacity: 0.9, fontWeight: 500 }}>
-                          Active Balance
-                        </Typography>
-                      </>
-                    ) : parseFloat(walletBalance) < 0 ? (
-                      <>
-                        <Box sx={{ 
-                          width: 8, 
-                          height: 8, 
-                          borderRadius: '50%', 
-                          bgcolor: '#f87171',
-                          mr: 1,
-                          boxShadow: '0 0 8px rgba(248, 113, 113, 0.6)'
-                        }} />
-                        <Typography variant="body2" sx={{ opacity: 0.9, fontWeight: 500 }}>
-                          Negative Balance
-                        </Typography>
-                      </>
-                    ) : (
-                      <>
-                        <Box sx={{ 
-                          width: 8, 
-                          height: 8, 
-                          borderRadius: '50%', 
-                          bgcolor: '#94a3b8',
-                          mr: 1,
-                          boxShadow: '0 0 8px rgba(148, 163, 184, 0.6)'
-                        }} />
-                        <Typography variant="body2" sx={{ opacity: 0.9, fontWeight: 500 }}>
-                          Zero Balance
-                        </Typography>
-                      </>
-                    )}
-                  </Box>
-                </Box>
-              )}
-            </Box>
-          </Paper>
-        </Grid>
 
         {/* Wallet Transaction History Table */}
         <Grid item xs={12}>
