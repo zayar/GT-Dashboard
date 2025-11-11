@@ -158,6 +158,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { id: 'payment-details', label: 'Sales Details', icon: 'fas fa-receipt', path: '/payment-details' },
         { id: 'payment-report', label: 'Payment Report', icon: 'fas fa-file-invoice-dollar', path: '/banking-details' },
         { id: 'sales-by-sales-person', label: 'Sales by Sales Person', icon: 'fas fa-user-tag', path: '/sales-by-sales-person' },
+        { id: 'customers-by-salesperson', label: 'Customers by Salesperson', icon: 'fas fa-users-cog', path: '/customers-by-salesperson' },
       ]
     },
     { id: 'customers', label: 'Customers', icon: 'fas fa-users', path: '/customers' },

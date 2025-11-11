@@ -636,7 +636,7 @@ WITH CustomerPayments AS (
     OrderCreatedDate,
     InvoiceNumber,
     PaymentMethod,
-    ItemTotal,
+    NetTotal,
     PaymentStatus,
     ServiceName,
     ServicePackageName,
@@ -655,7 +655,7 @@ SELECT
   ServiceName,
   ServicePackageName,
   SellerName,
-  CAST(ItemTotal AS INT64) AS amount,
+  CAST(NetTotal AS INT64) AS amount,
   PaymentStatus AS status
 FROM CustomerPayments
 ORDER BY OrderCreatedDate DESC;
@@ -711,9 +711,13 @@ ORDER BY OrderCreatedDate DESC;
           // Get unique invoice numbers to count actual invoices
           const uniqueInvoices = [...new Set(filteredPaymentData.map((p: any) => p.invoiceNumber))];
           
-          // Calculate total spent
-          const totalSpent = filteredPaymentData.reduce((sum: number, payment: any) => 
-            sum + (payment.amount || 0), 0);
+          // Calculate total spent (excluding PASS payment method)
+          const totalSpent = filteredPaymentData.reduce((sum: number, payment: any) => {
+            if (payment.method === 'PASS') {
+              return sum; // Don't add PASS amounts to total
+            }
+            return sum + (payment.amount || 0);
+          }, 0);
           
           // Group by payment method
           const methodGroups: Record<string, { count: number; total: number }> = {};

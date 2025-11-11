@@ -24,6 +24,7 @@ import HelperList from './components/HelperList';
 import Login from './components/Login';
 import PaymentDetails from './components/PaymentDetails';
 import SalesBySalesPerson from './components/SalesBySalesPerson';
+import CustomersBySalesperson from './components/CustomersBySalesperson';
 import ServiceBehaviorReport from './components/ServiceBehaviorReport';
 import ServiceDetails from './components/ServiceDetails';
 import ServicesTable from './components/ServicesTable';
@@ -2146,6 +2147,7 @@ const AppContent = () => {
             <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
+            <Route path="/customers-by-salesperson" element={<CustomersBySalesperson />} />
             {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
             <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
             <Route path="/daily-report" element={<DailyReport />} />
