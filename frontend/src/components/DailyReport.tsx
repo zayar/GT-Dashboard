@@ -91,15 +91,27 @@ const DailyReport: React.FC = () => {
           GROUP BY CustomerPhoneNumber
         ),
         PaymentData AS (
+          -- First deduplicate invoices (since MainPaymentView has multiple rows per invoice for each line item)
+          WITH DeduplicatedInvoices AS (
+            SELECT
+              CustomerPhoneNumber,
+              InvoiceNumber,
+              MAX(CAST(NetTotal AS FLOAT64)) AS InvoiceNetTotal,
+              MAX(PaymentMethod) AS PaymentMethod,
+              MAX(CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END) AS PaymentNote,
+              MAX(SellerName) AS SellerName
+            FROM great_time.MainPaymentView
+            WHERE DATE(OrderCreatedDate) = '${selectedDateStr}'
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+            GROUP BY CustomerPhoneNumber, InvoiceNumber
+          )
           SELECT
             CustomerPhoneNumber,
-            SUM(PaymentAmount) AS TotalPaymentAmount,
+            SUM(InvoiceNetTotal) AS TotalPaymentAmount,
             STRING_AGG(DISTINCT PaymentMethod, ', ') AS PaymentMethods,
             STRING_AGG(DISTINCT CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END, ' | ') AS PaymentNotes,
             STRING_AGG(DISTINCT SellerName, ', ') AS SellerNames
-          FROM great_time.MainPaymentView
-          WHERE DATE(OrderCreatedDate) = '${selectedDateStr}'
-            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          FROM DeduplicatedInvoices
           GROUP BY CustomerPhoneNumber
         )
         SELECT
