@@ -166,7 +166,7 @@ export default function QueenCommissionPage() {
 
   const formatPrice = (price: number | null): string => {
     if (price === null || price === undefined) return 'N/A';
-    return `${price.toLocaleString()} MMK`;
+    return formatCurrencyUtil(price, currentClinic);
   };
 
   const formatMonthDisplay = (monthStr: string): string => {

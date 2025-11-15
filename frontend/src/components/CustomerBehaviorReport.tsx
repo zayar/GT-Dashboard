@@ -27,6 +27,7 @@ import ReactApexChart from 'react-apexcharts';
 import { ApexOptions } from 'apexcharts';
 import SearchIcon from '@mui/icons-material/Search';
 import { useClinic } from '../contexts/ClinicContext';
+import { formatCurrency } from '../utils/currency';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -801,7 +802,7 @@ const CustomerBehaviorReport: React.FC = () => {
                         <TableCell sx={{ color: '#e2e8f0' }}>{row.memberId}</TableCell>
                         <TableCell sx={{ color: '#e2e8f0' }}>{row.visits}</TableCell>
                         <TableCell sx={{ color: '#e2e8f0' }}>{row.purchases}</TableCell>
-                        <TableCell sx={{ color: '#e2e8f0' }}>{row.spend.toLocaleString('en-US')} MMK</TableCell>
+                        <TableCell sx={{ color: '#e2e8f0' }}>{formatCurrency(row.spend, currentClinic)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

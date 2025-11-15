@@ -27,6 +27,7 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useClinic } from '../contexts/ClinicContext';
+import { formatCurrency } from '../utils/currency';
 
 interface Customer {
   id: string;
@@ -575,10 +576,7 @@ const CustomersTable: React.FC = () => {
                           color: '#d1d5db'
                         }}
                       >
-                        {customer.totalSpend.toLocaleString('en-US', {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0
-                        })} MMK
+                        {formatCurrency(customer.totalSpend, currentClinic)}
                       </TableCell>
                       <TableCell 
                         sx={{ 

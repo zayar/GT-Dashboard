@@ -34,6 +34,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'; // Assuming you might want a back button
 import { useClinic } from '../contexts/ClinicContext';
 import axios from 'axios'; // Import axios for making direct API calls
+import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
 
 // Define the interface for the record based on schema
 interface CheckInOutRecord {
@@ -210,8 +211,8 @@ const CheckInCheckOutPage: React.FC = () => {
 
   // Function to format currency
   const formatCurrency = (amount: number | null) => {
-    if (amount === null || isNaN(amount)) return 'MMK 0';
-    return `MMK ${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    if (amount === null || isNaN(amount)) return formatCurrencyUtil(0, currentClinic);
+    return formatCurrencyUtil(amount, currentClinic);
   };
 
   // Function to handle CSV export

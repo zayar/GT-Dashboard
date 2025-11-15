@@ -30,6 +30,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { formatCurrency } from '../utils/currency';
 
 interface Customer {
   name: string;
@@ -654,10 +655,7 @@ const CustomersBySalesperson: React.FC = () => {
                         fontWeight: 600
                       }}
                     >
-                      {customer.totalSpend.toLocaleString('en-US', {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0
-                      })} MMK
+                      {formatCurrency(customer.totalSpend, currentClinic)}
                     </TableCell>
                     <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
                       {customer.lastPurchaseDate}

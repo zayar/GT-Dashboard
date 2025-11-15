@@ -258,10 +258,7 @@ const BusinessInsightsDashboard: React.FC = () => {
 
   // Format currency
   const formatCurrency = (value: number): string => {
-    return value.toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }) + " MMK";
+    return formatCurrencyUtil(value, currentClinic);
   };
 
   // Key Metrics Chart Options

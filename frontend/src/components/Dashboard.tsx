@@ -19,6 +19,7 @@ import axios from 'axios';
 import { format, startOfMonth, addDays, subMonths } from 'date-fns';
 import { motion } from 'framer-motion';
 import { useClinic } from '../contexts/ClinicContext';
+import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
 import { useNavigate } from 'react-router-dom';
 
 // Define period types
@@ -808,12 +809,9 @@ const Dashboard: React.FC = () => {
     fetchTopTherapists();
   }, [period, currentClinic]);
   
-  // Format currency
+  // Format currency using the utility function
   const formatCurrency = (value: number): string => {
-    return value.toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }) + " MMK";
+    return formatCurrencyUtil(value, currentClinic);
   };
   
   // Chart series data

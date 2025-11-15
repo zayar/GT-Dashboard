@@ -28,6 +28,7 @@ import axios from 'axios';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import { formatCurrency } from '../utils/currency';
 
 interface DailyReportData {
   CustomerName: string;
@@ -945,10 +946,7 @@ const DailyReport: React.FC = () => {
                         textAlign: 'right'
                       }}
                     >
-                      {heatmapData.paymentAmountMap[customer] 
-                        ? heatmapData.paymentAmountMap[customer].toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                        : '0.00'
-                      }
+                      {formatCurrency(heatmapData.paymentAmountMap[customer], currentClinic, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell
                       sx={{

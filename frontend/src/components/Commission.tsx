@@ -58,7 +58,7 @@ const Commission = () => {
   };
 
   const formatPrice = (price: number): string => {
-    return `${price.toLocaleString()} MMK`;
+    return formatCurrencyUtil(price, currentClinic);
   };
 
   const exportToCSV = () => {

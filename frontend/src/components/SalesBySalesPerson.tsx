@@ -26,6 +26,7 @@ import { useNavigate } from 'react-router-dom';
 import { useClinic } from '../contexts/ClinicContext';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
+import { formatCurrency, getCurrency } from '../utils/currency';
 
 interface SalesPersonData {
   salesPerson: string;
@@ -238,12 +239,12 @@ const SalesBySalesPerson: React.FC = () => {
       ...salesBySalesPerson.map(person => ({
         'Sales Person': person.salesPerson,
         'Transaction Count': person.transactionCount,
-        'Total Amount': `${person.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK`
+        'Total Amount': formatCurrency(person.totalAmount, currentClinic)
       })),
       { 
         'Sales Person': 'Total',
         'Transaction Count': totalTransactions,
-        'Total Amount': `${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK`
+        'Total Amount': formatCurrency(totalAmount, currentClinic)
       }
     ];
 
@@ -285,7 +286,7 @@ const SalesBySalesPerson: React.FC = () => {
       'Package': transaction.ServicePackageName || '-',
       'Payment Method': transaction.PaymentMethod,
       'Status': transaction.PaymentStatus,
-      'Amount': `${Number(transaction.InvoiceNetTotal).toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK`
+      'Amount': formatCurrency(Number(transaction.InvoiceNetTotal), currentClinic)
     }));
 
     // Create worksheet from data
@@ -467,7 +468,7 @@ const SalesBySalesPerson: React.FC = () => {
           
           <Box>
             <Typography variant="body2" sx={{ color: '#94a3b8', display: 'inline' }}>
-              Total Sales: <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>{totalAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })} MMK</span>
+              Total Sales: <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>{formatCurrency(totalAmount, currentClinic)}</span>
             </Typography>
             <Typography variant="body2" sx={{ color: '#94a3b8', display: 'inline', ml: 3 }}>
               Transactions: <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>{totalTransactions}</span>
@@ -564,10 +565,7 @@ const SalesBySalesPerson: React.FC = () => {
                         {salesPerson.transactionCount}
                       </TableCell>
                       <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
-                        {salesPerson.totalAmount.toLocaleString('en-US', {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0
-                        })} MMK
+                        {formatCurrency(salesPerson.totalAmount, currentClinic)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -580,10 +578,7 @@ const SalesBySalesPerson: React.FC = () => {
                       {totalTransactions}
                     </TableCell>
                     <TableCell sx={{ color: '#f3f4f6', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }} align="right">
-                      {totalAmount.toLocaleString('en-US', {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0
-                      })} MMK
+                      {formatCurrency(totalAmount, currentClinic)}
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -738,10 +733,7 @@ const SalesBySalesPerson: React.FC = () => {
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.PaymentMethod}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.PaymentStatus}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
-                            {Number(transaction.InvoiceNetTotal).toLocaleString('en-US', {
-                              minimumFractionDigits: 0,
-                              maximumFractionDigits: 0
-                            })} MMK
+                            {formatCurrency(Number(transaction.InvoiceNetTotal), currentClinic)}
                           </TableCell>
                         </TableRow>
                       ))}

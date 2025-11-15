@@ -9,6 +9,7 @@ import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, Tabl
 import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
 import { useClinic } from '../contexts/ClinicContext';
+import { formatCurrency } from '../utils/currency';
 
 // Types for customer profile and data
 interface CustomerProfile {
@@ -1900,7 +1901,7 @@ SELECT
                       {service.total_customers} customers
                     </TableCell>
                       <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
-                      {service.avg_price.toLocaleString()} MMK
+                      {formatCurrency(service.avg_price, currentClinic)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1986,10 +1987,7 @@ SELECT
                         Total Spent
                       </Typography>
                       <Typography variant="h6" fontWeight="bold" color="#e2e8f0">
-                        {paymentSummary.totalSpent.toLocaleString('en-US', {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0
-                        })} MMK
+                        {formatCurrency(paymentSummary.totalSpent, currentClinic)}
                       </Typography>
                     </Paper>
                   </Grid>
@@ -2117,10 +2115,7 @@ SELECT
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.method}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.SellerName || '-'}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
-                            {Number(payment.amount).toLocaleString('en-US', {
-                              minimumFractionDigits: 0,
-                              maximumFractionDigits: 0
-                            })} MMK
+                            {formatCurrency(Number(payment.amount), currentClinic)}
                           </TableCell>
                         </TableRow>
                       ))}

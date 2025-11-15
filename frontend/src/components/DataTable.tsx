@@ -12,6 +12,8 @@ import {
   Chip,
   Typography
 } from '@mui/material';
+import { useClinic } from '../contexts/ClinicContext';
+import { formatCurrency } from '../utils/currency';
 
 interface DataTableProps {
   data: any[];
@@ -66,6 +68,7 @@ const DataTable: React.FC<DataTableProps> = ({
   onTherapistClick,
   columnAliases = {}
 }): JSX.Element => {
+  const { currentClinic } = useClinic();
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<string>('');
   const [page, setPage] = useState(0);
@@ -183,10 +186,7 @@ const DataTable: React.FC<DataTableProps> = ({
       }
       
       if (typeof value === 'number') {
-        return `${value.toLocaleString('en-US', {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 0
-        })} MMK`;
+        return formatCurrency(value, currentClinic);
       }
     }
     
