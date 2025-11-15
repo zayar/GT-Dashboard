@@ -126,18 +126,18 @@ const Dashboard: React.FC = () => {
     }
   };
   
-  // Use fallback data if no real data is available
-  const useFallbackData = () => {
-    setDateLabels(FALLBACK_DATA.dateLabels);
-    setServicesData(FALLBACK_DATA.servicesData);
-    setTotalIncome(FALLBACK_DATA.stats.totalIncome);
-    setIncomeChange(FALLBACK_DATA.stats.incomeChange);
-    setCustomerCount(FALLBACK_DATA.stats.customerCount);
-    setCustomerChange(FALLBACK_DATA.stats.customerChange);
-    setAppointmentRate(FALLBACK_DATA.stats.appointmentRate);
-    setAppointmentChange(FALLBACK_DATA.stats.appointmentChange);
-    setServiceCount(FALLBACK_DATA.stats.serviceCount);
-    setServiceChange(FALLBACK_DATA.stats.serviceChange);
+  // Show no data state instead of fallback
+  const showNoDataState = () => {
+    setDateLabels([]);
+    setServicesData([]);
+    setTotalIncome(0);
+    setIncomeChange(0);
+    setCustomerCount(0);
+    setCustomerChange(0);
+    setAppointmentRate(0);
+    setAppointmentChange(0);
+    setServiceCount(0);
+    setServiceChange(0);
     setLoading(false);
     setError(null);
     setUsingFallbackData(true);
@@ -189,7 +189,7 @@ const Dashboard: React.FC = () => {
         
         // Check if we have data in the table
         if (!responseData.success || !responseData.data || responseData.data.length === 0) {
-          useFallbackData(); // Use fallback data
+          showNoDataState(); // Show no data state
           return;
         }
         
@@ -319,7 +319,7 @@ const Dashboard: React.FC = () => {
         const data = fullResponseData.data || [];
         
         if (data.length === 0) {
-          useFallbackData(); // Use fallback data instead of showing error
+          showNoDataState(); // Show no data state instead of showing error
           return;
         }
         
@@ -1009,11 +1009,11 @@ const Dashboard: React.FC = () => {
         Dashboard
       </Typography>
       
-      {/* Fallback Data Notice */}
+      {/* No Data Notice */}
       {usingFallbackData && (
-        <Alert severity="warning" sx={{ mb: 3, backgroundColor: '#2d364f', color: 'white' }}>
-          <AlertTitle>Using Demo Data</AlertTitle>
-          Currently displaying demo data. No actual data was found in your database.
+        <Alert severity="info" sx={{ mb: 3, backgroundColor: '#2d364f', color: 'white' }}>
+          <AlertTitle>No Data Available</AlertTitle>
+          No data was found in your database for the selected period. Please check your clinic selection or date range.
         </Alert>
       )}
       
