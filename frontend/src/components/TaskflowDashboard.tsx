@@ -32,6 +32,7 @@ import ReactApexChart from 'react-apexcharts';
 import { ApexOptions } from 'apexcharts';
 
 interface TaskflowData {
+  BookingID: string;
   PractitionerName: string;
   CustomerName: string;
   CustomerPhoneNumber: string;
@@ -41,14 +42,13 @@ interface TaskflowData {
   CheckInTime: string;
 }
 
-interface ServiceCount {
-  service: string;
-  count: number;
-}
-
-interface PractitionerCount {
-  practitioner: string;
-  count: number;
+interface SummaryStats {
+  totalBookings: number;
+  totalCustomers: number;
+  totalServices: number;
+  totalPractitioners: number;
+  completedBookings: number;
+  processingBookings: number;
 }
 
 const TaskflowDashboard: React.FC = () => {
@@ -57,6 +57,7 @@ const TaskflowDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<TaskflowData[]>([]);
+  const [summaryStats, setSummaryStats] = useState<SummaryStats | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
 
   const fetchTaskflowData = useCallback(async () => {
@@ -72,32 +73,25 @@ const TaskflowDashboard: React.FC = () => {
 
       const selectedDateStr = format(selectedDate || new Date(), 'yyyy-MM-dd');
 
-      const query = `
+      // Query 1: Summary statistics (counts unique bookings)
+      const summaryQuery = `
         SELECT
-          PractitionerName,
-          CustomerName,
-          CustomerPhoneNumber,
-          ServiceName,
-          HelperName,
-          CASE
-            WHEN CheckOutTime IS NOT NULL THEN 'COMPLETED'
-            ELSE 'PROCESSING'
-          END AS status,
-          CheckInTime
+          COUNT(DISTINCT BookingID) AS totalBookings,
+          COUNT(DISTINCT CustomerPhoneNumber) AS totalCustomers,
+          COUNT(DISTINCT ServiceName) AS totalServices,
+          COUNT(DISTINCT PractitionerName) AS totalPractitioners,
+          COUNT(DISTINCT CASE WHEN CheckOutTime IS NOT NULL THEN BookingID END) AS completedBookings,
+          COUNT(DISTINCT CASE WHEN CheckOutTime IS NULL THEN BookingID END) AS processingBookings
         FROM great_time.MainDataView
         WHERE DATE(CheckInTime) = '${selectedDateStr}'
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
           AND CustomerName IS NOT NULL
           AND PractitionerName IS NOT NULL
-          AND ServiceName IS NOT NULL
-        ORDER BY PractitionerName, CustomerName, ServiceName
       `;
 
-      console.log('Executing taskflow query:', query);
-
-      const response = await axios.post(
+      const summaryResponse = await axios.post(
         `${import.meta.env.VITE_API_URL}/query`,
-        { query },
+        { query: summaryQuery },
         {
           headers: {
             'Content-Type': 'application/json',
@@ -107,12 +101,63 @@ const TaskflowDashboard: React.FC = () => {
         }
       );
 
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Failed to fetch taskflow data');
+      if (summaryResponse.data.success && summaryResponse.data.data[0]) {
+        setSummaryStats(summaryResponse.data.data[0]);
       }
 
-      const data = response.data.data || [];
-      console.log('Taskflow data fetched:', data.length, 'records');
+      // Query 2: Detailed heatmap data (one row per booking)
+      const heatmapQuery = `
+        WITH BookingDetails AS (
+          SELECT
+            BookingID,
+            MAX(PractitionerName) AS PractitionerName,
+            MAX(CustomerName) AS CustomerName,
+            MAX(CustomerPhoneNumber) AS CustomerPhoneNumber,
+            STRING_AGG(DISTINCT ServiceName, ', ') AS ServiceName,
+            MAX(HelperName) AS HelperName,
+            CASE
+              WHEN MAX(CheckOutTime) IS NOT NULL THEN 'COMPLETED'
+              ELSE 'PROCESSING'
+            END AS status,
+            MAX(CheckInTime) AS CheckInTime
+          FROM great_time.MainDataView
+          WHERE DATE(CheckInTime) = '${selectedDateStr}'
+            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+            AND CustomerName IS NOT NULL
+            AND PractitionerName IS NOT NULL
+          GROUP BY BookingID
+        )
+        SELECT
+          BookingID,
+          PractitionerName,
+          CustomerName,
+          CustomerPhoneNumber,
+          ServiceName,
+          HelperName,
+          status,
+          CheckInTime
+        FROM BookingDetails
+        ORDER BY PractitionerName, CustomerName
+      `;
+
+      const heatmapResponse = await axios.post(
+        `${import.meta.env.VITE_API_URL}/query`,
+        { query: heatmapQuery },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
+          },
+          timeout: 15000
+        }
+      );
+
+      if (!heatmapResponse.data.success) {
+        throw new Error(heatmapResponse.data.error || 'Failed to fetch taskflow data');
+      }
+
+      const data = heatmapResponse.data.data || [];
+      console.log('Taskflow data fetched:', data.length, 'unique bookings');
       setRawData(data);
     } catch (err: any) {
       console.error('Error fetching taskflow data:', err);
@@ -132,102 +177,128 @@ const TaskflowDashboard: React.FC = () => {
     setSelectedDate(date);
   };
 
-  // Calculate summary statistics
+  // Use summary statistics from the query
   const summary = useMemo(() => {
-    const uniqueCustomers = new Set(rawData.map(r => r.CustomerPhoneNumber));
-    const uniqueServices = new Set(rawData.map(r => r.ServiceName));
-    const uniquePractitioners = new Set(rawData.map(r => r.PractitionerName));
+    if (!summaryStats) {
+      return {
+        totalTasks: 0,
+        customers: 0,
+        services: 0,
+        practitioners: 0
+      };
+    }
     
     return {
-      totalTasks: rawData.length,
-      customers: uniqueCustomers.size,
-      services: uniqueServices.size,
-      practitioners: uniquePractitioners.size
+      totalTasks: summaryStats.totalBookings,
+      customers: summaryStats.totalCustomers,
+      services: summaryStats.totalServices,
+      practitioners: summaryStats.totalPractitioners
     };
-  }, [rawData]);
+  }, [summaryStats]);
 
-  // Service counts
+  // Service counts (counting unique bookings per service)
   const serviceCounts = useMemo(() => {
-    const counts: { [key: string]: number } = {};
+    const counts: { [key: string]: Set<string> } = {};
     rawData.forEach(record => {
-      counts[record.ServiceName] = (counts[record.ServiceName] || 0) + 1;
+      // ServiceName might contain multiple services concatenated, split them
+      const services = record.ServiceName.split(', ');
+      services.forEach(service => {
+        if (!counts[service]) {
+          counts[service] = new Set();
+        }
+        counts[service].add(record.BookingID);
+      });
     });
     return Object.entries(counts)
-      .map(([service, count]) => ({ service, count }))
+      .map(([service, bookingIds]) => ({ service, count: bookingIds.size }))
       .sort((a, b) => b.count - a.count);
   }, [rawData]);
 
-  // Practitioner counts
+  // Practitioner counts (counting unique bookings per practitioner)
   const practitionerCounts = useMemo(() => {
-    const counts: { [key: string]: number } = {};
+    const counts: { [key: string]: Set<string> } = {};
     rawData.forEach(record => {
-      counts[record.PractitionerName] = (counts[record.PractitionerName] || 0) + 1;
+      if (!counts[record.PractitionerName]) {
+        counts[record.PractitionerName] = new Set();
+      }
+      counts[record.PractitionerName].add(record.BookingID);
     });
     return Object.entries(counts)
-      .map(([practitioner, count]) => ({ practitioner, count }))
+      .map(([practitioner, bookingIds]) => ({ practitioner, count: bookingIds.size }))
       .sort((a, b) => b.count - a.count);
   }, [rawData]);
 
-  // Task status data for pie chart
+  // Task status data for pie chart (from summary stats)
   const taskStatusData = useMemo(() => {
-    const completed = rawData.filter(r => r.status === 'COMPLETED').length;
-    const processing = rawData.filter(r => r.status === 'PROCESSING').length;
+    if (!summaryStats) {
+      return [
+        { name: 'Completed', value: 0, color: '#10b981' },
+        { name: 'Processing', value: 0, color: '#3b82f6' }
+      ];
+    }
     
     return [
-      { name: 'Completed', value: completed, color: '#10b981' },
-      { name: 'Processing', value: processing, color: '#3b82f6' }
+      { name: 'Completed', value: summaryStats.completedBookings, color: '#10b981' },
+      { name: 'Processing', value: summaryStats.processingBookings, color: '#3b82f6' }
     ];
-  }, [rawData]);
+  }, [summaryStats]);
 
-  // Heatmap data: Practitioner x Customer x Service
+  // Heatmap data: Practitioner x Customer (each row = one booking with concatenated services)
   const heatmapData = useMemo(() => {
-    const practitionerCustomerMap: { 
-      [practitioner: string]: { 
-        [customer: string]: {
-          helper: string;
-          status: string;
-          services: { [service: string]: number };
-        }
-      }
-    } = {};
+    const practitionerCustomerRows: Array<{
+      practitioner: string;
+      customer: string;
+      customerPhone: string;
+      helper: string;
+      status: string;
+      services: string;
+      bookingId: string;
+    }> = [];
     
-    const allServices = new Set<string>();
-    const allPractitioners = new Set<string>();
+    const allServiceNames = new Set<string>();
 
+    // Each booking is one row
     rawData.forEach(record => {
-      const practitioner = record.PractitionerName;
-      const customer = record.CustomerName;
-      const service = record.ServiceName;
-      
-      allPractitioners.add(practitioner);
-      allServices.add(service);
+      practitionerCustomerRows.push({
+        practitioner: record.PractitionerName,
+        customer: record.CustomerName,
+        customerPhone: record.CustomerPhoneNumber,
+        helper: record.HelperName || '-',
+        status: record.status,
+        services: record.ServiceName, // Already concatenated from the query
+        bookingId: record.BookingID
+      });
 
-      if (!practitionerCustomerMap[practitioner]) {
-        practitionerCustomerMap[practitioner] = {};
-      }
-
-      if (!practitionerCustomerMap[practitioner][customer]) {
-        practitionerCustomerMap[practitioner][customer] = {
-          helper: record.HelperName || '-',
-          status: record.status,
-          services: {}
-        };
-      }
-
-      if (!practitionerCustomerMap[practitioner][customer].services[service]) {
-        practitionerCustomerMap[practitioner][customer].services[service] = 0;
-      }
-
-      practitionerCustomerMap[practitioner][customer].services[service]++;
+      // Extract individual service names for column headers
+      const services = record.ServiceName.split(', ');
+      services.forEach(s => allServiceNames.add(s.trim()));
     });
 
-    const services = Array.from(allServices).sort();
-    const practitioners = Array.from(allPractitioners).sort();
+    // Sort by practitioner, then customer
+    practitionerCustomerRows.sort((a, b) => {
+      const practComp = a.practitioner.localeCompare(b.practitioner);
+      if (practComp !== 0) return practComp;
+      return a.customer.localeCompare(b.customer);
+    });
+
+    const services = Array.from(allServiceNames).sort();
+
+    // Create a map for service counts per row
+    const rowServiceCounts = practitionerCustomerRows.map(row => {
+      const serviceList = row.services.split(', ').map(s => s.trim());
+      const serviceCounts: { [service: string]: number } = {};
+      
+      services.forEach(service => {
+        serviceCounts[service] = serviceList.filter(s => s === service).length;
+      });
+      
+      return serviceCounts;
+    });
 
     return {
-      practitioners,
+      rows: practitionerCustomerRows,
       services,
-      data: practitionerCustomerMap
+      serviceCounts: rowServiceCounts
     };
   }, [rawData]);
 
@@ -499,7 +570,7 @@ const TaskflowDashboard: React.FC = () => {
             Practitioner Task Overview
           </Typography>
 
-          {heatmapData.practitioners.length === 0 ? (
+          {heatmapData.rows.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 8 }}>
               <Typography sx={{ color: '#9ca3af' }}>
                 No task data available for the selected date
@@ -560,94 +631,88 @@ const TaskflowDashboard: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {heatmapData.practitioners.map((practitioner) => {
-                    const customers = Object.keys(heatmapData.data[practitioner] || {});
-                    return customers.map((customer, custIndex) => {
-                      const customerData = heatmapData.data[practitioner][customer];
-                      return (
-                        <TableRow
-                          key={`${practitioner}-${customer}-${custIndex}`}
-                          sx={{ '&:hover': { bgcolor: '#1a2234' } }}
+                  {heatmapData.rows.map((row, rowIndex) => (
+                    <TableRow
+                      key={`${row.bookingId}-${rowIndex}`}
+                      sx={{ '&:hover': { bgcolor: '#1a2234' } }}
+                    >
+                      <TableCell
+                        sx={{
+                          color: '#f3f4f6',
+                          borderBottom: '1px solid #2d3748',
+                          position: 'sticky',
+                          left: 0,
+                          bgcolor: '#1a2234',
+                          fontWeight: 500
+                        }}
+                      >
+                        {row.practitioner}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          color: '#f3f4f6',
+                          borderBottom: '1px solid #2d3748',
+                          position: 'sticky',
+                          left: 150,
+                          bgcolor: '#1a2234'
+                        }}
+                      >
+                        {row.customer}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          color: '#d1d5db',
+                          borderBottom: '1px solid #2d3748',
+                          position: 'sticky',
+                          left: 300,
+                          bgcolor: '#1a2234'
+                        }}
+                      >
+                        {row.helper}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          borderBottom: '1px solid #2d3748',
+                          position: 'sticky',
+                          left: 420,
+                          bgcolor: '#1a2234',
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            display: 'inline-block',
+                            px: 1.5,
+                            py: 0.5,
+                            borderRadius: 1,
+                            bgcolor: row.status === 'COMPLETED' ? '#10b981' : '#3b82f6',
+                            color: 'white',
+                            fontSize: '0.75rem',
+                            fontWeight: 600
+                          }}
                         >
+                          {row.status}
+                        </Box>
+                      </TableCell>
+                      {heatmapData.services.map((service) => {
+                        const count = heatmapData.serviceCounts[rowIndex][service] || 0;
+                        return (
                           <TableCell
-                            sx={{
-                              color: '#f3f4f6',
-                              borderBottom: '1px solid #2d3748',
-                              position: 'sticky',
-                              left: 0,
-                              bgcolor: '#1a2234',
-                              fontWeight: 500
-                            }}
-                          >
-                            {practitioner}
-                          </TableCell>
-                          <TableCell
-                            sx={{
-                              color: '#f3f4f6',
-                              borderBottom: '1px solid #2d3748',
-                              position: 'sticky',
-                              left: 150,
-                              bgcolor: '#1a2234'
-                            }}
-                          >
-                            {customer}
-                          </TableCell>
-                          <TableCell
-                            sx={{
-                              color: '#d1d5db',
-                              borderBottom: '1px solid #2d3748',
-                              position: 'sticky',
-                              left: 300,
-                              bgcolor: '#1a2234'
-                            }}
-                          >
-                            {customerData.helper}
-                          </TableCell>
-                          <TableCell
+                            key={`${row.bookingId}-${service}`}
+                            align="center"
                             sx={{
                               borderBottom: '1px solid #2d3748',
-                              position: 'sticky',
-                              left: 420,
-                              bgcolor: '#1a2234',
-                              textAlign: 'center'
+                              bgcolor: count > 0 ? 'rgba(59, 130, 246, 0.3)' : 'transparent',
+                              color: count > 0 ? '#f3f4f6' : '#6b7280',
+                              fontWeight: count > 0 ? 600 : 400
                             }}
                           >
-                            <Box
-                              sx={{
-                                display: 'inline-block',
-                                px: 1.5,
-                                py: 0.5,
-                                borderRadius: 1,
-                                bgcolor: customerData.status === 'COMPLETED' ? '#10b981' : '#3b82f6',
-                                color: 'white',
-                                fontSize: '0.75rem',
-                                fontWeight: 600
-                              }}
-                            >
-                              {customerData.status}
-                            </Box>
+                            {count > 0 ? count : '-'}
                           </TableCell>
-                          {heatmapData.services.map((service) => {
-                            const count = customerData.services[service] || 0;
-                            return (
-                              <TableCell
-                                key={`${practitioner}-${customer}-${service}`}
-                                align="center"
-                                sx={{
-                                  borderBottom: '1px solid #2d3748',
-                                  bgcolor: count > 0 ? 'rgba(59, 130, 246, 0.3)' : 'transparent',
-                                  color: count > 0 ? '#f3f4f6' : '#6b7280',
-                                  fontWeight: count > 0 ? 600 : 400
-                                }}
-                              >
-                                {count > 0 ? count : '-'}
-                              </TableCell>
-                            );
-                          })}
-                        </TableRow>
-                      );
-                    });
-                  })}
+                        );
+                      })}
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </TableContainer>
