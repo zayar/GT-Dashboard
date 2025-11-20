@@ -143,6 +143,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { id: 'main-dashboard', label: 'Main Dashboard', icon: 'fas fa-home', path: '/dashboard' },
         { id: 'customer-behavior', label: 'Customer Behavior', icon: 'fas fa-chart-bar', path: '/customer-behavior-report' },
         { id: 'service-behavior', label: 'Service Behavior', icon: 'fas fa-spa', path: '/service-behavior-report' },
+        { id: 'taskflow-dashboard', label: 'Taskflow Dashboard', icon: 'fas fa-tasks', path: '/taskflow-dashboard' },
       ]
     },
     { id: 'appointments-list-mysql', label: 'Appointments List', icon: 'fas fa-list', path: '/appointments-list' },

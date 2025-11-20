@@ -11,6 +11,7 @@ import AppointmentsListPage from './components/AppointmentsListPage';
 import BankingDetails from './components/BankingDetails';
 import CheckInCheckOutPage from './components/CheckInCheckOutPage';
 import DailyReport from './components/DailyReport';
+import TaskflowDashboard from './components/TaskflowDashboard';
 import ClinicSelector from './components/ClinicSelector';
 import Commission from './components/Commission';
 import ConversationalAI from './components/ConversationalAI'; // Import our new component
@@ -2146,6 +2147,7 @@ const AppContent = () => {
             <Route path="/appointments-list" element={<AppointmentsListPage />} />
             <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
             <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
+            <Route path="/taskflow-dashboard" element={<TaskflowDashboard />} />
             <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
             <Route path="/customers-by-salesperson" element={<CustomersBySalesperson />} />
             {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
