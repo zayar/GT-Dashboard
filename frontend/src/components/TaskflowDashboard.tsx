@@ -28,7 +28,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useClinic } from '../contexts/ClinicContext';
 import axios from 'axios';
 import { format } from 'date-fns';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import ReactApexChart from 'react-apexcharts';
+import { ApexOptions } from 'apexcharts';
 
 interface TaskflowData {
   PractitionerName: string;
@@ -419,35 +420,46 @@ const TaskflowDashboard: React.FC = () => {
               <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 2, fontWeight: 600, textAlign: 'center' }}>
                 Task Status
               </Typography>
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={taskStatusData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {taskStatusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1a2234',
-                      border: '1px solid #2d3748',
-                      borderRadius: '4px',
-                      color: '#f3f4f6'
-                    }}
-                  />
-                  <Legend
-                    wrapperStyle={{ color: '#d1d5db' }}
-                    iconType="circle"
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              <Box sx={{ height: 280 }}>
+                <ReactApexChart
+                  options={{
+                    chart: {
+                      type: 'donut',
+                      background: 'transparent'
+                    },
+                    labels: taskStatusData.map(item => item.name),
+                    colors: taskStatusData.map(item => item.color),
+                    legend: {
+                      position: 'bottom',
+                      labels: {
+                        colors: '#d1d5db'
+                      }
+                    },
+                    dataLabels: {
+                      enabled: true,
+                      style: {
+                        colors: ['#fff']
+                      }
+                    },
+                    plotOptions: {
+                      pie: {
+                        donut: {
+                          size: '60%'
+                        }
+                      }
+                    },
+                    tooltip: {
+                      theme: 'dark',
+                      style: {
+                        fontSize: '12px'
+                      }
+                    }
+                  } as ApexOptions}
+                  series={taskStatusData.map(item => item.value)}
+                  type="donut"
+                  height={280}
+                />
+              </Box>
             </Paper>
           </Grid>
 
