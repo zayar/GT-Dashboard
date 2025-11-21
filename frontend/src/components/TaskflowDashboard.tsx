@@ -24,7 +24,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import PeopleIcon from '@mui/icons-material/People';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
-import PersonIcon from '@mui/icons-material/Person';
+import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 import { useClinic } from '../contexts/ClinicContext';
 import axios from 'axios';
 import { format } from 'date-fns';
@@ -38,6 +38,7 @@ interface TaskflowData {
   CustomerPhoneNumber: string;
   ServiceName: string;
   HelperName: string | null;
+  RoomName: string | null;
   status: string;
   CheckInTime: string;
 }
@@ -115,6 +116,7 @@ const TaskflowDashboard: React.FC = () => {
             MAX(CustomerPhoneNumber) AS CustomerPhoneNumber,
             STRING_AGG(DISTINCT ServiceName, ', ') AS ServiceName,
             MAX(HelperName) AS HelperName,
+            MAX(RoomName) AS RoomName,
             CASE
               WHEN MAX(CheckOutTime) IS NOT NULL THEN 'COMPLETED'
               ELSE 'PROCESSING'
@@ -134,10 +136,14 @@ const TaskflowDashboard: React.FC = () => {
           CustomerPhoneNumber,
           ServiceName,
           HelperName,
+          RoomName,
           status,
           CheckInTime
         FROM BookingDetails
-        ORDER BY PractitionerName, CustomerName
+        ORDER BY 
+          CASE WHEN RoomName IS NULL THEN 1 ELSE 0 END, -- Rooms first
+          RoomName, 
+          PractitionerName
       `;
 
       const heatmapResponse = await axios.post(
@@ -250,6 +256,7 @@ const TaskflowDashboard: React.FC = () => {
       customer: string;
       customerPhone: string;
       helper: string;
+      room: string;
       status: string;
       services: string;
       bookingId: string;
@@ -264,6 +271,7 @@ const TaskflowDashboard: React.FC = () => {
         customer: record.CustomerName,
         customerPhone: record.CustomerPhoneNumber,
         helper: record.HelperName || '-',
+        room: record.RoomName || 'No Room',
         status: record.status,
         services: record.ServiceName, // Already concatenated from the query
         bookingId: record.BookingID
@@ -274,11 +282,16 @@ const TaskflowDashboard: React.FC = () => {
       services.forEach(s => allServiceNames.add(s.trim()));
     });
 
-    // Sort by practitioner, then customer
+    // Sort by Room first, then Practitioner
     practitionerCustomerRows.sort((a, b) => {
-      const practComp = a.practitioner.localeCompare(b.practitioner);
-      if (practComp !== 0) return practComp;
-      return a.customer.localeCompare(b.customer);
+      // Put 'No Room' at the end
+      if (a.room === 'No Room' && b.room !== 'No Room') return 1;
+      if (a.room !== 'No Room' && b.room === 'No Room') return -1;
+      
+      const roomComp = a.room.localeCompare(b.room);
+      if (roomComp !== 0) return roomComp;
+      
+      return a.practitioner.localeCompare(b.practitioner);
     });
 
     const services = Array.from(allServiceNames).sort();
@@ -567,7 +580,7 @@ const TaskflowDashboard: React.FC = () => {
         {/* Heatmap Grid */}
         <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748' }}>
           <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 3, fontWeight: 600 }}>
-            Practitioner Task Overview
+            Room & Task Overview
           </Typography>
 
           {heatmapData.rows.length === 0 ? (
@@ -601,16 +614,19 @@ const TaskflowDashboard: React.FC = () => {
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 0, zIndex: 3, minWidth: 150 }}>
+                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 0, zIndex: 3, minWidth: 120 }}>
+                      Room
+                    </TableCell>
+                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 120, zIndex: 3, minWidth: 150 }}>
                       Practitioner(s)
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 150, zIndex: 3, minWidth: 150 }}>
+                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 270, zIndex: 3, minWidth: 150 }}>
                       Customer Name
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 300, zIndex: 3, minWidth: 120 }}>
+                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 420, zIndex: 3, minWidth: 120 }}>
                       Helpers
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 420, zIndex: 3, minWidth: 120, textAlign: 'center' }}>
+                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 540, zIndex: 3, minWidth: 120, textAlign: 'center' }}>
                       Status
                     </TableCell>
                     {heatmapData.services.map((service) => (
@@ -622,10 +638,22 @@ const TaskflowDashboard: React.FC = () => {
                           fontWeight: 600,
                           borderBottom: '1px solid #2d3748',
                           minWidth: 120,
-                          textAlign: 'center'
+                          textAlign: 'center',
+                          verticalAlign: 'bottom',
+                          height: 100
                         }}
                       >
-                        {service}
+                        <Box sx={{ 
+                          writingMode: 'vertical-rl', 
+                          transform: 'rotate(180deg)', 
+                          textAlign: 'left',
+                          maxHeight: 100,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          width: '100%'
+                        }}>
+                          {service}
+                        </Box>
                       </TableCell>
                     ))}
                   </TableRow>
@@ -638,10 +666,27 @@ const TaskflowDashboard: React.FC = () => {
                     >
                       <TableCell
                         sx={{
-                          color: '#f3f4f6',
+                          color: row.room === 'No Room' ? '#6b7280' : '#f3f4f6',
                           borderBottom: '1px solid #2d3748',
                           position: 'sticky',
                           left: 0,
+                          bgcolor: '#1a2234',
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          height: '60px' // Ensure consistent height
+                        }}
+                      >
+                        {row.room !== 'No Room' && <MeetingRoomIcon sx={{ fontSize: 18, color: '#3b82f6' }} />}
+                        {row.room}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          color: '#f3f4f6',
+                          borderBottom: '1px solid #2d3748',
+                          position: 'sticky',
+                          left: 120,
                           bgcolor: '#1a2234',
                           fontWeight: 500
                         }}
@@ -653,7 +698,7 @@ const TaskflowDashboard: React.FC = () => {
                           color: '#f3f4f6',
                           borderBottom: '1px solid #2d3748',
                           position: 'sticky',
-                          left: 150,
+                          left: 270,
                           bgcolor: '#1a2234'
                         }}
                       >
@@ -664,7 +709,7 @@ const TaskflowDashboard: React.FC = () => {
                           color: '#d1d5db',
                           borderBottom: '1px solid #2d3748',
                           position: 'sticky',
-                          left: 300,
+                          left: 420,
                           bgcolor: '#1a2234'
                         }}
                       >
@@ -674,7 +719,7 @@ const TaskflowDashboard: React.FC = () => {
                         sx={{
                           borderBottom: '1px solid #2d3748',
                           position: 'sticky',
-                          left: 420,
+                          left: 540,
                           bgcolor: '#1a2234',
                           textAlign: 'center'
                         }}
@@ -685,8 +730,9 @@ const TaskflowDashboard: React.FC = () => {
                             px: 1.5,
                             py: 0.5,
                             borderRadius: 1,
-                            bgcolor: row.status === 'COMPLETED' ? '#10b981' : '#3b82f6',
-                            color: 'white',
+                            bgcolor: row.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                            color: row.status === 'COMPLETED' ? '#34d399' : '#60a5fa',
+                            border: `1px solid ${row.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
                             fontSize: '0.75rem',
                             fontWeight: 600
                           }}
@@ -702,9 +748,11 @@ const TaskflowDashboard: React.FC = () => {
                             align="center"
                             sx={{
                               borderBottom: '1px solid #2d3748',
-                              bgcolor: count > 0 ? 'rgba(59, 130, 246, 0.3)' : 'transparent',
-                              color: count > 0 ? '#f3f4f6' : '#6b7280',
-                              fontWeight: count > 0 ? 600 : 400
+                              bgcolor: count > 0 ? (row.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)') : 'transparent',
+                              color: count > 0 ? (row.status === 'COMPLETED' ? '#34d399' : '#60a5fa') : '#6b7280',
+                              fontWeight: count > 0 ? 700 : 400,
+                              borderLeft: count > 0 ? `1px solid ${row.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)'}` : 'none',
+                              borderRight: count > 0 ? `1px solid ${row.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)'}` : 'none'
                             }}
                           >
                             {count > 0 ? count : '-'}
