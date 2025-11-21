@@ -23,6 +23,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import PeopleIcon from '@mui/icons-material/People';
+import PersonIcon from '@mui/icons-material/Person';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 import { useClinic } from '../contexts/ClinicContext';
