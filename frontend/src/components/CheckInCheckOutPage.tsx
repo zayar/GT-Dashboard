@@ -137,19 +137,41 @@ const CheckInCheckOutPage: React.FC = () => {
     // If /api/mysql *also* needs Firebase auth, this should use apiClient too.
     let query = `
       SELECT 
-        OrderId, CheckInTime, CheckOutTime, Servicename, TherapicName, HelperName, 
-        CustomerName, CustomerPhoneNumber, PaymentMethod, PaymentStatus, Total, SellerName
-      FROM inoutview 
-      WHERE CheckInTime >= '${formatDateForSQL(calculatedStartDate)}' 
-        AND CheckInTime <= '${formatDateForSQL(calculatedEndDate)}'
-        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+        v.OrderId, v.CheckInTime, v.CheckOutTime, v.Servicename, v.TherapicName, v.HelperName, 
+        v.CustomerName, v.CustomerPhoneNumber, v.PaymentMethod, v.PaymentStatus,
+        COALESCE(
+          (
+            SELECT oi.price
+            FROM orders item_order
+            JOIN order_items oi ON oi.order_id = item_order.id
+            JOIN servcies item_service ON item_service.id = oi.service_id
+            WHERE item_order.order_id = v.OrderId
+              AND item_service.clinic_id = v.ClinicId
+              AND TRIM(item_service.name) = TRIM(v.Servicename)
+            ORDER BY oi.updated_at DESC
+            LIMIT 1
+          ),
+          (
+            SELECT service.price
+            FROM servcies service
+            WHERE service.clinic_id = v.ClinicId
+              AND TRIM(service.name) = TRIM(v.Servicename)
+            LIMIT 1
+          ),
+          v.Total
+        ) AS Total,
+        v.SellerName
+      FROM inoutview v
+      WHERE v.CheckInTime >= '${formatDateForSQL(calculatedStartDate)}' 
+        AND v.CheckInTime <= '${formatDateForSQL(calculatedEndDate)}'
+        AND LOWER(v.ClinicCode) = LOWER('${currentClinic.code}')
     `;
 
     if (paymentStatusFilter !== 'all') {
-      query += ` AND PaymentStatus = '${paymentStatusFilter.toUpperCase()}'`;
+      query += ` AND v.PaymentStatus = '${paymentStatusFilter.toUpperCase()}'`;
     }
 
-    query += ` ORDER BY CheckInTime DESC;`; // Example ordering
+    query += ` ORDER BY v.CheckInTime DESC;`; // Example ordering
 
     try {
       const searchQuery = new URLSearchParams({
@@ -215,6 +237,17 @@ const CheckInCheckOutPage: React.FC = () => {
     return formatCurrencyUtil(amount, currentClinic);
   };
 
+  const formatCSVAmount = (amount: number | null) => {
+    if (amount === null || amount === undefined) return '';
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount)) return '';
+
+    return Number.isInteger(numericAmount)
+      ? numericAmount.toString()
+      : numericAmount.toString();
+  };
+
   // Function to handle CSV export
   const handleExportCSV = () => {
     if (!filteredRecords.length) return;
@@ -232,12 +265,14 @@ const CheckInCheckOutPage: React.FC = () => {
       record.CustomerPhoneNumber ?? '-',
       record.PaymentMethod ?? '-',
       record.PaymentStatus ?? '-',
-      formatCurrency(record.Total)
+      formatCSVAmount(record.Total)
     ]);
 
+    const escapeCSVCell = (value: string | number | null) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
     let csvContent = "data:text/csv;charset=utf-8,"
-      + headers.join(",") + "\n"
-      + rows.map(e => e.join(",")).join("\n");
+      + headers.map(escapeCSVCell).join(",") + "\n"
+      + rows.map(row => row.map(escapeCSVCell).join(",")).join("\n");
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
