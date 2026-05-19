@@ -220,6 +220,24 @@ const CheckInCheckOutPage: React.FC = () => {
     );
   }, [records, searchTerm]);
 
+  const recordsForDisplay = useMemo(() => {
+    const displayedOrderIds = new Set<string>();
+
+    return filteredRecords.map(record => {
+      const orderId = record.OrderId?.trim();
+      const shouldShowDiscount = !orderId || !displayedOrderIds.has(orderId);
+
+      if (orderId && shouldShowDiscount) {
+        displayedOrderIds.add(orderId);
+      }
+
+      return {
+        ...record,
+        DisplayDiscount: shouldShowDiscount ? record.Discount : null
+      };
+    });
+  }, [filteredRecords]);
+
   // Function to format date for display
   const formatDisplayDateTime = (dateTimeString: string | null) => {
     if (!dateTimeString) return '-';
@@ -252,10 +270,10 @@ const CheckInCheckOutPage: React.FC = () => {
 
   // Function to handle CSV export
   const handleExportCSV = () => {
-    if (!filteredRecords.length) return;
+    if (!recordsForDisplay.length) return;
 
     const headers = ['Order ID', 'Check-In Time', 'Check-Out Time', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Discount', 'Total'];
-    const rows = filteredRecords.map(record => [
+    const rows = recordsForDisplay.map(record => [
       record.OrderId ?? '-',
       formatDisplayDateTime(record.CheckInTime),
       formatDisplayDateTime(record.CheckOutTime),
@@ -267,7 +285,7 @@ const CheckInCheckOutPage: React.FC = () => {
       record.CustomerPhoneNumber ?? '-',
       record.PaymentMethod ?? '-',
       record.PaymentStatus ?? '-',
-      formatCSVAmount(record.Discount),
+      formatCSVAmount(record.DisplayDiscount),
       formatCSVAmount(record.Total)
     ]);
 
@@ -436,7 +454,7 @@ const CheckInCheckOutPage: React.FC = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredRecords.map((record, index) => (
+                recordsForDisplay.map((record, index) => (
                   <TableRow
                     key={record.OrderId ? `${record.OrderId}-${index}` : `record-${index}`}
                     hover
@@ -460,7 +478,9 @@ const CheckInCheckOutPage: React.FC = () => {
                         variant="filled"
                       />
                     </TableCell>
-                    <TableCell align="right">{formatCurrency(record.Discount)}</TableCell>
+                    <TableCell align="right">
+                      {record.DisplayDiscount === null ? '' : formatCurrency(record.DisplayDiscount)}
+                    </TableCell>
                     <TableCell align="right">{formatCurrency(record.Total)}</TableCell>
                   </TableRow>
                 ))
