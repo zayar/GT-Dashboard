@@ -210,14 +210,24 @@ const CheckInCheckOutPage: React.FC = () => {
     if (!searchTerm) {
       return records;
     }
-    const lowerSearchTerm = searchTerm.toLowerCase();
-    return records.filter(record =>
-      record.CustomerName?.toLowerCase().includes(lowerSearchTerm) ||
-      record.Servicename?.toLowerCase().includes(lowerSearchTerm) ||
-      record.TherapicName?.toLowerCase().includes(lowerSearchTerm) ||
-      record.CustomerPhoneNumber?.includes(searchTerm) ||
-      record.SellerName?.toLowerCase().includes(lowerSearchTerm)
-    );
+    const trimmedSearchTerm = searchTerm.trim();
+    const lowerSearchTerm = trimmedSearchTerm.toLowerCase();
+    const normalizedSearchTerm = lowerSearchTerm.replace(/[^a-z0-9]/g, '');
+
+    return records.filter(record => {
+      const orderId = record.OrderId?.toLowerCase() ?? '';
+      const normalizedOrderId = orderId.replace(/[^a-z0-9]/g, '');
+
+      return (
+        orderId.includes(lowerSearchTerm) ||
+        (normalizedSearchTerm.length > 0 && normalizedOrderId.includes(normalizedSearchTerm)) ||
+        record.CustomerName?.toLowerCase().includes(lowerSearchTerm) ||
+        record.Servicename?.toLowerCase().includes(lowerSearchTerm) ||
+        record.TherapicName?.toLowerCase().includes(lowerSearchTerm) ||
+        record.CustomerPhoneNumber?.includes(trimmedSearchTerm) ||
+        record.SellerName?.toLowerCase().includes(lowerSearchTerm)
+      );
+    });
   }, [records, searchTerm]);
 
   const recordsForDisplay = useMemo(() => {
@@ -395,7 +405,7 @@ const CheckInCheckOutPage: React.FC = () => {
             <Grid item xs={12} sm={6} md={3}>
               <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Search Records</Typography>
               <TextField
-                placeholder="Customer, service, therapist, seller..."
+                placeholder="Order ID, customer, service, therapist..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 size="small"
