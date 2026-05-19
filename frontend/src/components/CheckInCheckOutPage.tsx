@@ -49,6 +49,7 @@ interface CheckInOutRecord {
   PaymentMethod: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER' | null; // Adjust enum values if needed
   PaymentStatus: 'PAID' | 'PENDING' | 'CANCELLED' | 'REFUNDED' | null; // Adjust enum values if needed
   Total: number | null;
+  Discount: number | null;
   SellerName: string | null;
   // Add other fields from inoutview if needed for display or filtering
 }
@@ -160,6 +161,7 @@ const CheckInCheckOutPage: React.FC = () => {
           ),
           v.Total
         ) AS Total,
+        COALESCE(v.Discount, 0) AS Discount,
         v.SellerName
       FROM inoutview v
       WHERE v.CheckInTime >= '${formatDateForSQL(calculatedStartDate)}' 
@@ -252,7 +254,7 @@ const CheckInCheckOutPage: React.FC = () => {
   const handleExportCSV = () => {
     if (!filteredRecords.length) return;
 
-    const headers = ['Order ID', 'Check-In Time', 'Check-Out Time', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Total'];
+    const headers = ['Order ID', 'Check-In Time', 'Check-Out Time', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Discount', 'Total'];
     const rows = filteredRecords.map(record => [
       record.OrderId ?? '-',
       formatDisplayDateTime(record.CheckInTime),
@@ -265,6 +267,7 @@ const CheckInCheckOutPage: React.FC = () => {
       record.CustomerPhoneNumber ?? '-',
       record.PaymentMethod ?? '-',
       record.PaymentStatus ?? '-',
+      formatCSVAmount(record.Discount),
       formatCSVAmount(record.Total)
     ]);
 
@@ -401,7 +404,7 @@ const CheckInCheckOutPage: React.FC = () => {
 
         {/* Data Table */}
         <TableContainer component={Paper} elevation={1} sx={{ maxHeight: '65vh', overflowX: 'auto' }}>
-          <Table stickyHeader size="small" sx={{ minWidth: 1400 }}>
+          <Table stickyHeader size="small" sx={{ minWidth: 1500 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Order ID</TableCell>
@@ -415,19 +418,20 @@ const CheckInCheckOutPage: React.FC = () => {
                 <TableCell>Phone</TableCell>
                 <TableCell>Payment Method</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell align="right">Discount</TableCell>
                 <TableCell align="right">Total</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={12} align="center">
+                  <TableCell colSpan={13} align="center">
                     <CircularProgress sx={{ my: 4 }} />
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length === 0 && !error ? (
                 <TableRow>
-                  <TableCell colSpan={12} align="center">
+                  <TableCell colSpan={13} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>No records match the current filters.</Typography>
                   </TableCell>
                 </TableRow>
@@ -456,6 +460,7 @@ const CheckInCheckOutPage: React.FC = () => {
                         variant="filled"
                       />
                     </TableCell>
+                    <TableCell align="right">{formatCurrency(record.Discount)}</TableCell>
                     <TableCell align="right">{formatCurrency(record.Total)}</TableCell>
                   </TableRow>
                 ))
