@@ -82,5 +82,12 @@ describe('markFirstInvoiceRows', () => {
       false,
       true,
     ]);
+    expect(rows.map(row => row.displayAmount)).toEqual([
+      479000,
+      null,
+      3000000,
+      null,
+      770000,
+    ]);
   });
 });

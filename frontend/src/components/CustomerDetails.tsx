@@ -2087,8 +2087,8 @@ SELECT
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.method}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.SellerName || '-'}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
-                            {payment.isFirstInvoiceRow ? (
-                              formatCurrency(Number(payment.amount), currentClinic)
+                            {payment.displayAmount !== null ? (
+                              formatCurrency(Number(payment.displayAmount), currentClinic)
                             ) : (
                               <span style={{ color: '#9ca3af' }}>-</span>
                             )}

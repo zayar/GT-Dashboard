@@ -18,6 +18,7 @@ export interface CustomerPaymentSummary {
 
 export type InvoiceDisplayRow<T> = T & {
   isFirstInvoiceRow: boolean;
+  displayAmount: T extends { amount?: infer A } ? A | null : number | string | null;
 };
 
 const normalizeInvoiceKey = (invoiceNumber: CustomerPaymentSummaryRecord['invoiceNumber']): string | null => {
@@ -80,12 +81,16 @@ export const markFirstInvoiceRows = <T extends { invoiceNumber?: string | null }
     const invoiceKey = normalizeInvoiceKey(payment.invoiceNumber);
 
     if (!invoiceKey) {
-      return { ...payment, isFirstInvoiceRow: true };
+      return { ...payment, isFirstInvoiceRow: true, displayAmount: payment.amount ?? null };
     }
 
     const isFirstInvoiceRow = !seenInvoices.has(invoiceKey);
     seenInvoices.add(invoiceKey);
 
-    return { ...payment, isFirstInvoiceRow };
+    return {
+      ...payment,
+      isFirstInvoiceRow,
+      displayAmount: isFirstInvoiceRow ? payment.amount ?? null : null,
+    };
   });
 };
