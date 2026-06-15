@@ -10,6 +10,7 @@ import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
 import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency } from '../utils/currency';
+import { calculateCustomerPaymentSummary } from '../utils/paymentSummary';
 
 // Types for customer profile and data
 interface CustomerProfile {
@@ -709,40 +710,7 @@ ORDER BY OrderCreatedDate DESC;
         
         // Calculate payment summary manually since we simplified the query
         if (filteredPaymentData.length > 0) {
-          // Get unique invoice numbers to count actual invoices
-          const uniqueInvoices = [...new Set(filteredPaymentData.map((p: any) => p.invoiceNumber))];
-          
-          // Calculate total spent (excluding PASS payment method)
-          const totalSpent = filteredPaymentData.reduce((sum: number, payment: any) => {
-            if (payment.method === 'PASS') {
-              return sum; // Don't add PASS amounts to total
-            }
-            return sum + (payment.amount || 0);
-          }, 0);
-          
-          // Group by payment method
-          const methodGroups: Record<string, { count: number; total: number }> = {};
-          filteredPaymentData.forEach((payment: any) => {
-            const method = payment.method || 'Unknown';
-            if (!methodGroups[method]) {
-              methodGroups[method] = { count: 0, total: 0 };
-            }
-            methodGroups[method].count += 1;
-            methodGroups[method].total += (payment.amount || 0);
-          });
-          
-          // Format payment methods summary
-          const paymentMethods = Object.entries(methodGroups).map(([method, data]) => ({
-            method,
-            count: data.count,
-            total: data.total,
-          }));
-          
-          setPaymentSummary({
-            totalSpent,
-            invoiceCount: uniqueInvoices.length,
-            paymentMethods,
-          });
+          setPaymentSummary(calculateCustomerPaymentSummary(filteredPaymentData));
         } else {
           console.log('No payment history found for customer');
           setPaymentSummary({
