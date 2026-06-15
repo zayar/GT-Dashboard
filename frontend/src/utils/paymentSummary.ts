@@ -16,6 +16,10 @@ export interface CustomerPaymentSummary {
   paymentMethods: PaymentMethodSummary[];
 }
 
+export type InvoiceDisplayRow<T> = T & {
+  isFirstInvoiceRow: boolean;
+};
+
 const normalizeInvoiceKey = (invoiceNumber: CustomerPaymentSummaryRecord['invoiceNumber']): string | null => {
   const key = String(invoiceNumber || '').trim();
   return key.length > 0 ? key : null;
@@ -65,4 +69,23 @@ export const calculateCustomerPaymentSummary = (
     invoiceCount: invoices.size,
     paymentMethods: Object.values(methodGroups),
   };
+};
+
+export const markFirstInvoiceRows = <T extends { invoiceNumber?: string | null }>(
+  payments: T[]
+): InvoiceDisplayRow<T>[] => {
+  const seenInvoices = new Set<string>();
+
+  return payments.map((payment) => {
+    const invoiceKey = normalizeInvoiceKey(payment.invoiceNumber);
+
+    if (!invoiceKey) {
+      return { ...payment, isFirstInvoiceRow: true };
+    }
+
+    const isFirstInvoiceRow = !seenInvoices.has(invoiceKey);
+    seenInvoices.add(invoiceKey);
+
+    return { ...payment, isFirstInvoiceRow };
+  });
 };

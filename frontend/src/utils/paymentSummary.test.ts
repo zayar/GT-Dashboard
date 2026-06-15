@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateCustomerPaymentSummary } from './paymentSummary';
+import { calculateCustomerPaymentSummary, markFirstInvoiceRows } from './paymentSummary';
 
 describe('calculateCustomerPaymentSummary', () => {
   it('counts one invoice with multiple service rows only once', () => {
@@ -61,6 +61,26 @@ describe('calculateCustomerPaymentSummary', () => {
       { method: 'MMQR', count: 1, total: 100000 },
       { method: 'CASH', count: 1, total: 80000 },
       { method: 'KPAY', count: 1, total: 30000 },
+    ]);
+  });
+});
+
+describe('markFirstInvoiceRows', () => {
+  it('marks only the first service row for each invoice as the amount row', () => {
+    const rows = markFirstInvoiceRows([
+      { invoiceNumber: 'CO-1931420', amount: 479000, service: 'Restructure Treatment' },
+      { invoiceNumber: 'CO-1931420', amount: 479000, service: 'Sublimis. Oil Serum' },
+      { invoiceNumber: 'SO-521082', amount: 3000000, service: 'Hair Spa Treatment' },
+      { invoiceNumber: 'SO-521082', amount: 3000000, service: 'Hair Spa Treatment' },
+      { invoiceNumber: 'CO-6091815', amount: 770000, service: 'Hair Coloring' },
+    ]);
+
+    expect(rows.map(row => row.isFirstInvoiceRow)).toEqual([
+      true,
+      false,
+      true,
+      false,
+      true,
     ]);
   });
 });

@@ -10,7 +10,7 @@ import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
 import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency } from '../utils/currency';
-import { calculateCustomerPaymentSummary } from '../utils/paymentSummary';
+import { calculateCustomerPaymentSummary, markFirstInvoiceRows } from '../utils/paymentSummary';
 
 // Types for customer profile and data
 interface CustomerProfile {
@@ -548,6 +548,10 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       console.error('Error generating payment chart data:', error);
       return emptyChartData;
     }
+  }, [paymentHistory]);
+
+  const paymentHistoryRows = useMemo(() => {
+    return markFirstInvoiceRows(paymentHistory);
   }, [paymentHistory]);
 
   // Add this function to calculate heatmap color based on value
@@ -2065,7 +2069,7 @@ SELECT
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {paymentHistory.map((payment, index) => (
+                      {paymentHistoryRows.map((payment, index) => (
                         <TableRow key={`${payment.invoiceNumber}-${index}`} sx={{
                           '&:hover': {
                             bgcolor: '#242f3d',
@@ -2083,7 +2087,11 @@ SELECT
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.method}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.SellerName || '-'}</TableCell>
                           <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
-                            {formatCurrency(Number(payment.amount), currentClinic)}
+                            {payment.isFirstInvoiceRow ? (
+                              formatCurrency(Number(payment.amount), currentClinic)
+                            ) : (
+                              <span style={{ color: '#9ca3af' }}>-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
