@@ -31,6 +31,8 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,7 +79,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         "password": password,
         "appType": "WEB"
       }
-      const response = await fetch(`${import.meta.env.VITE_API_BASE}/apicore`, {
+
+      if (!API_BASE_URL) {
+        throw new Error('Login API is not configured. Please check VITE_API_BASE.');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/apicore`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -85,11 +92,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         body: JSON.stringify({ query, variables }),
       });
 
+      const responseText = await response.text();
+      const contentType = response.headers.get('content-type') || '';
+
       if (!response.ok) {
         throw new Error('Login failed: Invalid credentials');
       }
 
-      const { errors = [], data } = await response.json() as { errors: Array<{ message: string }>, data?: { gtAuthLogin: any } };
+      if (!contentType.includes('application/json')) {
+        throw new Error('Login API returned an invalid response. Please refresh and try again.');
+      }
+
+      let payload: { errors?: Array<{ message: string }>, data?: { gtAuthLogin: any } };
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        throw new Error('Login API returned invalid JSON. Please refresh and try again.');
+      }
+
+      const { errors = [], data } = payload;
 
       if (errors.length > 0) {
         throw new Error(errors[0].message)
