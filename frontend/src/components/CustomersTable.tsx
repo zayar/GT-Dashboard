@@ -96,29 +96,33 @@ const CustomersTable: React.FC = () => {
           CustomerName,
           CustomerPhoneNumber,
           MemberId,
-          PaymentMethod,
-          PaymentStatus,
-          CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal
+          InvoiceNumber,
+          MAX(CAST(NetTotal AS FLOAT64)) AS InvoiceNetTotal
         FROM 
           great_time.MainPaymentView
         WHERE 
           CustomerName IS NOT NULL 
           AND CustomerPhoneNumber IS NOT NULL
-          AND PaymentStatus = 'PAID'
-          AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
           AND PaymentMethod != 'PASS'
+          AND InvoiceNumber IS NOT NULL
+          AND CAST(NetTotal AS FLOAT64) > 0
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+        GROUP BY
+          CustomerName,
+          CustomerPhoneNumber,
+          MemberId,
+          InvoiceNumber
       ),
       CustomerSpend AS (
         SELECT
           CustomerName,
           CustomerPhoneNumber,
-          MemberId,
+          ANY_VALUE(MemberId) AS MemberId,
           SUM(InvoiceNetTotal) AS TotalSpend
         FROM
           CustomerPayments
         GROUP BY
-          CustomerName, CustomerPhoneNumber, MemberId
+          CustomerName, CustomerPhoneNumber
       ),
       CustomerInfo AS (
         SELECT 
