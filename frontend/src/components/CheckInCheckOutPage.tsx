@@ -19,7 +19,6 @@ import {
   Select,
   Grid,
   InputAdornment,
-  IconButton,
   SelectChangeEvent,
   Chip,
   ButtonGroup
@@ -35,6 +34,12 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'; // Assuming you might
 import { useClinic } from '../contexts/ClinicContext';
 import axios from 'axios'; // Import axios for making direct API calls
 import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
+import {
+  buildCheckInOutRecordsQuery,
+  CheckInOutStatusFilter,
+  DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  MERCHANT_CANCEL_STATUS,
+} from '../utils/checkInOutReport';
 
 // Define the interface for the record based on schema
 interface CheckInOutRecord {
@@ -47,7 +52,7 @@ interface CheckInOutRecord {
   CustomerName: string | null;
   CustomerPhoneNumber: string;
   PaymentMethod: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER' | null; // Adjust enum values if needed
-  PaymentStatus: 'PAID' | 'PENDING' | 'CANCELLED' | 'REFUNDED' | null; // Adjust enum values if needed
+  PaymentStatus: string | null; // Adjust enum values if needed
   Total: number | null;
   Discount: number | null;
   SellerName: string | null;
@@ -63,9 +68,6 @@ const connectionConfig = {
   database: 'great_time'
 };
 
-// Base URL for the new MySQL service
-const MYSQL_SERVICE_URL = 'http://localhost:5004/api/mysql';
-
 const CheckInCheckOutPage: React.FC = () => {
   const [records, setRecords] = useState<CheckInOutRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,7 +77,7 @@ const CheckInCheckOutPage: React.FC = () => {
   // Filter states
   const [dateRange, setDateRange] = useState<'day' | 'week' | 'month'>('day');
   const [endDate, setEndDate] = useState<Date | null>(new Date());
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<CheckInOutStatusFilter>(DEFAULT_CHECK_IN_OUT_STATUS_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
 
   const theme = useTheme();
@@ -134,46 +136,12 @@ const CheckInCheckOutPage: React.FC = () => {
       return;
     }
 
-    // Query inoutview table - *KEEPING direct axios for the separate MySQL service*
-    // If /api/mysql *also* needs Firebase auth, this should use apiClient too.
-    let query = `
-      SELECT 
-        v.OrderId, v.CheckInTime, v.CheckOutTime, v.Servicename, v.TherapicName, v.HelperName, 
-        v.CustomerName, v.CustomerPhoneNumber, v.PaymentMethod, v.PaymentStatus,
-        COALESCE(
-          (
-            SELECT oi.price
-            FROM orders item_order
-            JOIN order_items oi ON oi.order_id = item_order.id
-            JOIN servcies item_service ON item_service.id = oi.service_id
-            WHERE item_order.order_id = v.OrderId
-              AND item_service.clinic_id = v.ClinicId
-              AND TRIM(item_service.name) = TRIM(v.Servicename)
-            ORDER BY oi.updated_at DESC
-            LIMIT 1
-          ),
-          (
-            SELECT service.price
-            FROM servcies service
-            WHERE service.clinic_id = v.ClinicId
-              AND TRIM(service.name) = TRIM(v.Servicename)
-            LIMIT 1
-          ),
-          v.Total
-        ) AS Total,
-        COALESCE(v.Discount, 0) AS Discount,
-        v.SellerName
-      FROM inoutview v
-      WHERE v.CheckInTime >= '${formatDateForSQL(calculatedStartDate)}' 
-        AND v.CheckInTime <= '${formatDateForSQL(calculatedEndDate)}'
-        AND LOWER(v.ClinicCode) = LOWER('${currentClinic.code}')
-    `;
-
-    if (paymentStatusFilter !== 'all') {
-      query += ` AND v.PaymentStatus = '${paymentStatusFilter.toUpperCase()}'`;
-    }
-
-    query += ` ORDER BY v.CheckInTime DESC;`; // Example ordering
+    const query = buildCheckInOutRecordsQuery({
+      startDate: formatDateForSQL(calculatedStartDate),
+      endDate: formatDateForSQL(calculatedEndDate),
+      clinicCode: currentClinic.code,
+      statusFilter,
+    });
 
     try {
       const searchQuery = new URLSearchParams({
@@ -197,7 +165,7 @@ const CheckInCheckOutPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [dateRange, endDate, paymentStatusFilter, currentClinic]); // Added currentClinic to dependencies
+  }, [dateRange, endDate, statusFilter, currentClinic]); // Added currentClinic to dependencies
 
   useEffect(() => {
     if (currentClinic) {
@@ -318,6 +286,7 @@ const CheckInCheckOutPage: React.FC = () => {
     switch (status?.toUpperCase()) {
       case 'PAID': return "success";
       case 'PENDING': return "warning";
+      case MERCHANT_CANCEL_STATUS.toUpperCase():
       case 'CANCELLED':
       case 'REFUNDED': return "error";
       default: return "default";
@@ -379,7 +348,7 @@ const CheckInCheckOutPage: React.FC = () => {
               </ButtonGroup>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>End Date</Typography>
+              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Report Date</Typography>
               <DatePicker
                 value={endDate}
                 onChange={(newValue) => setEndDate(newValue)}
@@ -387,19 +356,20 @@ const CheckInCheckOutPage: React.FC = () => {
               />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Payment Status</Typography>
+              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Status</Typography>
               <Select
-                value={paymentStatusFilter}
-                onChange={(e: SelectChangeEvent<string>) => setPaymentStatusFilter(e.target.value)}
+                value={statusFilter}
+                onChange={(e: SelectChangeEvent<CheckInOutStatusFilter>) => setStatusFilter(e.target.value as CheckInOutStatusFilter)}
                 size="small"
                 fullWidth
               >
+                <MenuItem value={DEFAULT_CHECK_IN_OUT_STATUS_FILTER}>All Except Merchant Cancel</MenuItem>
                 <MenuItem value="all">All Statuses</MenuItem>
-                <MenuItem value="paid">Paid</MenuItem>
-                <MenuItem value="pending">Pending</MenuItem>
-                <MenuItem value="cancelled">Cancelled</MenuItem>
-                <MenuItem value="refunded">Refunded</MenuItem>
-                {/* Add other statuses if needed */}
+                <MenuItem value="PAID">Paid</MenuItem>
+                <MenuItem value="PENDING">Pending</MenuItem>
+                <MenuItem value={MERCHANT_CANCEL_STATUS}>{MERCHANT_CANCEL_STATUS}</MenuItem>
+                <MenuItem value="CANCELLED">Cancelled</MenuItem>
+                <MenuItem value="REFUNDED">Refunded</MenuItem>
               </Select>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
