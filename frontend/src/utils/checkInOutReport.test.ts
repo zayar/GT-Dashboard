@@ -4,6 +4,7 @@ import {
   buildCheckInOutRecordsQuery,
   buildCheckInOutStatusClause,
   DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  formatReportDateTime,
   getCheckInOutDateRangeBounds,
   MERCHANT_CANCEL_STATUS,
   ORDER_CANCEL_STATUS,
@@ -125,5 +126,19 @@ describe('getCheckInOutDateRangeBounds', () => {
     });
 
     expect(bounds).toBeNull();
+  });
+});
+
+describe('formatReportDateTime', () => {
+  it('displays serialized report timestamps without shifting them as UTC', () => {
+    expect(formatReportDateTime('2026-06-14T18:03:34.807Z')).toBe('2026-06-14 06:03 PM');
+  });
+
+  it('keeps late-night report timestamps on the stored report date', () => {
+    expect(formatReportDateTime('2026-06-15T19:50:00.000Z')).toBe('2026-06-15 07:50 PM');
+  });
+
+  it('supports raw SQL datetime strings', () => {
+    expect(formatReportDateTime('2026-06-14 17:54:00')).toBe('2026-06-14 05:54 PM');
   });
 });

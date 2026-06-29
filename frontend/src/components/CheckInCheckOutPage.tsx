@@ -26,7 +26,7 @@ import {
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -39,6 +39,7 @@ import {
   CheckInOutDateRange,
   CheckInOutStatusFilter,
   DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  formatReportDateTime,
   getCheckInOutDateRangeBounds,
   MERCHANT_CANCEL_STATUS,
   ORDER_CANCEL_STATUS,
@@ -198,19 +199,6 @@ const CheckInCheckOutPage: React.FC = () => {
     });
   }, [filteredRecords]);
 
-  // Function to format date for display
-  const formatDisplayDateTime = (dateTimeString: string | null) => {
-    if (!dateTimeString) return '-';
-    try {
-      // Handle potential Z at the end if it's UTC
-      const date = parseISO(dateTimeString.endsWith('Z') ? dateTimeString : dateTimeString.replace(' ', 'T') + 'Z');
-      return format(date, 'yyyy-MM-dd hh:mm a');
-    } catch (e) {
-      console.error("Error parsing date:", dateTimeString, e);
-      return 'Invalid Date';
-    }
-  };
-
   // Function to format currency
   const formatCurrency = (amount: number | null) => {
     if (amount === null || isNaN(amount)) return formatCurrencyUtil(0, currentClinic);
@@ -235,8 +223,8 @@ const CheckInCheckOutPage: React.FC = () => {
     const headers = ['Order ID', 'Check-In Time', 'Check-Out Time', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Discount', 'Total'];
     const rows = recordsForDisplay.map(record => [
       record.OrderId ?? '-',
-      formatDisplayDateTime(record.CheckInTime),
-      formatDisplayDateTime(record.CheckOutTime),
+      formatReportDateTime(record.CheckInTime),
+      formatReportDateTime(record.CheckOutTime),
       record.Servicename ?? '-',
       record.TherapicName ?? '-',
       record.HelperName ?? '-',
@@ -447,8 +435,8 @@ const CheckInCheckOutPage: React.FC = () => {
                     sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                   >
                     <TableCell>{record.OrderId ?? '-'}</TableCell>
-                    <TableCell>{formatDisplayDateTime(record.CheckInTime)}</TableCell>
-                    <TableCell>{formatDisplayDateTime(record.CheckOutTime)}</TableCell>
+                    <TableCell>{formatReportDateTime(record.CheckInTime)}</TableCell>
+                    <TableCell>{formatReportDateTime(record.CheckOutTime)}</TableCell>
                     <TableCell>{record.Servicename}</TableCell>
                     <TableCell>{record.TherapicName}</TableCell>
                     <TableCell>{record.HelperName ?? '-'}</TableCell>

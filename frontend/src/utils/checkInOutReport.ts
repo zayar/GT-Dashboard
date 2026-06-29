@@ -1,4 +1,4 @@
-import { endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
+import { endOfDay, endOfMonth, endOfWeek, format, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
 
 export const MERCHANT_CANCEL_STATUS = 'Merchant Cancel';
 export const ORDER_CANCEL_STATUS = 'Cancel Order';
@@ -37,6 +37,38 @@ export interface CheckInOutDateRangeBounds {
 const escapeSqlLiteral = (value: string): string => value.replace(/'/g, "''");
 
 const normalizeStatusSql = (column: string): string => `LOWER(TRIM(${column}))`;
+
+export const parseReportDateTime = (dateTimeString: string | null): Date | null => {
+  if (!dateTimeString) {
+    return null;
+  }
+
+  const match = dateTimeString
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
+  const parsedDate = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+export const formatReportDateTime = (dateTimeString: string | null): string => {
+  const parsedDate = parseReportDateTime(dateTimeString);
+
+  return parsedDate ? format(parsedDate, 'yyyy-MM-dd hh:mm a') : '-';
+};
 
 export const getCheckInOutDateRangeBounds = ({
   dateRange,
