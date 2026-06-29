@@ -1,6 +1,10 @@
+import { endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
+
 export const MERCHANT_CANCEL_STATUS = 'Merchant Cancel';
 export const ORDER_CANCEL_STATUS = 'Cancel Order';
 export const DEFAULT_CHECK_IN_OUT_STATUS_FILTER = 'active_records';
+
+export type CheckInOutDateRange = 'day' | 'week' | 'month' | 'custom';
 
 export type CheckInOutStatusFilter =
   | typeof DEFAULT_CHECK_IN_OUT_STATUS_FILTER
@@ -18,9 +22,67 @@ interface BuildCheckInOutRecordsQueryOptions {
   statusFilter: CheckInOutStatusFilter;
 }
 
+interface CheckInOutDateRangeBoundsOptions {
+  dateRange: CheckInOutDateRange;
+  reportDate: Date | null;
+  customStartDate: Date | null;
+  customEndDate: Date | null;
+}
+
+export interface CheckInOutDateRangeBounds {
+  startDate: Date;
+  endDate: Date;
+}
+
 const escapeSqlLiteral = (value: string): string => value.replace(/'/g, "''");
 
 const normalizeStatusSql = (column: string): string => `LOWER(TRIM(${column}))`;
+
+export const getCheckInOutDateRangeBounds = ({
+  dateRange,
+  reportDate,
+  customStartDate,
+  customEndDate,
+}: CheckInOutDateRangeBoundsOptions): CheckInOutDateRangeBounds | null => {
+  if (dateRange === 'custom') {
+    if (!customStartDate || !customEndDate) {
+      return null;
+    }
+
+    const startDate = startOfDay(customStartDate);
+    const endDate = endOfDay(customEndDate);
+
+    if (startDate.getTime() > endDate.getTime()) {
+      return null;
+    }
+
+    return { startDate, endDate };
+  }
+
+  if (!reportDate) {
+    return null;
+  }
+
+  switch (dateRange) {
+    case 'day':
+      return {
+        startDate: startOfDay(reportDate),
+        endDate: endOfDay(reportDate),
+      };
+    case 'week':
+      return {
+        startDate: startOfWeek(reportDate, { weekStartsOn: 1 }),
+        endDate: endOfWeek(reportDate, { weekStartsOn: 1 }),
+      };
+    case 'month':
+      return {
+        startDate: startOfMonth(reportDate),
+        endDate: endOfMonth(reportDate),
+      };
+    default:
+      return null;
+  }
+};
 
 export const buildCheckInOutOrderCancelClause = (operator: 'EXISTS' | 'NOT EXISTS' = 'NOT EXISTS'): string => `
    AND ${operator} (

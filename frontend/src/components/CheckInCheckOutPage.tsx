@@ -26,7 +26,7 @@ import {
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -36,8 +36,10 @@ import axios from 'axios'; // Import axios for making direct API calls
 import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
 import {
   buildCheckInOutRecordsQuery,
+  CheckInOutDateRange,
   CheckInOutStatusFilter,
   DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  getCheckInOutDateRangeBounds,
   MERCHANT_CANCEL_STATUS,
   ORDER_CANCEL_STATUS,
 } from '../utils/checkInOutReport';
@@ -76,8 +78,10 @@ const CheckInCheckOutPage: React.FC = () => {
   const { currentClinic } = useClinic();
 
   // Filter states
-  const [dateRange, setDateRange] = useState<'day' | 'week' | 'month'>('day');
+  const [dateRange, setDateRange] = useState<CheckInOutDateRange>('day');
   const [endDate, setEndDate] = useState<Date | null>(new Date());
+  const [customStartDate, setCustomStartDate] = useState<Date | null>(new Date());
+  const [customEndDate, setCustomEndDate] = useState<Date | null>(new Date());
   const [statusFilter, setStatusFilter] = useState<CheckInOutStatusFilter>(DEFAULT_CHECK_IN_OUT_STATUS_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -90,34 +94,7 @@ const CheckInCheckOutPage: React.FC = () => {
     return format(date, 'yyyy-MM-dd HH:mm:ss');
   };
 
-  // Calculate start date based on end date and range
-  const getStartDate = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
-    if (!end) return null;
-    switch (range) {
-      case 'day':
-        return startOfDay(end);
-      case 'week':
-        return startOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
-      case 'month':
-        return startOfMonth(end);
-      default:
-        return null;
-    }
-  };
-
-  const getEndDateRange = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
-    if (!end) return null;
-    switch (range) {
-      case 'day':
-        return endOfDay(end);
-      case 'week':
-        return endOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
-      case 'month':
-        return endOfMonth(end);
-      default:
-        return null;
-    }
-  };
+  const isCustomDateRange = dateRange === 'custom';
 
   const fetchData = useCallback(async () => {
     if (!currentClinic) {
@@ -128,18 +105,22 @@ const CheckInCheckOutPage: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    const calculatedStartDate = getStartDate(dateRange, endDate);
-    const calculatedEndDate = getEndDateRange(dateRange, endDate); // Use the end of the selected period for range queries
+    const dateBounds = getCheckInOutDateRangeBounds({
+      dateRange,
+      reportDate: endDate,
+      customStartDate,
+      customEndDate,
+    });
 
-    if (!calculatedStartDate || !calculatedEndDate) {
-      setError("Invalid date range selected.");
+    if (!dateBounds) {
+      setError(isCustomDateRange ? "Invalid custom date range selected." : "Invalid date range selected.");
       setLoading(false);
       return;
     }
 
     const query = buildCheckInOutRecordsQuery({
-      startDate: formatDateForSQL(calculatedStartDate),
-      endDate: formatDateForSQL(calculatedEndDate),
+      startDate: formatDateForSQL(dateBounds.startDate),
+      endDate: formatDateForSQL(dateBounds.endDate),
       clinicCode: currentClinic.code,
       statusFilter,
     });
@@ -166,7 +147,7 @@ const CheckInCheckOutPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [dateRange, endDate, statusFilter, currentClinic]); // Added currentClinic to dependencies
+  }, [currentClinic, customEndDate, customStartDate, dateRange, endDate, isCustomDateRange, statusFilter]); // Added currentClinic to dependencies
 
   useEffect(() => {
     if (currentClinic) {
@@ -348,17 +329,39 @@ const CheckInCheckOutPage: React.FC = () => {
                 <Button onClick={() => setDateRange('day')} variant={dateRange === 'day' ? 'contained' : 'outlined'}>Day</Button>
                 <Button onClick={() => setDateRange('week')} variant={dateRange === 'week' ? 'contained' : 'outlined'}>Week</Button>
                 <Button onClick={() => setDateRange('month')} variant={dateRange === 'month' ? 'contained' : 'outlined'}>Month</Button>
+                <Button onClick={() => setDateRange('custom')} variant={dateRange === 'custom' ? 'contained' : 'outlined'}>Custom</Button>
               </ButtonGroup>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Report Date</Typography>
-              <DatePicker
-                value={endDate}
-                onChange={(newValue) => setEndDate(newValue)}
-                slotProps={{ textField: { size: 'small', fullWidth: true } }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            {isCustomDateRange ? (
+              <>
+                <Grid item xs={12} sm={6} md={2}>
+                  <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>From Date</Typography>
+                  <DatePicker
+                    value={customStartDate}
+                    onChange={(newValue) => setCustomStartDate(newValue)}
+                    slotProps={{ textField: { size: 'small', fullWidth: true } }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6} md={2}>
+                  <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>To Date</Typography>
+                  <DatePicker
+                    value={customEndDate}
+                    onChange={(newValue) => setCustomEndDate(newValue)}
+                    slotProps={{ textField: { size: 'small', fullWidth: true } }}
+                  />
+                </Grid>
+              </>
+            ) : (
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Report Date</Typography>
+                <DatePicker
+                  value={endDate}
+                  onChange={(newValue) => setEndDate(newValue)}
+                  slotProps={{ textField: { size: 'small', fullWidth: true } }}
+                />
+              </Grid>
+            )}
+            <Grid item xs={12} sm={6} md={isCustomDateRange ? 2 : 3}>
               <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Status</Typography>
               <Select
                 value={statusFilter}

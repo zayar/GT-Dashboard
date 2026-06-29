@@ -4,6 +4,7 @@ import {
   buildCheckInOutRecordsQuery,
   buildCheckInOutStatusClause,
   DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  getCheckInOutDateRangeBounds,
   MERCHANT_CANCEL_STATUS,
   ORDER_CANCEL_STATUS,
 } from './checkInOutReport';
@@ -77,5 +78,52 @@ describe('buildCheckInOutRecordsQuery', () => {
 
   it('builds the reusable canceled-order exclusion clause', () => {
     expect(buildCheckInOutOrderCancelClause()).toContain('NOT EXISTS');
+  });
+});
+
+describe('getCheckInOutDateRangeBounds', () => {
+  it('uses the full selected day for day mode', () => {
+    const bounds = getCheckInOutDateRangeBounds({
+      dateRange: 'day',
+      reportDate: new Date(2026, 5, 15, 14, 30),
+      customStartDate: null,
+      customEndDate: null,
+    });
+
+    expect(bounds?.startDate.getFullYear()).toBe(2026);
+    expect(bounds?.startDate.getMonth()).toBe(5);
+    expect(bounds?.startDate.getDate()).toBe(15);
+    expect(bounds?.startDate.getHours()).toBe(0);
+    expect(bounds?.startDate.getMinutes()).toBe(0);
+    expect(bounds?.endDate.getDate()).toBe(15);
+    expect(bounds?.endDate.getHours()).toBe(23);
+    expect(bounds?.endDate.getMinutes()).toBe(59);
+  });
+
+  it('uses from start-of-day through to end-of-day for custom mode', () => {
+    const bounds = getCheckInOutDateRangeBounds({
+      dateRange: 'custom',
+      reportDate: null,
+      customStartDate: new Date(2026, 5, 10, 14, 30),
+      customEndDate: new Date(2026, 5, 15, 8, 5),
+    });
+
+    expect(bounds?.startDate.getDate()).toBe(10);
+    expect(bounds?.startDate.getHours()).toBe(0);
+    expect(bounds?.startDate.getMinutes()).toBe(0);
+    expect(bounds?.endDate.getDate()).toBe(15);
+    expect(bounds?.endDate.getHours()).toBe(23);
+    expect(bounds?.endDate.getMinutes()).toBe(59);
+  });
+
+  it('rejects custom ranges where from date is after to date', () => {
+    const bounds = getCheckInOutDateRangeBounds({
+      dateRange: 'custom',
+      reportDate: null,
+      customStartDate: new Date(2026, 5, 16),
+      customEndDate: new Date(2026, 5, 15),
+    });
+
+    expect(bounds).toBeNull();
   });
 });
