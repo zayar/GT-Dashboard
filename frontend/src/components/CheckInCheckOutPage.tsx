@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Paper,
   Typography,
@@ -85,6 +85,7 @@ const CheckInCheckOutPage: React.FC = () => {
   const [customEndDate, setCustomEndDate] = useState<Date | null>(new Date());
   const [statusFilter, setStatusFilter] = useState<CheckInOutStatusFilter>(DEFAULT_CHECK_IN_OUT_STATUS_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
+  const latestRequestIdRef = useRef(0);
 
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -102,6 +103,10 @@ const CheckInCheckOutPage: React.FC = () => {
       setError("No clinic selected");
       return;
     }
+
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
+    const isLatestRequest = () => latestRequestIdRef.current === requestId;
 
     setLoading(true);
     setError(null);
@@ -135,6 +140,10 @@ const CheckInCheckOutPage: React.FC = () => {
         query: query
       });
 
+      if (!isLatestRequest()) {
+        return;
+      }
+
       if (response.data.success) {
         setRecords(response.data.data || []);
       } else {
@@ -142,11 +151,17 @@ const CheckInCheckOutPage: React.FC = () => {
         setRecords([]); // Clear records on error
       }
     } catch (err: any) {
+      if (!isLatestRequest()) {
+        return;
+      }
+
       console.error('Fetch error:', err);
       setError(err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to fetch data');
       setRecords([]); // Clear records on error
     } finally {
-      setLoading(false);
+      if (isLatestRequest()) {
+        setLoading(false);
+      }
     }
   }, [currentClinic, customEndDate, customStartDate, dateRange, endDate, isCustomDateRange, statusFilter]); // Added currentClinic to dependencies
 
