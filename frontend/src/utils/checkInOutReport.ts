@@ -1,13 +1,14 @@
 export const MERCHANT_CANCEL_STATUS = 'Merchant Cancel';
-export const DEFAULT_CHECK_IN_OUT_STATUS_FILTER = 'exclude_merchant_cancel';
+export const ORDER_CANCEL_STATUS = 'Cancel Order';
+export const DEFAULT_CHECK_IN_OUT_STATUS_FILTER = 'active_records';
 
 export type CheckInOutStatusFilter =
   | typeof DEFAULT_CHECK_IN_OUT_STATUS_FILTER
   | 'all'
   | 'PAID'
-  | 'PENDING'
-  | 'CANCELLED'
-  | 'REFUNDED'
+  | 'UNPAID'
+  | 'PARTIAL_PAID'
+  | typeof ORDER_CANCEL_STATUS
   | typeof MERCHANT_CANCEL_STATUS;
 
 interface BuildCheckInOutRecordsQueryOptions {
@@ -21,16 +22,33 @@ const escapeSqlLiteral = (value: string): string => value.replace(/'/g, "''");
 
 const normalizeStatusSql = (column: string): string => `LOWER(TRIM(${column}))`;
 
+export const buildCheckInOutOrderCancelClause = (operator: 'EXISTS' | 'NOT EXISTS' = 'NOT EXISTS'): string => `
+   AND ${operator} (
+     SELECT 1
+     FROM orders order_status
+     WHERE order_status.order_id = v.OrderId
+       AND order_status.clinic_id = v.ClinicId
+       AND ${normalizeStatusSql('order_status.status')} = 'cancel'
+   )`;
+
 export const buildCheckInOutStatusClause = (statusFilter: CheckInOutStatusFilter): string => {
   if (statusFilter === 'all') {
     return '';
   }
 
   if (statusFilter === DEFAULT_CHECK_IN_OUT_STATUS_FILTER) {
-    return ` AND (v.PaymentStatus IS NULL OR ${normalizeStatusSql('v.PaymentStatus')} != LOWER('${MERCHANT_CANCEL_STATUS}'))`;
+    return ` AND (v.PaymentStatus IS NULL OR ${normalizeStatusSql('v.PaymentStatus')} != LOWER('${MERCHANT_CANCEL_STATUS}'))${buildCheckInOutOrderCancelClause()}`;
   }
 
-  return ` AND ${normalizeStatusSql('v.PaymentStatus')} = LOWER('${escapeSqlLiteral(statusFilter)}')`;
+  if (statusFilter === ORDER_CANCEL_STATUS) {
+    return buildCheckInOutOrderCancelClause('EXISTS');
+  }
+
+  if (statusFilter === MERCHANT_CANCEL_STATUS) {
+    return ` AND ${normalizeStatusSql('v.PaymentStatus')} = LOWER('${MERCHANT_CANCEL_STATUS}')`;
+  }
+
+  return ` AND ${normalizeStatusSql('v.PaymentStatus')} = LOWER('${escapeSqlLiteral(statusFilter)}')${buildCheckInOutOrderCancelClause()}`;
 };
 
 export const buildCheckInOutRecordsQuery = ({

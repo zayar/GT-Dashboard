@@ -39,6 +39,7 @@ import {
   CheckInOutStatusFilter,
   DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
   MERCHANT_CANCEL_STATUS,
+  ORDER_CANCEL_STATUS,
 } from '../utils/checkInOutReport';
 
 // Define the interface for the record based on schema
@@ -285,6 +286,8 @@ const CheckInCheckOutPage: React.FC = () => {
   const getStatusChipColor = (status: string | null): "success" | "warning" | "error" | "default" | "info" => {
     switch (status?.toUpperCase()) {
       case 'PAID': return "success";
+      case 'UNPAID':
+      case 'PARTIAL_PAID':
       case 'PENDING': return "warning";
       case MERCHANT_CANCEL_STATUS.toUpperCase():
       case 'CANCELLED':
@@ -363,13 +366,13 @@ const CheckInCheckOutPage: React.FC = () => {
                 size="small"
                 fullWidth
               >
-                <MenuItem value={DEFAULT_CHECK_IN_OUT_STATUS_FILTER}>All Except Merchant Cancel</MenuItem>
+                <MenuItem value={DEFAULT_CHECK_IN_OUT_STATUS_FILTER}>All Active Statuses</MenuItem>
                 <MenuItem value="all">All Statuses</MenuItem>
                 <MenuItem value="PAID">Paid</MenuItem>
-                <MenuItem value="PENDING">Pending</MenuItem>
+                <MenuItem value="UNPAID">Unpaid</MenuItem>
+                <MenuItem value="PARTIAL_PAID">Partial Paid</MenuItem>
                 <MenuItem value={MERCHANT_CANCEL_STATUS}>{MERCHANT_CANCEL_STATUS}</MenuItem>
-                <MenuItem value="CANCELLED">Cancelled</MenuItem>
-                <MenuItem value="REFUNDED">Refunded</MenuItem>
+                <MenuItem value={ORDER_CANCEL_STATUS}>{ORDER_CANCEL_STATUS}</MenuItem>
               </Select>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
