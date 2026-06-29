@@ -6,6 +6,8 @@ export const DEFAULT_CHECK_IN_OUT_STATUS_FILTER = 'active_records';
 
 export type CheckInOutDateRange = 'day' | 'week' | 'month' | 'custom';
 
+export type CheckInOutDateFilterField = 'checkIn' | 'checkOut';
+
 export type CheckInOutStatusFilter =
   | typeof DEFAULT_CHECK_IN_OUT_STATUS_FILTER
   | 'all'
@@ -20,6 +22,7 @@ interface BuildCheckInOutRecordsQueryOptions {
   endDate: string;
   clinicCode: string;
   statusFilter: CheckInOutStatusFilter;
+  dateFilterField?: CheckInOutDateFilterField;
 }
 
 interface CheckInOutDateRangeBoundsOptions {
@@ -37,6 +40,9 @@ export interface CheckInOutDateRangeBounds {
 const escapeSqlLiteral = (value: string): string => value.replace(/'/g, "''");
 
 const normalizeStatusSql = (column: string): string => `LOWER(TRIM(${column}))`;
+
+const getDateFilterColumn = (dateFilterField: CheckInOutDateFilterField = 'checkIn'): string =>
+  dateFilterField === 'checkOut' ? 'v.CheckOutTime' : 'v.CheckInTime';
 
 export const parseReportDateTime = (dateTimeString: string | null): Date | null => {
   if (!dateTimeString) {
@@ -150,7 +156,11 @@ export const buildCheckInOutRecordsQuery = ({
   endDate,
   clinicCode,
   statusFilter,
-}: BuildCheckInOutRecordsQueryOptions): string => `
+  dateFilterField = 'checkIn',
+}: BuildCheckInOutRecordsQueryOptions): string => {
+  const dateFilterColumn = getDateFilterColumn(dateFilterField);
+
+  return `
       SELECT 
         v.OrderId, v.CheckInTime, v.CheckOutTime, v.Servicename, v.TherapicName, v.HelperName, 
         v.CustomerName, v.CustomerPhoneNumber, v.PaymentMethod, v.PaymentStatus,
@@ -178,7 +188,8 @@ export const buildCheckInOutRecordsQuery = ({
         COALESCE(v.Discount, 0) AS Discount,
         v.SellerName
       FROM inoutview v
-      WHERE v.CheckInTime >= '${escapeSqlLiteral(startDate)}' 
-        AND v.CheckInTime <= '${escapeSqlLiteral(endDate)}'
+      WHERE ${dateFilterColumn} >= '${escapeSqlLiteral(startDate)}' 
+        AND ${dateFilterColumn} <= '${escapeSqlLiteral(endDate)}'
         AND LOWER(v.ClinicCode) = LOWER('${escapeSqlLiteral(clinicCode)}')
-    ${buildCheckInOutStatusClause(statusFilter)} ORDER BY v.CheckInTime DESC;`;
+    ${buildCheckInOutStatusClause(statusFilter)} ORDER BY ${dateFilterColumn} DESC, v.CheckInTime DESC;`;
+};

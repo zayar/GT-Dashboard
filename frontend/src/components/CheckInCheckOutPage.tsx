@@ -129,6 +129,7 @@ const CheckInCheckOutPage: React.FC = () => {
       endDate: formatDateForSQL(dateBounds.endDate),
       clinicCode: currentClinic.code,
       statusFilter,
+      dateFilterField: isCustomDateRange ? 'checkIn' : 'checkOut',
     });
 
     try {

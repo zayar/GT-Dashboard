@@ -11,7 +11,7 @@ import {
 } from './checkInOutReport';
 
 describe('buildCheckInOutRecordsQuery', () => {
-  it('filters the report date by check-in time', () => {
+  it('filters custom date ranges by check-in time by default', () => {
     const query = buildCheckInOutRecordsQuery({
       startDate: '2026-06-25 00:00:00',
       endDate: '2026-06-25 23:59:59',
@@ -23,6 +23,22 @@ describe('buildCheckInOutRecordsQuery', () => {
     expect(query).toContain("v.CheckInTime <= '2026-06-25 23:59:59'");
     expect(query).not.toContain('v.CheckOutTime >=');
     expect(query).not.toContain('v.CheckOutTime <=');
+  });
+
+  it('can filter report date ranges by check-out time', () => {
+    const query = buildCheckInOutRecordsQuery({
+      startDate: '2026-06-14 00:00:00',
+      endDate: '2026-06-14 23:59:59',
+      clinicCode: 'GTFANCYHOUSEGA',
+      statusFilter: DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+      dateFilterField: 'checkOut',
+    });
+
+    expect(query).toContain("v.CheckOutTime >= '2026-06-14 00:00:00'");
+    expect(query).toContain("v.CheckOutTime <= '2026-06-14 23:59:59'");
+    expect(query).not.toContain('v.CheckInTime >=');
+    expect(query).not.toContain('v.CheckInTime <=');
+    expect(query).toContain('ORDER BY v.CheckOutTime DESC, v.CheckInTime DESC');
   });
 
   it('excludes merchant-cancelled records by default', () => {
