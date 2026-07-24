@@ -1,102 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCheckInOutOrderCancelClause,
-  buildCheckInOutRecordsQuery,
-  buildCheckInOutStatusClause,
-  DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  formatAppointmentDateTime,
+  formatGraphqlDateTimeInMyanmar,
   formatReportDateTime,
   getCheckInOutDateRangeBounds,
-  MERCHANT_CANCEL_STATUS,
-  ORDER_CANCEL_STATUS,
 } from './checkInOutReport';
-
-describe('buildCheckInOutRecordsQuery', () => {
-  it('filters custom date ranges by check-in time by default', () => {
-    const query = buildCheckInOutRecordsQuery({
-      startDate: '2026-06-25 00:00:00',
-      endDate: '2026-06-25 23:59:59',
-      clinicCode: 'GTDRKO',
-      statusFilter: DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
-    });
-
-    expect(query).toContain("v.CheckInTime >= '2026-06-25 00:00:00'");
-    expect(query).toContain("v.CheckInTime <= '2026-06-25 23:59:59'");
-    expect(query).not.toContain('v.CheckOutTime >=');
-    expect(query).not.toContain('v.CheckOutTime <=');
-  });
-
-  it('can filter report date ranges by check-out time', () => {
-    const query = buildCheckInOutRecordsQuery({
-      startDate: '2026-06-14 00:00:00',
-      endDate: '2026-06-14 23:59:59',
-      clinicCode: 'GTFANCYHOUSEGA',
-      statusFilter: DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
-      dateFilterField: 'checkOut',
-    });
-
-    expect(query).toContain("v.CheckOutTime >= '2026-06-14 00:00:00'");
-    expect(query).toContain("v.CheckOutTime <= '2026-06-14 23:59:59'");
-    expect(query).not.toContain('v.CheckInTime >=');
-    expect(query).not.toContain('v.CheckInTime <=');
-    expect(query).toContain('ORDER BY v.CheckOutTime DESC, v.CheckInTime DESC');
-  });
-
-  it('excludes merchant-cancelled records by default', () => {
-    const query = buildCheckInOutRecordsQuery({
-      startDate: '2026-06-25 00:00:00',
-      endDate: '2026-06-25 23:59:59',
-      clinicCode: 'GTDRKO',
-      statusFilter: DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
-    });
-
-    expect(query).toContain("v.PaymentStatus IS NULL OR LOWER(TRIM(v.PaymentStatus)) != LOWER('Merchant Cancel')");
-  });
-
-  it('excludes canceled orders by default', () => {
-    const query = buildCheckInOutRecordsQuery({
-      startDate: '2026-06-14 00:00:00',
-      endDate: '2026-06-14 23:59:59',
-      clinicCode: 'GTCHI',
-      statusFilter: DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
-    });
-
-    expect(query).toContain('NOT EXISTS');
-    expect(query).toContain('FROM orders order_status');
-    expect(query).toContain('order_status.order_id = v.OrderId');
-    expect(query).toContain('order_status.clinic_id = v.ClinicId');
-    expect(query).toContain("LOWER(TRIM(order_status.status)) = 'cancel'");
-  });
-
-  it('removes payment and order status filters when all statuses are selected', () => {
-    expect(buildCheckInOutStatusClause('all')).toBe('');
-  });
-
-  it('can explicitly filter to merchant-cancelled records', () => {
-    expect(buildCheckInOutStatusClause(MERCHANT_CANCEL_STATUS)).toBe(
-      " AND LOWER(TRIM(v.PaymentStatus)) = LOWER('Merchant Cancel')"
-    );
-  });
-
-  it('keeps canceled orders out of normal payment-status filters', () => {
-    const clause = buildCheckInOutStatusClause('PAID');
-
-    expect(clause).toContain("LOWER(TRIM(v.PaymentStatus)) = LOWER('PAID')");
-    expect(clause).toContain('NOT EXISTS');
-    expect(clause).toContain('FROM orders order_status');
-  });
-
-  it('can explicitly filter to canceled orders', () => {
-    const clause = buildCheckInOutStatusClause(ORDER_CANCEL_STATUS);
-
-    expect(clause).toContain('EXISTS');
-    expect(clause).not.toContain('NOT EXISTS');
-    expect(clause).toContain("LOWER(TRIM(order_status.status)) = 'cancel'");
-  });
-
-  it('builds the reusable canceled-order exclusion clause', () => {
-    expect(buildCheckInOutOrderCancelClause()).toContain('NOT EXISTS');
-  });
-});
 
 describe('getCheckInOutDateRangeBounds', () => {
   it('uses the full selected day for day mode', () => {
@@ -145,16 +53,20 @@ describe('getCheckInOutDateRangeBounds', () => {
   });
 });
 
-describe('formatReportDateTime', () => {
-  it('displays serialized report timestamps without shifting them as UTC', () => {
+describe('report date formatting', () => {
+  it('keeps appointment-view wall-clock timestamps on their stored date', () => {
     expect(formatReportDateTime('2026-06-14T18:03:34.807Z')).toBe('2026-06-14 06:03 PM');
+    expect(formatAppointmentDateTime('2026-07-22T16:30:00.000Z')).toBe('Jul 22, 4:30 PM');
   });
 
-  it('keeps late-night report timestamps on the stored report date', () => {
-    expect(formatReportDateTime('2026-06-15T19:50:00.000Z')).toBe('2026-06-15 07:50 PM');
+  it('converts live APICORE timestamps to Myanmar time', () => {
+    expect(formatGraphqlDateTimeInMyanmar('2026-06-14T18:03:34.807Z')).toBe(
+      '2026-06-15 12:33 AM',
+    );
   });
 
-  it('supports raw SQL datetime strings', () => {
-    expect(formatReportDateTime('2026-06-14 17:54:00')).toBe('2026-06-14 05:54 PM');
+  it('returns a placeholder for missing or invalid APICORE timestamps', () => {
+    expect(formatGraphqlDateTimeInMyanmar(null)).toBe('-');
+    expect(formatGraphqlDateTimeInMyanmar('not-a-date')).toBe('-');
   });
 });

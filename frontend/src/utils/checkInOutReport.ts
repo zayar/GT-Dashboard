@@ -3,10 +3,9 @@ import { endOfDay, endOfMonth, endOfWeek, format, startOfDay, startOfMonth, star
 export const MERCHANT_CANCEL_STATUS = 'Merchant Cancel';
 export const ORDER_CANCEL_STATUS = 'Cancel Order';
 export const DEFAULT_CHECK_IN_OUT_STATUS_FILTER = 'active_records';
+export const MYANMAR_TIME_LABEL = 'Myanmar Time (UTC+06:30)';
 
 export type CheckInOutDateRange = 'day' | 'week' | 'month' | 'custom';
-
-export type CheckInOutDateFilterField = 'checkIn' | 'checkOut';
 
 export type CheckInOutStatusFilter =
   | typeof DEFAULT_CHECK_IN_OUT_STATUS_FILTER
@@ -16,14 +15,6 @@ export type CheckInOutStatusFilter =
   | 'PARTIAL_PAID'
   | typeof ORDER_CANCEL_STATUS
   | typeof MERCHANT_CANCEL_STATUS;
-
-interface BuildCheckInOutRecordsQueryOptions {
-  startDate: string;
-  endDate: string;
-  clinicCode: string;
-  statusFilter: CheckInOutStatusFilter;
-  dateFilterField?: CheckInOutDateFilterField;
-}
 
 interface CheckInOutDateRangeBoundsOptions {
   dateRange: CheckInOutDateRange;
@@ -36,13 +27,6 @@ export interface CheckInOutDateRangeBounds {
   startDate: Date;
   endDate: Date;
 }
-
-const escapeSqlLiteral = (value: string): string => value.replace(/'/g, "''");
-
-const normalizeStatusSql = (column: string): string => `LOWER(TRIM(${column}))`;
-
-const getDateFilterColumn = (dateFilterField: CheckInOutDateFilterField = 'checkIn'): string =>
-  dateFilterField === 'checkOut' ? 'v.CheckOutTime' : 'v.CheckInTime';
 
 export const parseReportDateTime = (dateTimeString: string | null): Date | null => {
   if (!dateTimeString) {
@@ -70,10 +54,46 @@ export const parseReportDateTime = (dateTimeString: string | null): Date | null 
   return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
 };
 
+// APICORE getBookingDetails converts UTC to Myanmar time before returning its
+// DATETIME values. GraphQL may append "Z" while serializing them, so these
+// appointment values must remain wall-clock times rather than be converted again.
 export const formatReportDateTime = (dateTimeString: string | null): string => {
   const parsedDate = parseReportDateTime(dateTimeString);
 
   return parsedDate ? format(parsedDate, 'yyyy-MM-dd hh:mm a') : '-';
+};
+
+export const formatAppointmentDateTime = (dateTimeString: string | null): string => {
+  const parsedDate = parseReportDateTime(dateTimeString);
+
+  return parsedDate ? format(parsedDate, 'MMM d, h:mm a') : '-';
+};
+
+export const formatGraphqlDateTimeInMyanmar = (dateTimeString: string | null): string => {
+  if (!dateTimeString) {
+    return '-';
+  }
+
+  const parsedDate = new Date(dateTimeString);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return '-';
+  }
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Yangon',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(parsedDate);
+  const valueByPart = new Map(parts.map((part) => [part.type, part.value]));
+
+  return [
+    `${valueByPart.get('year')}-${valueByPart.get('month')}-${valueByPart.get('day')}`,
+    `${valueByPart.get('hour')}:${valueByPart.get('minute')} ${valueByPart.get('dayPeriod')}`,
+  ].join(' ');
 };
 
 export const getCheckInOutDateRangeBounds = ({
@@ -120,76 +140,4 @@ export const getCheckInOutDateRangeBounds = ({
     default:
       return null;
   }
-};
-
-export const buildCheckInOutOrderCancelClause = (operator: 'EXISTS' | 'NOT EXISTS' = 'NOT EXISTS'): string => `
-   AND ${operator} (
-     SELECT 1
-     FROM orders order_status
-     WHERE order_status.order_id = v.OrderId
-       AND order_status.clinic_id = v.ClinicId
-       AND ${normalizeStatusSql('order_status.status')} = 'cancel'
-   )`;
-
-export const buildCheckInOutStatusClause = (statusFilter: CheckInOutStatusFilter): string => {
-  if (statusFilter === 'all') {
-    return '';
-  }
-
-  if (statusFilter === DEFAULT_CHECK_IN_OUT_STATUS_FILTER) {
-    return ` AND (v.PaymentStatus IS NULL OR ${normalizeStatusSql('v.PaymentStatus')} != LOWER('${MERCHANT_CANCEL_STATUS}'))${buildCheckInOutOrderCancelClause()}`;
-  }
-
-  if (statusFilter === ORDER_CANCEL_STATUS) {
-    return buildCheckInOutOrderCancelClause('EXISTS');
-  }
-
-  if (statusFilter === MERCHANT_CANCEL_STATUS) {
-    return ` AND ${normalizeStatusSql('v.PaymentStatus')} = LOWER('${MERCHANT_CANCEL_STATUS}')`;
-  }
-
-  return ` AND ${normalizeStatusSql('v.PaymentStatus')} = LOWER('${escapeSqlLiteral(statusFilter)}')${buildCheckInOutOrderCancelClause()}`;
-};
-
-export const buildCheckInOutRecordsQuery = ({
-  startDate,
-  endDate,
-  clinicCode,
-  statusFilter,
-  dateFilterField = 'checkIn',
-}: BuildCheckInOutRecordsQueryOptions): string => {
-  const dateFilterColumn = getDateFilterColumn(dateFilterField);
-
-  return `
-      SELECT 
-        v.OrderId, v.CheckInTime, v.CheckOutTime, v.Servicename, v.TherapicName, v.HelperName, 
-        v.CustomerName, v.CustomerPhoneNumber, v.PaymentMethod, v.PaymentStatus,
-        COALESCE(
-          (
-            SELECT oi.price
-            FROM orders item_order
-            JOIN order_items oi ON oi.order_id = item_order.id
-            JOIN servcies item_service ON item_service.id = oi.service_id
-            WHERE item_order.order_id = v.OrderId
-              AND item_service.clinic_id = v.ClinicId
-              AND TRIM(item_service.name) = TRIM(v.Servicename)
-            ORDER BY oi.updated_at DESC
-            LIMIT 1
-          ),
-          (
-            SELECT service.price
-            FROM servcies service
-            WHERE service.clinic_id = v.ClinicId
-              AND TRIM(service.name) = TRIM(v.Servicename)
-            LIMIT 1
-          ),
-          v.Total
-        ) AS Total,
-        COALESCE(v.Discount, 0) AS Discount,
-        v.SellerName
-      FROM inoutview v
-      WHERE ${dateFilterColumn} >= '${escapeSqlLiteral(startDate)}' 
-        AND ${dateFilterColumn} <= '${escapeSqlLiteral(endDate)}'
-        AND LOWER(v.ClinicCode) = LOWER('${escapeSqlLiteral(clinicCode)}')
-    ${buildCheckInOutStatusClause(statusFilter)} ORDER BY ${dateFilterColumn} DESC, v.CheckInTime DESC;`;
 };
