@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Paper,
   Table,
@@ -18,7 +18,7 @@ import {
   alpha,
   Button,
   Chip,
-  Link,
+  Stack,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -31,42 +31,27 @@ import axios from 'axios';
 import { format } from 'date-fns';
 import { useClinic } from '../contexts/ClinicContext';
 import { useNavigate } from 'react-router-dom';
+import { buildWalletAccountsQuery, summarizeWalletAccounts } from '../utils/walletAccountReport';
+import {
+  formatMmk,
+  formatMyanmarWalletDateTime,
+  MYANMAR_TIME_ZONE_LABEL,
+} from '../utils/walletTransactionReport';
 
 interface WalletAccount {
-  name: string; // MainAccountName
-  phoneNumber: string; // Most frequent phone number for the account
-  balance: string; // accountbalance
-  transactionCount: number; // Count of transactions
+  name: string;
+  phoneNumber: string;
+  balance: string | number | null;
+  transactionCount: number;
+  lastActivity: string;
+  needsReview: boolean;
 }
-
-// Mock data for when backend is unavailable
-const MOCK_WALLET_ACCOUNTS: WalletAccount[] = [
-  {
-    name: 'John Smith',
-    phoneNumber: '+95912345678',
-    balance: '120000.00',
-    transactionCount: 15
-  },
-  {
-    name: 'Jane Doe',
-    phoneNumber: '+95987654321',
-    balance: '85000.00',
-    transactionCount: 8
-  },
-  {
-    name: 'Michael Johnson',
-    phoneNumber: '+95978901234',
-    balance: '230000.00',
-    transactionCount: 23
-  }
-];
 
 const Wallet: React.FC = () => {
   const [walletAccounts, setWalletAccounts] = useState<WalletAccount[]>([]);
   const [filteredAccounts, setFilteredAccounts] = useState<WalletAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isMockData, setIsMockData] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [retryCount, setRetryCount] = useState(0);
   
@@ -92,79 +77,17 @@ const Wallet: React.FC = () => {
     setLoading(true);
     setError(null);
     
-    if (!currentClinic) {
-      setError('No clinic selected. Please select a clinic first.');
+    if (!currentClinic?.pass_id) {
+      setError('The selected clinic is not connected to a wallet account.');
+      setWalletAccounts([]);
       setLoading(false);
       return;
     }
 
-    // Enhanced debug logging for clinic data
-    console.log('=== WALLET COMPONENT: CLINIC DATA DEBUG ===');
-    console.log('Current Clinic Full Data:', currentClinic);
-    console.log('Type of currentClinic:', typeof currentClinic);
-    console.log('Properties available:', Object.keys(currentClinic));
-    console.log('pass_id value:', currentClinic.pass_id);
-    console.log('pass_id type:', typeof currentClinic.pass_id);
-    console.log('clinic code:', currentClinic.code);
-    console.log('=== END CLINIC DEBUG ===');
-
     try {
-      // Build SQL query to fetch wallet accounts with aggregations
-      const query = `
-        WITH AccountTransactions AS (
-          SELECT 
-            MainAccountName,
-            senderPhone,
-            accountbalance,
-            transactionNumber,
-            COUNT(*) OVER (PARTITION BY MainAccountName, senderPhone) as phone_count
-          FROM 
-            \`piti-pass.passdb_prod.wallettransaction\`
-          WHERE 
-            ClinicCode = '${currentClinic.pass_id}'
-            AND MainAccountName IS NOT NULL
-            AND MainAccountName != ''
-        ),
-        -- Get the most frequently used phone for each account
-        AccountPhones AS (
-          SELECT 
-            MainAccountName,
-            senderPhone,
-            accountbalance,
-            ROW_NUMBER() OVER (PARTITION BY MainAccountName ORDER BY phone_count DESC) as phone_rank
-          FROM AccountTransactions
-          GROUP BY MainAccountName, senderPhone, accountbalance, phone_count
-        ),
-        -- Get the transaction count for each account
-        AccountStats AS (
-          SELECT 
-            MainAccountName,
-            COUNT(DISTINCT transactionNumber) as transaction_count
-          FROM AccountTransactions
-          GROUP BY MainAccountName
-        )
-        -- Combine the data
-        SELECT 
-          p.MainAccountName as name,
-          p.senderPhone as phoneNumber,
-          p.accountbalance as balance,
-          s.transaction_count as transactionCount
-        FROM 
-          AccountPhones p
-        JOIN 
-          AccountStats s ON p.MainAccountName = s.MainAccountName
-        WHERE 
-          p.phone_rank = 1
-        ORDER BY 
-          CAST(p.accountbalance AS NUMERIC) DESC
-        LIMIT 100
-      `;
+      const query = buildWalletAccountsQuery(currentClinic.pass_id);
       
-      console.log('=== WALLET QUERY DEBUG ===');
-      console.log('Wallet query for clinic:', currentClinic.name);
-      console.log('Using ClinicCode:', currentClinic.code);
-      console.log('Full SQL Query:', query);
-      console.log('=== END WALLET QUERY DEBUG ===');
+      console.log('Wallet accounts query for clinic:', currentClinic.name, query);
       const searchQuery = new URLSearchParams({
         projectId: "piti-pass",
         location: "us-central1",
@@ -187,12 +110,15 @@ const Wallet: React.FC = () => {
           // Format the data to ensure numeric values are handled correctly
           const formattedAccounts = response.data.data.map((account: any) => ({
             ...account,
-            balance: account.balance || '0',
-            transactionCount: parseInt(account.transactionCount, 10) || 0
+            name: account.name?.trim() || 'Unknown account',
+            phoneNumber: account.phoneNumber || '',
+            balance: account.balance ?? null,
+            transactionCount: parseInt(account.transactionCount, 10) || 0,
+            lastActivity: account.lastActivity || '',
+            needsReview: Boolean(account.needsReview),
           }));
           
           setWalletAccounts(formattedAccounts);
-          setIsMockData(false);
         } else {
           console.warn('Invalid data format from backend:', response.data);
           throw new Error('Backend returned invalid data format');
@@ -211,21 +137,17 @@ const Wallet: React.FC = () => {
       console.error('Error loading wallet accounts:', err);
       if (err.name === 'AbortError' || err.code === 'ECONNABORTED' || 
           err.code === 'ETIMEDOUT' || (err.response && err.response.status >= 500)) {
-        setError('Connection to server timed out. Using sample wallet data.');
+        setError('Connection to the wallet service timed out. No account balances are being shown.');
       } else if (err.response && err.response.status === 401) {
         setError('Authentication failed. Please log in again.');
       } else if (err.response && err.response.status === 403) {
         setError('You do not have permission to access this data.');
       } else {
-        // Include more error details to help debugging
         const errorDetails = err.response?.data?.error || err.message || 'Unknown error';
-        setError(`Error loading wallet accounts: ${errorDetails}. Using sample data instead.`);
+        setError(`Error loading wallet accounts: ${errorDetails}`);
       }
-      
-      // Use mock data with Fancy House as clinic
-      const mocksWithFancyHouse = MOCK_WALLET_ACCOUNTS;
-      setWalletAccounts(mocksWithFancyHouse);
-      setIsMockData(true);
+
+      setWalletAccounts([]);
     } finally {
       setLoading(false);
     }
@@ -241,8 +163,8 @@ const Wallet: React.FC = () => {
     
     // Handle numeric vs string comparisons
     if (key === 'balance') {
-      valueA = parseFloat(a[key] || '0');
-      valueB = parseFloat(b[key] || '0');
+      valueA = Number(a[key] ?? 0);
+      valueB = Number(b[key] ?? 0);
     } else if (key === 'transactionCount') {
       valueA = a[key] || 0;
       valueB = b[key] || 0;
@@ -276,14 +198,23 @@ const Wallet: React.FC = () => {
   // Export to CSV function
   const exportToCSV = () => {
     // CSV Headers
-    const headers = ['Name', 'Phone Number', 'Balance', 'Transaction Count'];
+    const headers = [
+      'Account Name',
+      'Phone Number',
+      'Current Balance (MMK)',
+      'Transaction Count',
+      `Last Activity (${MYANMAR_TIME_ZONE_LABEL})`,
+      'Status',
+    ];
     
     // Format data for CSV
     const data = filteredAccounts.map(account => [
       account.name,
       account.phoneNumber,
       account.balance,
-      account.transactionCount.toString()
+      account.transactionCount.toString(),
+      account.lastActivity,
+      account.needsReview ? 'Needs review' : Number(account.balance ?? 0) > 0 ? 'Funded' : 'Zero balance',
     ]);
     
     // Combine headers and data
@@ -344,6 +275,19 @@ const Wallet: React.FC = () => {
     // Navigate to wallet transaction details page with the owner name
     navigate(`/wallet-transactions/${encodeURIComponent(name)}`);
   };
+
+  const accountSummary = useMemo(
+    () => summarizeWalletAccounts(filteredAccounts),
+    [filteredAccounts],
+  );
+
+  const latestActivity = useMemo(
+    () => walletAccounts.reduce(
+      (latest, account) => account.lastActivity > latest ? account.lastActivity : latest,
+      '',
+    ),
+    [walletAccounts],
+  );
   
   if (loading) {
     return (
@@ -383,42 +327,29 @@ const Wallet: React.FC = () => {
         <AccountBalanceWalletIcon fontSize="large" />
         Wallet Accounts
         {currentClinic && (
-          <>
-            <Typography component="span" sx={{ 
-              ml: 2, 
-              fontSize: '0.9rem', 
-              bgcolor: alpha(theme.palette.primary.main, 0.15),
-              color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
-              px: 2,
-              py: 0.5,
-              borderRadius: 2,
-              display: 'inline-flex',
-              alignItems: 'center'
-            }}>
-              Clinic: {currentClinic.name}
-            </Typography>
-            {currentClinic.pass_id && (
-              <Typography component="span" sx={{ 
-                ml: 1, 
-                fontSize: '0.9rem', 
-                bgcolor: alpha(theme.palette.secondary.main, 0.15),
-                color: isDarkMode ? theme.palette.secondary.light : theme.palette.secondary.dark,
-                px: 2,
-                py: 0.5,
-                borderRadius: 2,
-                display: 'inline-flex',
-                alignItems: 'center'
-              }}>
-                Pass ID: {currentClinic.pass_id}
-              </Typography>
-            )}
-          </>
+          <Typography component="span" sx={{
+            ml: 2,
+            fontSize: '0.9rem',
+            bgcolor: alpha(theme.palette.primary.main, 0.15),
+            color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
+            px: 2,
+            py: 0.5,
+            borderRadius: 2,
+            display: 'inline-flex',
+            alignItems: 'center'
+          }}>
+            Clinic: {currentClinic.name}
+          </Typography>
         )}
       </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: -2, mb: 2 }}>
+        Current wallet balances from each account’s latest ledger entry.
+        {latestActivity && ` Latest activity: ${formatMyanmarWalletDateTime(latestActivity)} MMT.`}
+      </Typography>
       
-      {(isMockData || error) && (
+      {error && (
         <Alert 
-          severity={error ? "warning" : "info"} 
+          severity="error"
           sx={{ 
             mb: 2,
             bgcolor: isDarkMode ? (
@@ -454,7 +385,7 @@ const Wallet: React.FC = () => {
             ) : undefined
           }
         >
-          {error || "Using sample wallet data. Real wallet data is currently unavailable due to database access issues."}
+          {error}
         </Alert>
       )}
       
@@ -513,25 +444,66 @@ const Wallet: React.FC = () => {
           }}
         />
         
-        {/* Export CSV Button */}
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<FileDownloadIcon />}
-          onClick={exportToCSV}
-          disabled={filteredAccounts.length === 0}
-          sx={{
-            color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
-            borderColor: isDarkMode ? alpha(theme.palette.primary.light, 0.5) : undefined,
-            '&:hover': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : undefined,
-              borderColor: isDarkMode ? theme.palette.primary.light : undefined
-            }
-          }}
-        >
-          Export CSV
-        </Button>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+          <Button variant="outlined" size="small" startIcon={<ReplayIcon />} onClick={fetchWalletAccounts}>
+            Refresh
+          </Button>
+          <Button variant="contained" size="small" onClick={() => navigate('/transactions')}>
+            View All Transactions
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<FileDownloadIcon />}
+            onClick={exportToCSV}
+            disabled={filteredAccounts.length === 0}
+            sx={{
+              color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
+              borderColor: isDarkMode ? alpha(theme.palette.primary.light, 0.5) : undefined,
+              '&:hover': {
+                backgroundColor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : undefined,
+                borderColor: isDarkMode ? theme.palette.primary.light : undefined
+              }
+            }}
+          >
+            Export CSV
+          </Button>
+        </Stack>
       </Box>
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(5, 1fr)' },
+          gap: 1.5,
+          mb: 2,
+        }}
+      >
+        {[
+          { label: 'Total wallet balance', value: formatMmk(accountSummary.totalBalance), color: theme.palette.primary.main },
+          { label: 'Wallet accounts', value: accountSummary.totalAccounts.toLocaleString() },
+          { label: 'Funded accounts', value: accountSummary.fundedAccounts.toLocaleString(), color: theme.palette.success.main },
+          { label: 'Zero-balance accounts', value: accountSummary.zeroBalanceAccounts.toLocaleString(), color: theme.palette.text.secondary },
+          { label: 'Needs review', value: accountSummary.needsReviewAccounts.toLocaleString(), color: theme.palette.warning.main },
+        ].map(card => (
+          <Paper
+            key={card.label}
+            variant="outlined"
+            sx={{ p: 1.5, bgcolor: 'transparent', borderColor: alpha(theme.palette.divider, 0.6) }}
+          >
+            <Typography variant="caption" color="text.secondary">{card.label}</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: card.color || 'text.primary' }}>
+              {card.value}
+            </Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      {accountSummary.invalidBalanceAccounts > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {accountSummary.invalidBalanceAccounts} accounts have an invalid balance and are excluded from the total.
+        </Alert>
+      )}
       
       <Box sx={{ mb: 1 }}>
         <Typography 
@@ -601,7 +573,7 @@ const Wallet: React.FC = () => {
                       ? alpha(theme.palette.primary.dark, 0.3) 
                       : alpha(theme.palette.primary.light, 0.3)
                   },
-                  width: '30%'
+                  width: '24%'
                 }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -627,7 +599,7 @@ const Wallet: React.FC = () => {
                       ? alpha(theme.palette.primary.dark, 0.3) 
                       : alpha(theme.palette.primary.light, 0.3)
                   },
-                  width: '20%'
+                  width: '18%'
                 }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -653,18 +625,34 @@ const Wallet: React.FC = () => {
                       ? alpha(theme.palette.primary.dark, 0.3) 
                       : alpha(theme.palette.primary.light, 0.3)
                   },
-                  width: '25%',
+                  width: '20%',
                   textAlign: 'right'
                 }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  BALANCE
+                  CURRENT BALANCE (MMK)
                   {sortConfig.key === 'balance' && (
                     <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
                       {sortConfig.direction === 'ascending' 
                         ? <ArrowUpwardIcon fontSize="small" />
                         : <ArrowDownwardIcon fontSize="small" />
                       }
+                    </Box>
+                  )}
+                </Box>
+              </TableCell>
+
+              <TableCell
+                onClick={() => requestSort('lastActivity')}
+                sx={{ cursor: 'pointer', width: '18%' }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  LAST ACTIVITY (MMT)
+                  {sortConfig.key === 'lastActivity' && (
+                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
+                      {sortConfig.direction === 'ascending'
+                        ? <ArrowUpwardIcon fontSize="small" />
+                        : <ArrowDownwardIcon fontSize="small" />}
                     </Box>
                   )}
                 </Box>
@@ -680,12 +668,12 @@ const Wallet: React.FC = () => {
                       ? alpha(theme.palette.primary.dark, 0.3) 
                       : alpha(theme.palette.primary.light, 0.3)
                   },
-                  width: '25%',
+                  width: '12%',
                   textAlign: 'center'
                 }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  TRANSACTION COUNT
+                  TRANSACTIONS
                   {sortConfig.key === 'transactionCount' && (
                     <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
                       {sortConfig.direction === 'ascending' 
@@ -696,6 +684,7 @@ const Wallet: React.FC = () => {
                   )}
                 </Box>
               </TableCell>
+              <TableCell align="right" sx={{ width: '8%' }}>ACTION</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -705,59 +694,49 @@ const Wallet: React.FC = () => {
                   <TableCell sx={{ 
                     color: isDarkMode ? theme.palette.common.white : undefined,
                     fontWeight: 'medium',
-                    width: '30%'
+                    width: '24%'
                   }}>
-                    <Link
-                      component="button"
-                      variant="body1"
-                      onClick={() => handleNameClick(account.name)}
-                      sx={{
-                        textDecoration: 'none',
-                        color: isDarkMode ? theme.palette.common.white : theme.palette.primary.main,
-                        fontWeight: 'medium',
-                        '&:hover': {
-                          textDecoration: 'underline',
-                          color: isDarkMode ? alpha(theme.palette.common.white, 0.8) : theme.palette.primary.dark,
-                        }
-                      }}
-                    >
-                      {account.name}
-                    </Link>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography sx={{ fontWeight: 600 }}>{account.name}</Typography>
+                      <Chip
+                        label={account.needsReview
+                          ? 'Needs review'
+                          : Number(account.balance ?? 0) > 0 ? 'Funded' : 'Zero balance'}
+                        size="small"
+                        color={account.needsReview
+                          ? 'warning'
+                          : Number(account.balance ?? 0) > 0 ? 'success' : 'default'}
+                        variant="outlined"
+                      />
+                    </Stack>
                   </TableCell>
                   <TableCell sx={{ 
                     color: isDarkMode ? theme.palette.common.white : undefined,
-                    width: '20%'
+                    width: '18%',
+                    fontFamily: 'monospace',
                   }}>
-                    {account.phoneNumber || 'N/A'}
+                    {account.phoneNumber || 'No phone'}
                   </TableCell>
                   <TableCell sx={{ 
-                    color: isDarkMode ? theme.palette.common.white : undefined,
-                    width: '25%',
+                    color: Number(account.balance ?? 0) > 0
+                      ? theme.palette.success.main
+                      : theme.palette.text.secondary,
+                    width: '20%',
                     textAlign: 'right'
                   }}>
-                    <Chip
-                      label={parseFloat(account.balance || '0').toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}
-                      color={parseFloat(account.balance) > 0 ? 'success' : parseFloat(account.balance) < 0 ? 'error' : 'default'}
-                      variant={isDarkMode ? 'filled' : 'filled'}
-                      size="medium"
-                      sx={{
-                        fontWeight: 'bold',
-                        fontSize: '0.875rem',
-                        backgroundColor: isDarkMode ? (
-                          parseFloat(account.balance) > 0 ? alpha(theme.palette.success.main, 0.9) : 
-                          parseFloat(account.balance) < 0 ? alpha(theme.palette.error.main, 0.9) : 
-                          alpha(theme.palette.grey[600], 0.9)
-                        ) : undefined,
-                        color: isDarkMode ? theme.palette.common.white : undefined,
-                      }}
-                    />
+                    <Typography sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      {formatMmk(account.balance)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell sx={{ width: '18%', whiteSpace: 'nowrap' }}>
+                    <Typography variant="body2">
+                      {formatMyanmarWalletDateTime(account.lastActivity)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">MMT</Typography>
                   </TableCell>
                   <TableCell sx={{ 
                     color: isDarkMode ? theme.palette.common.white : undefined,
-                    width: '25%',
+                    width: '12%',
                     textAlign: 'center'
                   }}>
                     <Chip
@@ -772,11 +751,22 @@ const Wallet: React.FC = () => {
                       }}
                     />
                   </TableCell>
+                  <TableCell align="right" sx={{ width: '8%' }}>
+                    <Button
+                      size="small"
+                      variant="text"
+                      disabled={account.needsReview}
+                      title={account.needsReview ? 'This wallet needs an account name before history can be opened.' : undefined}
+                      onClick={() => handleNameClick(account.name)}
+                    >
+                      View history
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={4} align="center">
+                <TableCell colSpan={6} align="center">
                   <Box sx={{ py: 3, color: isDarkMode ? theme.palette.common.white : undefined }}>
                     {walletAccounts.length > 0 ? 
                       `No matches found. Try a different search term.` : 
@@ -793,4 +783,4 @@ const Wallet: React.FC = () => {
   );
 };
 
-export default Wallet; 
+export default Wallet;

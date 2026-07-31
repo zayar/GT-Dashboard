@@ -96,6 +96,37 @@ export const formatGraphqlDateTimeInMyanmar = (dateTimeString: string | null): s
   ].join(' ');
 };
 
+export const formatCheckInOutPhoneNumber = (
+  phoneNumber: string | null | undefined,
+  currency: string,
+): string => {
+  if (!phoneNumber) {
+    return '';
+  }
+
+  if (currency === 'USD' && phoneNumber.startsWith('+855')) {
+    return `0${phoneNumber.substring(4)}`;
+  }
+
+  if (currency === 'MMK' && phoneNumber.startsWith('+95')) {
+    return `0${phoneNumber.substring(3)}`;
+  }
+
+  return phoneNumber;
+};
+
+export const formatPhoneNumberForSpreadsheet = (phoneNumber: string): string => {
+  if (!phoneNumber) {
+    return '';
+  }
+
+  // Excel and Google Sheets otherwise coerce long phone numbers to numeric
+  // cells, dropping the leading zero or showing scientific notation.
+  return /^[+0-9 ()-]+$/.test(phoneNumber)
+    ? `="${phoneNumber}"`
+    : phoneNumber;
+};
+
 export const getCheckInOutDateRangeBounds = ({
   dateRange,
   reportDate,

@@ -1,6 +1,7 @@
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SendIcon from '@mui/icons-material/Send';
 import { Box, Button, CircularProgress, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import axios from 'axios';
 import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Title, Tooltip } from 'chart.js';
 import { nanoid } from 'nanoid';
@@ -68,6 +69,7 @@ interface Message {
 }
 
 const ConversationalAI = () => {
+  const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>(() => {
     const savedMessages = sessionStorage.getItem('chatMessages');
     return savedMessages ? JSON.parse(savedMessages) : [];
@@ -207,10 +209,10 @@ const ConversationalAI = () => {
       }
 
       const response = translationResponse.data.choices[0].message.content;
-      
+
       // Debug: Log the full OpenAI response to help diagnose issues
       console.log('Full OpenAI response:', response);
-      
+
       const sqlMatch = response.match(/\[SQL Query\]([\s\S]*?)\[End SQL\]/i);
 
       if (!sqlMatch) {
@@ -232,10 +234,10 @@ const ConversationalAI = () => {
         if (!queryResponse.data.success) {
           // Debug: Log SQL query error details to help debugging
           console.error('SQL Query Error:', queryResponse.data.error, 'SQL Query:', sqlQuery);
-          
+
           // Try to extract the most relevant part of the error message
           let errorMessage = queryResponse.data.error || 'Failed to execute SQL query';
-          
+
           // Check for common BigQuery error patterns
           if (errorMessage.includes('Syntax error') || errorMessage.includes('Unrecognized name')) {
             // For syntax errors, provide a more helpful message
@@ -247,7 +249,7 @@ const ConversationalAI = () => {
             // For resource limits
             errorMessage = 'Query too complex: BigQuery resource limits exceeded.';
           }
-          
+
           throw new Error(errorMessage);
         }
         queryResults = queryResponse.data.data;
@@ -255,10 +257,10 @@ const ConversationalAI = () => {
         // Handle network errors or other exceptions
         console.error('API Error:', error.message || 'Unknown error');
         console.error('Failed SQL Query:', sqlQuery);
-        
+
         // Provide more detailed error message to the user
         let userErrorMessage = 'Failed to execute query. ';
-        
+
         if (error.response?.status === 400) {
           userErrorMessage += 'The query contains errors.';
         } else if (error.response?.status === 500) {
@@ -270,7 +272,7 @@ const ConversationalAI = () => {
         } else {
           userErrorMessage += error.message || 'Unknown error';
         }
-        
+
         // Add user-friendly error message
         const assistantMessage: Message = {
           id: Date.now().toString(),
@@ -371,7 +373,7 @@ const ConversationalAI = () => {
   };
 
   return (
-    <div className="h-full w-full flex flex-col bg-[#121826] relative">
+    <div className="h-full w-full flex flex-col bg-[var(--background)] relative">
       {/* Main scrollable area with bottom padding for the fixed input box */}
       <div className="flex-1 overflow-auto" style={{ paddingBottom: '70px' }}>
         {messages.length === 0 ? (
@@ -383,7 +385,7 @@ const ConversationalAI = () => {
                 <span className="text-blue-400">Hello,</span>
                 <span className="text-purple-400"> there</span>
               </h1>
-              <p className="text-gray-300 text-xl">How can I help you today?</p>
+              <p className="text-[var(--text-secondary)] text-xl">How can I help you today?</p>
             </div>
 
             {/* Suggestion cards */}
@@ -393,11 +395,11 @@ const ConversationalAI = () => {
                   setInputMessage("Top 10 customers this month");
                   handleSendMessage();
                 }}
-                className="w-full bg-[#222222] p-4 rounded-lg text-left hover:bg-[#2a2a2a] transition-colors"
+                className="w-full bg-[var(--surface)] p-4 rounded-lg text-left hover:bg-[var(--surface-secondary)] transition-colors"
               >
                 <div className="flex flex-col">
                   <span className="text-white font-medium">Top 10 customers this month</span>
-                  <span className="text-gray-400 text-sm mt-1">Show top 10 customers by revenue this month</span>
+                  <span className="text-[var(--text-secondary)] text-sm mt-1">Show top 10 customers by revenue this month</span>
                 </div>
               </button>
 
@@ -406,11 +408,11 @@ const ConversationalAI = () => {
                   setInputMessage("Top 10 services this month");
                   handleSendMessage();
                 }}
-                className="w-full bg-[#222222] p-4 rounded-lg text-left hover:bg-[#2a2a2a] transition-colors"
+                className="w-full bg-[var(--surface)] p-4 rounded-lg text-left hover:bg-[var(--surface-secondary)] transition-colors"
               >
                 <div className="flex flex-col">
                   <span className="text-white font-medium">Top 10 services this month</span>
-                  <span className="text-gray-400 text-sm mt-1">Analyze our top services for this month...</span>
+                  <span className="text-[var(--text-secondary)] text-sm mt-1">Analyze our top services for this month...</span>
                 </div>
               </button>
             </div>
@@ -419,7 +421,7 @@ const ConversationalAI = () => {
           // Messages view
           <div className="w-full max-w-5xl mx-auto px-4 py-4">
             {/* Mobile header */}
-            <div className="sticky top-0 z-10 bg-[#121826] mb-4 py-2 md:hidden w-full border-b border-gray-700">
+            <div className="sticky top-0 z-10 bg-[var(--background)] mb-4 py-2 md:hidden w-full border-b border-[var(--border)]">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-medium text-white">Chat</h2>
                 <button
@@ -451,14 +453,14 @@ const ConversationalAI = () => {
                   className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} mb-4 w-full`}
                 >
                   {message.type === 'assistant' && (
-                    <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center mr-3 flex-shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-[var(--primary)] flex items-center justify-center mr-3 flex-shrink-0">
                       <span className="text-white text-sm">AI</span>
                     </div>
                   )}
                   <div
                     className={`w-full md:max-w-[75%] p-4 rounded-2xl ${message.type === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-800 text-gray-100'
+                        ? 'bg-[var(--primary)] text-white'
+                        : 'bg-[var(--surface)] text-[var(--text-primary)] border border-[var(--border)]'
                       }`}
                   >
                     {message.content}
@@ -474,8 +476,8 @@ const ConversationalAI = () => {
                                   key={key}
                                   sx={{
                                     fontWeight: 'bold',
-                                    color: '#fff',
-                                    borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                                    color: 'var(--text-secondary)',
+                                    borderBottom: '1px solid var(--border)'
                                   }}
                                 >
                                   {key}
@@ -489,37 +491,37 @@ const ConversationalAI = () => {
                                 {Object.values(row).map((cell: any, cellIndex) => {
                                   const cellKey = Object.keys(row)[cellIndex];
                                   console.log(`Cell key: ${cellKey}, Cell value:`, cell);
-                                  
+
                                   // Customer name cell
-                                  const isCustomerName = cellKey.toLowerCase().includes('name') && 
+                                  const isCustomerName = cellKey.toLowerCase().includes('name') &&
                                     cellKey.toLowerCase().includes('customer');
-                                  
+
                                   // Service name cell
-                                  const isServiceName = cellKey.toLowerCase().includes('name') && 
+                                  const isServiceName = cellKey.toLowerCase().includes('name') &&
                                     cellKey.toLowerCase().includes('service');
-                                    
+
                                   // Therapist name cell - expanded detection
-                                  const isTherapistName = 
+                                  const isTherapistName =
                                     // Key-based detection (expanded)
                                     cellKey.toLowerCase() === 'practitionername' ||
                                     cellKey.toLowerCase() === 'therapist' ||
                                     cellKey.toLowerCase() === 'practitioner' ||
                                     cellKey.toLowerCase() === 'therapist_name' ||
                                     cellKey.toLowerCase() === 'practitioner_name' ||
-                                    (cellKey.toLowerCase().includes('name') && 
-                                      (cellKey.toLowerCase().includes('therapist') || 
-                                       cellKey.toLowerCase().includes('staff') || 
-                                       cellKey.toLowerCase().includes('practitioner') || 
+                                    (cellKey.toLowerCase().includes('name') &&
+                                      (cellKey.toLowerCase().includes('therapist') ||
+                                       cellKey.toLowerCase().includes('staff') ||
+                                       cellKey.toLowerCase().includes('practitioner') ||
                                        cellKey.toLowerCase().includes('provider')));
-                                  
+
                                   if (isTherapistName) {
                                     console.log(`✅ Therapist cell detected: ${cellKey} = ${cell}`);
                                   }
-                                  
+
                                   // Check if we have phone data for customer
-                                  const phoneIndex = Object.keys(row).findIndex(key => 
+                                  const phoneIndex = Object.keys(row).findIndex(key =>
                                     key.toLowerCase().includes('phone'));
-                                  
+
                                   // Create clickable cell for customer names
                                   if (isCustomerName && phoneIndex >= 0) {
                                     const phoneNumber = Object.values(row)[phoneIndex];
@@ -546,7 +548,7 @@ const ConversationalAI = () => {
                                       </TableCell>
                                     );
                                   }
-                                  
+
                                   // Create clickable cell for service names
                                   if (isServiceName) {
                                     return (
@@ -575,7 +577,7 @@ const ConversationalAI = () => {
                                       </TableCell>
                                     );
                                   }
-                                  
+
                                   // Create clickable cell for therapist names
                                   if (isTherapistName) {
                                     console.log(`Therapist cell detected: Key=${cellKey}, Value=${cell}`);
@@ -606,13 +608,13 @@ const ConversationalAI = () => {
                                       </TableCell>
                                     );
                                   }
-                                  
+
                                   return (
                                     <TableCell
                                       key={cellIndex}
                                       sx={{
-                                        color: '#fff',
-                                        borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                                        color: 'var(--text-primary)',
+                                        borderBottom: '1px solid var(--border)'
                                       }}
                                     >
                                       {typeof cell === 'object' && cell !== null
@@ -627,10 +629,10 @@ const ConversationalAI = () => {
                         </Table>
                       </TableContainer>
                     )}
-                    
+
                     {/* Chart rendering */}
                     {message.data?.chartData && message.data.chartType === 'bar' && (
-                      <div className="mt-4 bg-gray-900 p-3 rounded-lg">
+                      <div className="mt-4 bg-[var(--surface-secondary)] p-3 rounded-lg border border-[var(--border)]">
                         <Bar
                           data={message.data.chartData}
                           options={{
@@ -638,33 +640,33 @@ const ConversationalAI = () => {
                             maintainAspectRatio: true,
                             scales: {
                               y: {
-                                ticks: { color: 'rgba(255, 255, 255, 0.7)' },
-                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                                ticks: { color: theme.palette.text.secondary },
+                                grid: { color: theme.palette.divider }
                               },
                               x: {
-                                ticks: { color: 'rgba(255, 255, 255, 0.7)' },
-                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                                ticks: { color: theme.palette.text.secondary },
+                                grid: { color: theme.palette.divider }
                               }
                             },
                             plugins: {
                               legend: {
                                 position: 'top',
-                                labels: { color: 'rgba(255, 255, 255, 0.8)' }
+                                labels: { color: theme.palette.text.primary }
                               },
                               tooltip: {
-                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                                titleColor: 'white',
-                                bodyColor: 'white'
+                                backgroundColor: theme.palette.background.paper,
+                                titleColor: theme.palette.text.primary,
+                                bodyColor: theme.palette.text.primary
                               }
                             }
                           }}
                         />
                       </div>
                     )}
-                    
+
                     {/* Customer Interactions Chart */}
                     {message.data?.customerInteractions && message.data.customerInteractions.names.length > 0 && (
-                      <div className="mt-4 bg-gray-900 p-3 rounded-lg">
+                      <div className="mt-4 bg-[var(--surface-secondary)] p-3 rounded-lg border border-[var(--border)]">
                         <Bar
                           data={{
                             labels: message.data.customerInteractions.names,
@@ -683,18 +685,18 @@ const ConversationalAI = () => {
                             maintainAspectRatio: true,
                             scales: {
                               y: {
-                                ticks: { color: 'rgba(255, 255, 255, 0.7)' },
-                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                                ticks: { color: theme.palette.text.secondary },
+                                grid: { color: theme.palette.divider }
                               },
                               x: {
-                                ticks: { color: 'rgba(255, 255, 255, 0.7)' },
-                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                                ticks: { color: theme.palette.text.secondary },
+                                grid: { color: theme.palette.divider }
                               }
                             },
                             plugins: {
                               legend: {
                                 position: 'top',
-                                labels: { color: 'rgba(255, 255, 255, 0.8)' }
+                                labels: { color: theme.palette.text.primary }
                               },
                               tooltip: {
                                 backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -721,7 +723,7 @@ const ConversationalAI = () => {
       </div>
 
       {/* Input box - fixed at bottom of screen */}
-      <div className="fixed bottom-0 left-0 right-0 border-t border-gray-700 bg-[#1a202c] z-10">
+      <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--border)] bg-[var(--surface)] z-10">
         <div className="max-w-5xl mx-auto px-4 py-3">
           <div className="relative">
             <input
@@ -734,13 +736,13 @@ const ConversationalAI = () => {
                 }
               }}
               placeholder={loading ? "Thinking..." : "Ask data..."}
-              className="w-full p-3 pl-5 pr-12 rounded-full bg-[#2a2a2a] border border-gray-700 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 pl-5 pr-12 rounded-full bg-[var(--surface-secondary)] border border-[var(--border)] text-[var(--text-primary)] placeholder-gray-400 focus:outline-none focus:border-blue-500"
               disabled={loading}
             />
             {loading ? (
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-gray-400">
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-[var(--text-secondary)]">
                 <span className="animate-pulse mr-1">Thinking...</span>
-                <CircularProgress size={16} className="text-gray-400" />
+                <CircularProgress size={16} className="text-[var(--text-secondary)]" />
               </div>
             ) : (
               <button
@@ -758,4 +760,4 @@ const ConversationalAI = () => {
   );
 };
 
-export default ConversationalAI; 
+export default ConversationalAI;

@@ -31,40 +31,20 @@ import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
 import { useClinic } from '../contexts/ClinicContext';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  fetchSalesDetailRecords,
+  type SalesDetailRecord,
+} from '../api/apicoreSalesReports';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 
-interface PaymentRecord {
-  Date: string;
-  InvoiceNumber: string;
-  CustomerName: string;
-  MemberId: string;
-  SalePerson: string;
-  ServiceName: string | null;
-  ServicePackageName: string | null;
-  WalletTopUp: number | null;
-  PaymentStatus: string;
-  PaymentMethod: string;
-  PaymentType: string | null;
-  PaymentAmount: number | null;
-  PaymentNote: string | null;
-  InvoiceNetTotal: number;
-  ItemQuantity: number | null;
-  ItemPrice: number | null;
-  ItemTotal: number | null;
-  SubTotal: number | null;
-  Total: number | null;
-  NetTotal: number | null;
-  OrderBalance: number | null;
-  OrderCreditBalance: number | null;
-  Discount: number | null;
-  Tax: number | null;
-
-}
+type PaymentRecord = SalesDetailRecord;
 
 const PaymentDetails: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
+  const { getAccessToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<PaymentRecord[]>([]);
@@ -99,23 +79,23 @@ const PaymentDetails: React.FC = () => {
   // Filter data based on selected payment methods, zero value setting, and search term
   const data = useMemo(() => {
     let filteredData = rawData;
-    
+
     // Apply payment method filter
     if (selectedPaymentMethods.length > 0) {
       filteredData = filteredData.filter(record => selectedPaymentMethods.includes(record.PaymentMethod));
     }
-    
+
     // Apply zero value filter
     if (!showZeroValues) {
-      filteredData = filteredData.filter(record => 
+      filteredData = filteredData.filter(record =>
         record.InvoiceNetTotal != null && record.InvoiceNetTotal !== 0
       );
     }
-    
+
     // Apply search filter across multiple fields
     if (searchTerm.trim() !== '') {
       const normalizedSearchTerm = searchTerm.toLowerCase().trim();
-      filteredData = filteredData.filter(record => 
+      filteredData = filteredData.filter(record =>
         (record.InvoiceNumber?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.CustomerName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.MemberId?.toLowerCase().includes(normalizedSearchTerm) || false) ||
@@ -123,49 +103,49 @@ const PaymentDetails: React.FC = () => {
         (record.ServiceName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServicePackageName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         // Handle search for wallet top-up
-        (normalizedSearchTerm === 'topup' && 
-          (record.WalletTopUp !== null && 
+        (normalizedSearchTerm === 'topup' &&
+          (record.WalletTopUp !== null &&
            (String(record.WalletTopUp).includes('*Point') || (typeof record.WalletTopUp === 'number' && record.WalletTopUp > 0))))
       );
     }
-    
+
     return filteredData;
   }, [rawData, selectedPaymentMethods, showZeroValues, searchTerm]);
 
   // Prepare the view data based on the mode
   const dataToDisplay = useMemo(() => {
     let filteredData = data;
-    
+
     // If in summary view, group by invoice number
     if (viewMode === 'summary') {
       const invoiceSummary: Record<string, PaymentRecord> = {};
       const servicesMap: Record<string, string[]> = {};
-      
+
       // First pass: collect unique invoices and their services
       data.forEach(record => {
         const invoiceNum = record.InvoiceNumber;
-        
+
         // Initialize invoice record if not exists
         if (!invoiceSummary[invoiceNum]) {
           invoiceSummary[invoiceNum] = { ...record };
           servicesMap[invoiceNum] = [];
         }
-        
+
         // Add service to the services list
         if (record.ServiceName) {
           servicesMap[invoiceNum].push(record.ServiceName);
         }
-        
+
         if (record.ServicePackageName) {
           servicesMap[invoiceNum].push(record.ServicePackageName);
         }
       });
-      
+
       // Second pass: Create summary records with concatenated services
       return Object.keys(invoiceSummary).map(invoiceNum => {
         const record = invoiceSummary[invoiceNum];
         const services = servicesMap[invoiceNum];
-        
+
         return {
           ...record,
           ServiceName: services.length > 0 ? services.join(', ') : null,
@@ -173,12 +153,12 @@ const PaymentDetails: React.FC = () => {
         };
       });
     }
-    
+
         // Reorder columns for both detailed and summary views
     const result = filteredData.map((record, index) => {
       // Check if this is the first occurrence of this invoice number
       const isFirstInvoiceRow = index === 0 || filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber;
-      
+
       return {
         Date: record.Date,
         InvoiceNumber: record.InvoiceNumber,
@@ -206,9 +186,9 @@ const PaymentDetails: React.FC = () => {
         PaymentNote: record.PaymentNote
       };
     });
-    
 
-    
+
+
     return result;
   }, [data, viewMode]);
 
@@ -220,231 +200,29 @@ const PaymentDetails: React.FC = () => {
 
   const fetchPaymentData = async () => {
     if (!currentClinic) return;
-    
+
     // Check if we have the required dates based on filter type
     if (filterType === 'day' && (!startDate || !endDate)) return;
     if (filterType === 'month' && !selectedDate) return;
-    
+
     try {
       setLoading(true);
-      const query = `
-        WITH RawData AS (
-          SELECT 
-            FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
-            InvoiceNumber,
-            CustomerName,
-            MemberId,
-            SellerName as SalePerson,
-            ServiceName,
-            ServicePackageName,
-            WalletTopUp,
-            PaymentStatus,
-            CAST(NetTotal AS FLOAT64) as InvoiceNetTotal,
-            ItemQuantity,
-            ItemPrice,
-            ItemTotal,
-            SubTotal,
-            Total,
-            NetTotal,
-            OrderBalance,
-            OrderCreditBalance,
-            Discount,
-            Tax,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
-            OrderCreatedDate
-          FROM great_time.MainPaymentView
-          WHERE ${filterType === 'day' 
-            ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-            : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-          }
-          AND PaymentMethod != 'PASS'
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ),
-        -- Preserve per-item occurrences across repeated payments by assigning an instance number first
-        -- Count payments per invoice to de-cartesian items x payments
-        PaymentsPerInvoice AS (
-          SELECT 
-            InvoiceNumber,
-            COUNT(DISTINCT CONCAT(COALESCE(PaymentMethod,''),'|',COALESCE(CAST(PaymentAmount AS STRING),''),'|',COALESCE(PaymentNote,''))) AS payments_count
-          FROM RawData
-          WHERE PaymentAmount IS NOT NULL AND PaymentAmount > 0
-          GROUP BY InvoiceNumber
-        ),
-        -- Group items ignoring payments but keep how many raw rows we saw (items x payments)
-        ItemGroups AS (
-          SELECT 
-            r.InvoiceNumber,
-            r.ServiceName,
-            r.ServicePackageName,
-            r.ItemQuantity,
-            r.ItemPrice,
-            r.ItemTotal,
-            r.SubTotal,
-            MIN(r.OrderCreatedDate) AS item_sort_key,
-            COUNT(*) AS raw_count
-          FROM RawData r
-          GROUP BY r.InvoiceNumber, r.ServiceName, r.ServicePackageName, r.ItemQuantity, r.ItemPrice, r.ItemTotal, r.SubTotal
-        ),
-        -- Expand each grouped item back to the real number of occurrences: raw_count / payments_count
-        ExpandedItems AS (
-          SELECT 
-            g.InvoiceNumber,
-            g.ServiceName,
-            g.ServicePackageName,
-            g.ItemQuantity,
-            g.ItemPrice,
-            g.ItemTotal,
-            g.SubTotal,
-            g.item_sort_key,
-            instance_num
-          FROM ItemGroups g
-          LEFT JOIN PaymentsPerInvoice p USING (InvoiceNumber)
-          , UNNEST(GENERATE_ARRAY(1, GREATEST(1, CAST(ROUND(SAFE_DIVIDE(g.raw_count, IFNULL(p.payments_count, 1))) AS INT64)))) AS instance_num
-        ),
-        -- Join expanded items back with invoice-level fields
-        UniqueServices AS (
-          SELECT 
-            r.Date,
-            r.InvoiceNumber,
-            r.CustomerName,
-            r.MemberId,
-            r.SalePerson,
-            e.ServiceName,
-            e.ServicePackageName,
-            r.WalletTopUp,
-            r.InvoiceNetTotal,
-            e.ItemQuantity,
-            e.ItemPrice,
-            e.ItemTotal,
-            e.SubTotal,
-            r.Total,
-            r.NetTotal,
-            r.OrderBalance,
-            r.OrderCreditBalance,
-            r.Discount,
-            r.Tax,
-            e.item_sort_key,
-            e.instance_num
-          FROM ExpandedItems e
-          JOIN RawData r
-            ON r.InvoiceNumber = e.InvoiceNumber
-          GROUP BY 
-            r.Date, r.InvoiceNumber, r.CustomerName, r.MemberId, r.SalePerson, r.WalletTopUp, r.InvoiceNetTotal,
-            r.Total, r.NetTotal, r.OrderBalance, r.OrderCreditBalance, r.Discount, r.Tax,
-            e.ServiceName, e.ServicePackageName, e.ItemQuantity, e.ItemPrice, e.ItemTotal, e.SubTotal, e.item_sort_key, e.instance_num
-        ),
-        -- Get unique payments per invoice (deduplicate exact combos first, then rank)
-        DedupPayments AS (
-          SELECT DISTINCT
-            InvoiceNumber,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
-            PaymentStatus
-          FROM RawData
-          WHERE PaymentAmount IS NOT NULL AND PaymentAmount > 0
-        ),
-        UniquePayments AS (
-          SELECT 
-            InvoiceNumber,
-            PaymentMethod,
-            PaymentType,
-            PaymentAmount,
-            PaymentNote,
-            PaymentStatus,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber 
-              ORDER BY PaymentAmount DESC, PaymentMethod
-            ) as payment_rank
-          FROM DedupPayments
-        ),
-        -- Create numbered service names for duplicates
-        ServiceWithNames AS (
-          SELECT *,
-            CASE 
-              WHEN instance_num > 1 
-              THEN CONCAT(ServiceName, ' #', CAST(instance_num AS STRING))
-              ELSE ServiceName 
-            END as DisplayServiceName,
-            ROW_NUMBER() OVER (
-              PARTITION BY InvoiceNumber 
-              ORDER BY item_sort_key, ServiceName, ServicePackageName, instance_num
-            ) as item_rank
-          FROM UniqueServices
-        ),
-        -- Get invoice level data
-        InvoiceData AS (
-          SELECT DISTINCT
-            InvoiceNumber,
-            Date,
-            CustomerName,
-            MemberId,
-            SalePerson,
-            WalletTopUp,
-            InvoiceNetTotal,
-            Total,
-            NetTotal,
-            OrderBalance,
-            OrderCreditBalance,
-            Discount,
-            Tax
-          FROM RawData
-        )
-        SELECT 
-          i.Date,
-          i.InvoiceNumber,
-          i.CustomerName,
-          i.MemberId,
-          i.SalePerson,
-          s.DisplayServiceName as ServiceName,
-          s.ServicePackageName,
-          i.WalletTopUp,
-          p.PaymentStatus,
-          i.InvoiceNetTotal,
-          s.ItemQuantity,
-          s.ItemPrice,
-          s.ItemTotal,
-          s.SubTotal,
-          i.Total,
-          i.NetTotal,
-          i.OrderBalance,
-          i.OrderCreditBalance,
-          i.Discount,
-          i.Tax,
-          p.PaymentMethod,
-          p.PaymentType,
-          p.PaymentAmount,
-          p.PaymentNote
-        FROM ServiceWithNames s
-        JOIN InvoiceData i ON s.InvoiceNumber = i.InvoiceNumber
-        LEFT JOIN UniquePayments p ON s.InvoiceNumber = p.InvoiceNumber AND s.item_rank = p.payment_rank
-        ORDER BY i.Date DESC, i.InvoiceNumber, s.item_rank
-      `;
+      setError(null);
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query }),
+      const records = await fetchSalesDetailRecords({
+        clinicId: currentClinic.id,
+        filterType,
+        startDate,
+        endDate,
+        selectedDate,
+        accessToken,
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch payment data');
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch payment data');
-      }
-
-
-
-      setRawData(result.data);
+      setRawData(records);
     } catch (err) {
       console.error('Payment Data Error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -537,12 +315,12 @@ const PaymentDetails: React.FC = () => {
   // Function to export data to Excel
   const exportToExcel = () => {
     if (dataToDisplay.length === 0) return;
-    
+
     const workbook = XLSX.utils.book_new();
-    
+
     // Use the processed dataToDisplay which already handles the logic for showing/hiding fields
     const processedRows: any[] = [];
-    
+
     dataToDisplay.forEach((record) => {
       // Format the wallet value
       let walletValue = '';
@@ -553,7 +331,7 @@ const PaymentDetails: React.FC = () => {
           walletValue = String(record.WalletTopUp);
         }
       }
-      
+
       processedRows.push({
         'Date': record.Date,
         'Invoice Number': record.InvoiceNumber,
@@ -581,10 +359,10 @@ const PaymentDetails: React.FC = () => {
         'Payment Note': record.PaymentNote || ''
       });
     });
-    
+
     // Create worksheet from data
     const worksheet = XLSX.utils.json_to_sheet(processedRows);
-    
+
     // Set column widths
     const colWidths = [
       { wch: 12 },  // Date
@@ -613,10 +391,10 @@ const PaymentDetails: React.FC = () => {
       { wch: 20 }   // Payment Note
     ];
     worksheet['!cols'] = colWidths;
-    
+
     // Add worksheet to workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Payment Details');
-    
+
     // Generate filename based on filter type and date
     let dateStr = '';
     if (filterType === 'month') {
@@ -628,7 +406,7 @@ const PaymentDetails: React.FC = () => {
       dateStr = start === end ? start : `${start}_to_${end}`;
     }
     const fileName = `payment_details_${dateStr}.xlsx`;
-    
+
     // Export file
     XLSX.writeFile(workbook, fileName);
   };
@@ -651,44 +429,44 @@ const PaymentDetails: React.FC = () => {
 
   if (loading) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: 'calc(100vh - 60px)',
         width: '100%',
-        bgcolor: '#101924',
+        bgcolor: 'var(--surface)',
         gap: 2
       }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
-        <Typography sx={{ color: '#d1d5db', mt: 2 }}>Loading sales data...</Typography>
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
+        <Typography sx={{ color: 'var(--text-secondary)', mt: 2 }}>Loading sales data...</Typography>
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ 
-        display: 'flex', 
+      <Box sx={{
+        display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
+        justifyContent: 'center',
+        alignItems: 'center',
         minHeight: 'calc(100vh - 60px)',
         width: '100%',
-        bgcolor: '#101924',
+        bgcolor: 'var(--surface)',
         padding: 3,
         gap: 2
       }}>
-        <Typography variant="h6" sx={{ color: '#ef4444' }}>{error}</Typography>
-        <Button 
+        <Typography variant="h6" sx={{ color: 'var(--error)' }}>{error}</Typography>
+        <Button
           variant="contained"
           onClick={fetchPaymentData}
-          sx={{ 
-            mt: 2, 
-            bgcolor: '#3b82f6',
+          sx={{
+            mt: 2,
+            bgcolor: 'var(--primary)',
             '&:hover': {
-              bgcolor: '#2563eb'
+              bgcolor: 'var(--primary-hover)'
             }
           }}
         >
@@ -699,9 +477,9 @@ const PaymentDetails: React.FC = () => {
   }
 
   return (
-    <Box sx={{ 
-      p: { xs: 1, sm: 2 }, 
-      bgcolor: '#101924',
+    <Box sx={{
+      p: { xs: 1, sm: 2 },
+      bgcolor: 'var(--surface)',
       minHeight: 'calc(100vh - 60px)', // Changed from fixed height to minHeight
       width: '100%',
       maxWidth: '100%',
@@ -710,15 +488,15 @@ const PaymentDetails: React.FC = () => {
       flexDirection: 'column'
     }}>
       {/* Header with back button and title */}
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
         mb: 2
       }}>
         <IconButton
           onClick={handleBack}
           sx={{
-            color: '#3b82f6',
+            color: 'var(--primary)',
             mr: 2,
             p: 1,
             '&:hover': {
@@ -728,11 +506,11 @@ const PaymentDetails: React.FC = () => {
         >
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h5" sx={{ color: '#f3f4f6' }}>Sales Details</Typography>
+        <Typography variant="h5" sx={{ color: 'var(--text-primary)' }}>Sales Details</Typography>
       </Box>
 
       {/* Filters and controls */}
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
@@ -740,8 +518,8 @@ const PaymentDetails: React.FC = () => {
         mb: 2
       }}>
         {/* Date filters */}
-        <Box sx={{ 
-          display: 'flex', 
+        <Box sx={{
+          display: 'flex',
           alignItems: 'center',
           gap: 1,
           flexGrow: 0
@@ -753,18 +531,18 @@ const PaymentDetails: React.FC = () => {
             sx={{
               minWidth: 100,
               maxHeight: 40,
-              color: '#d1d5db',
-              bgcolor: '#1a2234',
-              '& .MuiSelect-icon': { color: '#d1d5db' },
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4a5568' },
-              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' }
+              color: 'var(--text-secondary)',
+              bgcolor: 'var(--surface)',
+              '& .MuiSelect-icon': { color: 'var(--text-secondary)' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--text-muted)' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
             }}
           >
-            <MenuItem value="day" sx={{ bgcolor: '#1a2234', color: '#d1d5db' }}>Daily</MenuItem>
-            <MenuItem value="month" sx={{ bgcolor: '#1a2234', color: '#d1d5db' }}>Monthly</MenuItem>
+            <MenuItem value="day" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)' }}>Daily</MenuItem>
+            <MenuItem value="month" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)' }}>Monthly</MenuItem>
           </Select>
-          
+
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             {filterType === 'day' ? (
               <>
@@ -779,24 +557,24 @@ const PaymentDetails: React.FC = () => {
                       sx: {
                         maxHeight: 40,
                         minWidth: 140,
-                        bgcolor: '#1a2234',
+                        bgcolor: 'var(--surface)',
                         '& .MuiOutlinedInput-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                           '& fieldset': {
-                            borderColor: '#2d3748',
+                            borderColor: 'var(--border)',
                           },
                           '&:hover fieldset': {
-                            borderColor: '#4a5568',
+                            borderColor: 'var(--text-muted)',
                           },
                           '&.Mui-focused fieldset': {
-                            borderColor: '#3b82f6',
+                            borderColor: 'var(--primary)',
                           },
                         },
                         '& .MuiInputLabel-root': {
-                          color: '#9ca3af',
+                          color: 'var(--text-secondary)',
                         },
                         '& .MuiSvgIcon-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                         },
                       },
                     }
@@ -814,30 +592,30 @@ const PaymentDetails: React.FC = () => {
                       sx: {
                         maxHeight: 40,
                         minWidth: 140,
-                        bgcolor: '#1a2234',
+                        bgcolor: 'var(--surface)',
                         '& .MuiOutlinedInput-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                           '& fieldset': {
-                            borderColor: '#2d3748',
+                            borderColor: 'var(--border)',
                           },
                           '&:hover fieldset': {
-                            borderColor: '#4a5568',
+                            borderColor: 'var(--text-muted)',
                           },
                           '&.Mui-focused fieldset': {
-                            borderColor: '#3b82f6',
+                            borderColor: 'var(--primary)',
                           },
                         },
                         '& .MuiInputLabel-root': {
-                          color: '#9ca3af',
+                          color: 'var(--text-secondary)',
                         },
                         '& .MuiSvgIcon-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                         },
                       },
                     }
                   }}
                 />
-                
+
                 {/* Quick date range selection buttons */}
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                   <Button
@@ -849,12 +627,12 @@ const PaymentDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -870,12 +648,12 @@ const PaymentDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -891,12 +669,12 @@ const PaymentDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -912,12 +690,12 @@ const PaymentDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -936,24 +714,24 @@ const PaymentDetails: React.FC = () => {
                     size: 'small',
                     sx: {
                       maxHeight: 40,
-                      bgcolor: '#1a2234',
+                      bgcolor: 'var(--surface)',
                       '& .MuiOutlinedInput-root': {
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         '& fieldset': {
-                          borderColor: '#2d3748',
+                          borderColor: 'var(--border)',
                         },
                         '&:hover fieldset': {
-                          borderColor: '#4a5568',
+                          borderColor: 'var(--text-muted)',
                         },
                         '&.Mui-focused fieldset': {
-                          borderColor: '#3b82f6',
+                          borderColor: 'var(--primary)',
                         },
                       },
                       '& .MuiInputLabel-root': {
-                        color: '#9ca3af',
+                        color: 'var(--text-secondary)',
                       },
                       '& .MuiSvgIcon-root': {
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                       },
                     },
                   }
@@ -962,10 +740,10 @@ const PaymentDetails: React.FC = () => {
             )}
           </LocalizationProvider>
         </Box>
-        
+
         {/* Right side controls */}
-        <Box sx={{ 
-          display: 'flex', 
+        <Box sx={{
+          display: 'flex',
           alignItems: 'center',
           gap: 1,
           flexWrap: 'nowrap'
@@ -979,31 +757,31 @@ const PaymentDetails: React.FC = () => {
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon sx={{ color: '#9ca3af' }} />
+                  <SearchIcon sx={{ color: 'var(--text-secondary)' }} />
                 </InputAdornment>
               ),
             }}
             sx={{
               maxWidth: 200,
-              bgcolor: '#1a2234',
+              bgcolor: 'var(--surface)',
               '& .MuiOutlinedInput-root': {
-                color: '#d1d5db',
+                color: 'var(--text-secondary)',
                 '& fieldset': {
-                  borderColor: '#2d3748',
+                  borderColor: 'var(--border)',
                 },
                 '&:hover fieldset': {
-                  borderColor: '#4a5568',
+                  borderColor: 'var(--text-muted)',
                 },
                 '&.Mui-focused fieldset': {
-                  borderColor: '#3b82f6',
+                  borderColor: 'var(--primary)',
                 },
               },
               '& .MuiInputLabel-root': {
-                color: '#9ca3af',
+                color: 'var(--text-secondary)',
               }
             }}
           />
-          
+
           <Button
             variant="outlined"
             size="small"
@@ -1011,31 +789,31 @@ const PaymentDetails: React.FC = () => {
             onClick={handlePaymentFilterClick}
             sx={{
               height: 40,
-              borderColor: '#2d3748',
-              color: '#d1d5db',
-              bgcolor: '#1a2234',
+              borderColor: 'var(--border)',
+              color: 'var(--text-secondary)',
+              bgcolor: 'var(--surface)',
               whiteSpace: 'nowrap',
               minWidth: 0,
               px: 1,
               '&:hover': {
-                borderColor: '#4a5568',
+                borderColor: 'var(--text-muted)',
                 bgcolor: 'rgba(26, 34, 52, 0.7)'
               }
             }}
           >
             Payment {selectedPaymentMethods.length > 0 && `(${selectedPaymentMethods.length})`}
           </Button>
-          
+
           <FormControlLabel
             control={
-              <Switch 
+              <Switch
                 checked={showZeroValues}
                 onChange={handleZeroValueToggle}
               />
             }
             label="Show Zero Values"
           />
-          
+
           {/* Excel Export Button */}
           <Tooltip title="Export to Excel">
             <Button
@@ -1045,14 +823,14 @@ const PaymentDetails: React.FC = () => {
               onClick={exportToExcel}
             sx={{
               height: 40,
-                borderColor: '#2d3748',
-                color: '#d1d5db',
-                bgcolor: '#1a2234',
+                borderColor: 'var(--border)',
+                color: 'var(--text-secondary)',
+                bgcolor: 'var(--surface)',
                 whiteSpace: 'nowrap',
                 minWidth: 0,
                 px: 1,
                 '&:hover': {
-                  borderColor: '#4a5568',
+                  borderColor: 'var(--text-muted)',
                   bgcolor: 'rgba(26, 34, 52, 0.7)'
                 }
               }}
@@ -1083,8 +861,8 @@ const PaymentDetails: React.FC = () => {
               width: 250,
               maxHeight: 400,
               overflow: 'auto',
-              bgcolor: '#1a2234',
-              color: '#d1d5db',
+              bgcolor: 'var(--surface)',
+              color: 'var(--text-secondary)',
               borderRadius: '8px',
               zIndex: 1400
             }
@@ -1101,16 +879,16 @@ const PaymentDetails: React.FC = () => {
                 indeterminate={selectedPaymentMethods.length > 0 && !isAllSelected}
                 onChange={() => handlePaymentMethodChange('all')}
                 sx={{
-                  color: '#4a5568',
-                  '&.Mui-checked': { color: '#3b82f6' },
-                  '&.MuiCheckbox-indeterminate': { color: '#3b82f6' }
+                  color: 'var(--text-muted)',
+                  '&.Mui-checked': { color: 'var(--primary)' },
+                  '&.MuiCheckbox-indeterminate': { color: 'var(--primary)' }
                 }}
               />
             }
             label="Select All"
-            sx={{ color: '#d1d5db' }}
+            sx={{ color: 'var(--text-secondary)' }}
           />
-          <Box sx={{ borderTop: '1px solid #2d3748', my: 1 }} />
+          <Box sx={{ borderTop: '1px solid var(--border)', my: 1 }} />
           {paymentMethods.map((method) => (
             <FormControlLabel
               key={method}
@@ -1119,18 +897,18 @@ const PaymentDetails: React.FC = () => {
                   checked={selectedPaymentMethods.includes(method)}
                   onChange={() => handlePaymentMethodChange(method)}
                   sx={{
-                    color: '#4a5568',
-                    '&.Mui-checked': { color: '#3b82f6' }
+                    color: 'var(--text-muted)',
+                    '&.Mui-checked': { color: 'var(--primary)' }
                   }}
                 />
               }
               label={method}
-              sx={{ color: '#d1d5db' }}
+              sx={{ color: 'var(--text-secondary)' }}
             />
           ))}
             </>
           ) : (
-            <Typography variant="body2" color="#9ca3af">No payment methods available</Typography>
+            <Typography variant="body2" color="var(--text-secondary)">No payment methods available</Typography>
           )}
         </FormGroup>
       </Popover>
@@ -1190,4 +968,4 @@ const PaymentDetails: React.FC = () => {
   );
 };
 
-export default PaymentDetails; 
+export default PaymentDetails;

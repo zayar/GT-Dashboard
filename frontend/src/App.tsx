@@ -14,14 +14,15 @@ import DailyReport from './components/DailyReport';
 import TaskflowDashboard from './components/TaskflowDashboard';
 import ClinicSelector from './components/ClinicSelector';
 import Commission from './components/Commission';
-import ConversationalAI from './components/ConversationalAI'; // Import our new component
 import CustomerBehaviorReport from './components/CustomerBehaviorReport';
 import CustomerDetails from './components/CustomerDetails';
+import CustomerServiceActivityReport from './components/CustomerServiceActivityReport';
 import CustomersTable from './components/CustomersTable';
 import DailyTreatmentReport from './components/DailyTreatmentReport';
 import Dashboard from './components/Dashboard';
 import HelperDetails from './components/HelperDetails';
 import HelperList from './components/HelperList';
+import InactiveCustomersReport from './components/InactiveCustomersReport';
 import Login from './components/Login';
 import PaymentDetails from './components/PaymentDetails';
 import SalesBySalesPerson from './components/SalesBySalesPerson';
@@ -32,6 +33,9 @@ import ServicesTable from './components/ServicesTable';
 import Sidebar from './components/Sidebar';
 import TherapistDetails from './components/TherapistDetails';
 import TherapistList from './components/TherapistList';
+import ThemeSwitcher from './components/ThemeSwitcher';
+import TopTreatmentReport from './components/TopTreatmentReport';
+import TreatmentDetailsReport from './components/TreatmentDetailsReport';
 import Transaction from './components/Transaction';
 import Wallet from './components/Wallet';
 import WalletTransactionDetails from './components/WalletTransactionDetails';
@@ -333,7 +337,7 @@ WITH HourlyBookings AS (
     CAST(EXTRACT(HOUR FROM CheckInTime) AS STRING) as hour_of_day,
     COUNT(*) as booking_count
   FROM great_time.MainDataView
-  WHERE 
+  WHERE
     CheckInTime IS NOT NULL
     AND EXTRACT(HOUR FROM CheckInTime) BETWEEN 9 AND 19
     AND ClinicCode = '${currentClinic.code}'
@@ -344,7 +348,7 @@ SELECT
   hour_of_day,
   booking_count
 FROM HourlyBookings
-ORDER BY 
+ORDER BY
   CASE day_of_week
     WHEN 'Monday' THEN 1
     WHEN 'Tuesday' THEN 2
@@ -368,50 +372,50 @@ ORDER BY
                  - Always use TIMESTAMP() for timestamp literals
                  - Always cast string dates to TIMESTAMP type before comparison
                  - Example: TIMESTAMP(field) >= TIMESTAMP('2024-01-01')
-              
+
               2. For date/time formatting:
                  - Use FORMAT_TIMESTAMP() for timestamp fields
                  - Use FORMAT_DATE() for date fields
                  - Examples:
                    - FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', field)
                    - FORMAT_DATE('%Y-%m-%d', DATE(field))
-              
+
               3. For date/time extraction and arithmetic:
                  - Use EXTRACT() for getting specific parts
                  - Use TIMESTAMP_ADD() or TIMESTAMP_SUB() for calculations
                  - Examples:
                    - EXTRACT(HOUR FROM field)
                    - TIMESTAMP_ADD(field, INTERVAL 1 DAY)
-              
+
               4. For timezone handling:
                  - Be careful with parentheses when using timezone operations
                  - Correct syntax: TIMESTAMP(field) AT TIME ZONE 'timezone'
                  - Another correct syntax: (field AT TIME ZONE 'timezone')
                  - Avoid: TIMESTAMP(field AT TIME ZONE 'timezone') - this is incorrect syntax
-              
+
               5. For date/time aggregations:
                  - Group by formatted timestamps for consistency
                  - Example: GROUP BY FORMAT_TIMESTAMP('%Y-%m-%d', field)
-              
+
               6. NEVER compare TIMESTAMP with DATETIME directly
                  - Always convert to same type first
                  - Use CAST(field AS TIMESTAMP) if needed
-                 
+
               7. For customer-related queries:
                  - Always include CustomerName/customer_name, count/interactions, and PhoneNumber/phone in the SELECT clause
                  - Order by count/interactions DESC
                  - Use LIMIT to restrict to top N results
-                 
+
               8. For service-related queries:
                  - Always include ServiceName/service_name, count/instances in the SELECT clause
                  - Order by count/instances DESC
                  - Use LIMIT to restrict to top N results
-                 
+
               9. For therapist/practitioner/employee-related queries:
                  - Always include PractitionerName/practitioner_name/therapist_name, count/services/treatments in the SELECT clause
                  - Order by count/services/treatments DESC
                  - Use LIMIT to restrict to top N results
-               
+
               10. ALWAYS include this filter in your WHERE clause: AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
                   - This is mandatory for security and data isolation
                   - Never omit this filter from any query`
@@ -424,10 +428,10 @@ ORDER BY
         }
 
         const response = translationResponse.data.choices[0].message.content;
-        
+
         // Debug: Log the full OpenAI response to help diagnose issues
         console.log('Full OpenAI response:', response);
-        
+
         const sqlMatch = response.match(/\[SQL Query\]([\s\S]*?)\[End SQL\]/i);
 
         if (!sqlMatch) {
@@ -442,11 +446,11 @@ ORDER BY
 
         // Debug: Log the SQL query to console
         console.log('Generated SQL Query:', sqlQuery);
-        
+
         // For "top 10 customers" queries, show debug alert
-        if (currentInputMessage.toLowerCase().includes('top') && 
+        if (currentInputMessage.toLowerCase().includes('top') &&
             currentInputMessage.toLowerCase().includes('customer') &&
-            (currentInputMessage.toLowerCase().includes('week') || 
+            (currentInputMessage.toLowerCase().includes('week') ||
              currentInputMessage.toLowerCase().includes('month'))) {
           console.log('Top customers query detected, logging SQL query for debugging');
           // No alerts in production code, just use console
@@ -459,18 +463,18 @@ ORDER BY
             console.log('Using predefined query for "top 10 customers this week"');
             // Provide a predefined SQL query that is known to work
             sqlQuery = `
-SELECT 
+SELECT
   CustomerName,
   COUNT(*) as visit_count,
   CustomerPhoneNumber
-FROM 
+FROM
   great_time.MainDataView
-WHERE 
+WHERE
   LOWER(ClinicCode) = LOWER('${currentClinic.code}')
   AND CheckInTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
-GROUP BY 
+GROUP BY
   CustomerName, CustomerPhoneNumber
-ORDER BY 
+ORDER BY
   visit_count DESC
 LIMIT 10`;
           }
@@ -508,10 +512,10 @@ LIMIT 10`;
       if (!queryResponse.data.success) {
           // Debug: Log SQL query error details to help debugging
           console.error('SQL Query Error:', queryResponse.data.error, 'SQL Query:', sqlQuery);
-          
+
           // Try to extract the most relevant part of the error message
           let errorMessage = queryResponse.data.error || 'Failed to execute SQL query';
-          
+
           // Check for common BigQuery error patterns
           if (errorMessage.includes('Syntax error') || errorMessage.includes('Unrecognized name')) {
             // For syntax errors, provide a more helpful message
@@ -523,7 +527,7 @@ LIMIT 10`;
             // For resource limits
             errorMessage = 'Query too complex: BigQuery resource limits exceeded.';
           }
-          
+
           throw new Error(errorMessage);
       }
       queryResults = queryResponse.data.data;
@@ -531,10 +535,10 @@ LIMIT 10`;
         // Handle network errors or other exceptions
         console.error('API Error:', error.message || 'Unknown error');
         console.error('Failed SQL Query:', sqlQuery);
-        
+
         // Provide more detailed error message to the user
         let userErrorMessage = 'Failed to execute query. ';
-        
+
         if (error.response?.status === 400) {
           userErrorMessage += 'The query contains errors.';
         } else if (error.response?.status === 500) {
@@ -546,7 +550,7 @@ LIMIT 10`;
         } else {
           userErrorMessage += error.message || 'Unknown error';
         }
-        
+
         // Add user-friendly error message
         const assistantMessage: Message = {
           id: Date.now().toString(),
@@ -603,8 +607,8 @@ LIMIT 10`;
           ...prepareChartData(queryResults),
           datasets: prepareChartData(queryResults).datasets.map(dataset => ({
             ...dataset,
-            backgroundColor: ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e', '#6366f1', '#14b8a6', '#d946ef', '#84cc16'],
-            borderColor: '#3b82f6'
+            backgroundColor: ['#074142', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e', '#2F8F82', '#14b8a6', '#d946ef', '#84cc16'],
+            borderColor: '#074142'
           }))
         } : null;
 
@@ -818,7 +822,7 @@ LIMIT 10`;
               ['service_name', 'ServiceName', 'service', 'treatment'].includes(key));
 
             // Remove time field handling since it's causing display issues
-            // const timeField = Object.keys(queryResults[0]).find(key => 
+            // const timeField = Object.keys(queryResults[0]).find(key =>
             //   ['check_in_time', 'CheckInTime', 'appointment_time', 'time', 'date', 'schedule_time'].includes(key));
 
             const therapistField = Object.keys(queryResults[0]).find(key =>
@@ -1269,7 +1273,7 @@ LIMIT 10`;
                           if (phoneIndex >= 0 && customerTableData.rows[rowIndex][phoneIndex]) {
                             path = `/customers/${encodeURIComponent(customerTableData.rows[rowIndex][phoneIndex])}`;
                           } else {
-                            // Fallback to using name 
+                            // Fallback to using name
                             path = `/customers/${encodeURIComponent(cell)}`;
                           }
                         }
@@ -1287,7 +1291,7 @@ LIMIT 10`;
                             <Link
                               to={path}
                               style={{
-                                color: '#3b82f6',
+                                color: 'var(--primary)',
                                 textDecoration: 'none',
                                 cursor: 'pointer',
                                 fontWeight: 500,
@@ -1361,7 +1365,7 @@ LIMIT 10`;
       );
     }
 
-    // Check if the message includes table data 
+    // Check if the message includes table data
     if (data?.tableData) {
       const tableData = data.tableData;
       return (
@@ -1422,7 +1426,7 @@ LIMIT 10`;
                           if (phoneIndex >= 0 && row[phoneIndex]) {
                             path = `/customers/${encodeURIComponent(row[phoneIndex])}`;
                           } else {
-                            // Fallback to using name 
+                            // Fallback to using name
                             path = `/customers/${encodeURIComponent(cell)}`;
                           }
                         }
@@ -1440,7 +1444,7 @@ LIMIT 10`;
                             <Link
                               to={path}
                               style={{
-                                color: '#3b82f6',
+                                color: 'var(--primary)',
                                 textDecoration: 'none',
                                 cursor: 'pointer',
                                 fontWeight: 500,
@@ -1506,7 +1510,7 @@ LIMIT 10`;
               </Typography>
 
               {/* Then render the parsed table view */}
-              <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 'bold', color: '#3b82f6' }}>
+              <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 'bold', color: 'var(--primary)' }}>
                 Table View
               </Typography>
               <TableContainer component={Paper} sx={{ bgcolor: 'transparent', maxWidth: '100%', mb: 3, overflowX: 'auto' }}>
@@ -1566,7 +1570,7 @@ LIMIT 10`;
                                 if (phoneIndex >= 0 && row[phoneIndex]) {
                                   path = `/customers/${encodeURIComponent(row[phoneIndex])}`;
                                 } else {
-                                  // Fallback to using name 
+                                  // Fallback to using name
                                   path = `/customers/${encodeURIComponent(cell)}`;
                                 }
                               }
@@ -1584,7 +1588,7 @@ LIMIT 10`;
                                   <Link
                                     to={path}
                                     style={{
-                                      color: '#3b82f6',
+                                      color: 'var(--primary)',
                                       textDecoration: 'none',
                                       cursor: 'pointer',
                                       fontWeight: 500,
@@ -1890,7 +1894,7 @@ LIMIT 10`;
   }, [messages]);
 
   return (
-    <div className="h-full w-full flex flex-col bg-[#121826] relative">
+    <div className="h-full w-full flex flex-col bg-[var(--background)] relative">
       {/* Main scrollable area with bottom padding for the fixed input box */}
       <div className="flex-1 overflow-auto" style={{ paddingBottom: '70px' }}>
         {messages.length === 0 ? (
@@ -1902,7 +1906,7 @@ LIMIT 10`;
                 <span className="text-blue-400">Hello,</span>
                 <span className="text-purple-400"> there</span>
               </h1>
-              <p className="text-gray-300 text-xl">How can I help you today?</p>
+              <p className="text-[var(--text-secondary)] text-xl">How can I help you today?</p>
             </div>
 
             {/* Suggestion cards */}
@@ -1912,11 +1916,11 @@ LIMIT 10`;
                   setInputMessage("Top 10 customers this month");
                   handleSendMessage();
                 }}
-                className="w-full bg-[#222222] p-4 rounded-lg text-left hover:bg-[#2a2a2a] transition-colors"
+                className="w-full bg-[var(--surface)] p-4 rounded-lg text-left hover:bg-[var(--surface-secondary)] transition-colors"
               >
                 <div className="flex flex-col">
                   <span className="text-white font-medium">Top 10 customers this month</span>
-                  <span className="text-gray-400 text-sm mt-1">Show top 10 customers by revenue this month</span>
+                  <span className="text-[var(--text-secondary)] text-sm mt-1">Show top 10 customers by revenue this month</span>
                 </div>
               </button>
 
@@ -1925,11 +1929,11 @@ LIMIT 10`;
                   setInputMessage("Top 10 services this month");
                   handleSendMessage();
                 }}
-                className="w-full bg-[#222222] p-4 rounded-lg text-left hover:bg-[#2a2a2a] transition-colors"
+                className="w-full bg-[var(--surface)] p-4 rounded-lg text-left hover:bg-[var(--surface-secondary)] transition-colors"
               >
                 <div className="flex flex-col">
                   <span className="text-white font-medium">Top 10 services this month</span>
-                  <span className="text-gray-400 text-sm mt-1">Analyze our top services for this month...</span>
+                  <span className="text-[var(--text-secondary)] text-sm mt-1">Analyze our top services for this month...</span>
                 </div>
               </button>
             </div>
@@ -1938,7 +1942,7 @@ LIMIT 10`;
           // Messages view
           <div className="w-full max-w-5xl mx-auto px-4 py-4">
             {/* Mobile header */}
-            <div className="sticky top-0 z-10 bg-[#121826] mb-4 py-2 md:hidden w-full border-b border-gray-700">
+            <div className="sticky top-0 z-10 bg-[var(--background)] mb-4 py-2 md:hidden w-full border-b border-[var(--border)]">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-medium text-white">Chat</h2>
                 <button
@@ -1977,7 +1981,7 @@ LIMIT 10`;
                   <div
                     className={`w-full md:max-w-[75%] p-4 rounded-2xl ${message.type === 'user'
                         ? 'bg-blue-600 text-white'
-                        : 'bg-gray-800 text-gray-100'
+                        : 'bg-gray-800 text-[var(--text-primary)]'
                       }`}
                   >
                     {renderMessageContent(message.content, message.data)}
@@ -1996,7 +2000,7 @@ LIMIT 10`;
       </div>
 
       {/* Input box - fixed at bottom of screen */}
-      <div className="fixed bottom-0 left-0 right-0 border-t border-gray-700 bg-[#1a202c] z-10">
+      <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--border)] bg-[var(--surface)] z-10">
         <div className="max-w-5xl mx-auto px-4 py-3">
           <div className="relative">
             <input
@@ -2009,13 +2013,13 @@ LIMIT 10`;
                 }
               }}
               placeholder={loading ? "Thinking..." : "Ask data..."}
-              className="w-full p-3 pl-5 pr-12 rounded-full bg-[#2a2a2a] border border-gray-700 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 pl-5 pr-12 rounded-full bg-[var(--surface-secondary)] border border-[var(--border)] text-[var(--text-primary)] placeholder-gray-400 focus:outline-none focus:border-blue-500"
               disabled={loading}
             />
             {loading ? (
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-gray-400">
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-[var(--text-secondary)]">
                 <span className="animate-pulse mr-1">Thinking...</span>
-                <CircularProgress size={16} className="text-gray-400" />
+                <CircularProgress size={16} className="text-[var(--text-secondary)]" />
               </div>
             ) : (
             <button
@@ -2033,9 +2037,9 @@ LIMIT 10`;
       {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center pointer-events-none z-20">
-          <div className="bg-[#1a202c] p-4 rounded-lg shadow-lg flex items-center">
+          <div className="p-4 rounded-lg shadow-lg flex items-center" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border)' }}>
             <CircularProgress size={24} className="text-blue-500 mr-3" />
-            <span className="text-gray-200">Processing your request...</span>
+            <span style={{ color: 'var(--text-primary)' }}>Processing your request...</span>
           </div>
         </div>
       )}
@@ -2046,34 +2050,38 @@ LIMIT 10`;
 const App = () => {
   const { currentUser, loading } = useAuth(); // Use AuthContext
 
-  const handleLogin = (authStatus: boolean) => {
-    // This function might become redundant or just used for initial redirect logic
-    // The actual auth state is managed by AuthContext
-    console.log("Login triggered, auth state handled by AuthContext:", authStatus);
-  };
-
   if (loading) {
     // Show a full-page loader while checking auth state
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#101729' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'var(--background)' }}>
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <ClinicProvider> {/* Keep ClinicProvider */}
-      <Router>
-        <Toaster position="top-right" toastOptions={{ /* ... */ }} />
-        {!currentUser ? ( // Check currentUser from context
-          <Login onLogin={handleLogin} />
-        ) : (
-          <div className="flex h-screen bg-[#101729] text-[#f3f4f6]">
-            <AppContent /> {/* Render AppContent if logged in */}
+    <Router>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            background: 'var(--surface-elevated)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-card)',
+          },
+        }}
+      />
+      {!currentUser ? (
+        <Login />
+      ) : (
+        <ClinicProvider>
+          <div className="app-shell">
+            <AppContent />
           </div>
-        )}
-      </Router>
-    </ClinicProvider>
+        </ClinicProvider>
+      )}
+    </Router>
   );
 };
 
@@ -2117,20 +2125,20 @@ const AppContent = () => {
   return (
     <>
       <Sidebar onLogout={handleLogout} /> {/* Pass updated handleLogout */}
-      <div className="flex-1 h-full overflow-auto">
-        <div className="bg-[#101729] border-b border-[rgba(148,163,184,0.12)] px-4 py-2">
+      <div className="flex-1 h-full overflow-auto min-w-0">
+        <header className="app-header">
           <ClinicSelector
             onClinicChange={handleClinicChange}
           />
-        </div>
+          <ThemeSwitcher />
+        </header>
 
         {/* Main content area */}
-        <div className="flex-1 overflow-auto bg-[#101729]">
+        <main className="app-content flex-1 overflow-auto">
           <Routes>
             {/* Routes remain the same */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/conversational-ai" element={<ConversationalAI />} />
             <Route path="/customers" element={<CustomersTable />} />
             <Route path="/customers/:phoneNumber" element={<CustomerDetails />} />
             <Route path="/services" element={<ServicesTable />} />
@@ -2139,6 +2147,7 @@ const AppContent = () => {
             <Route path="/therapists/:name" element={<TherapistDetails />} />
             <Route path="/helpers" element={<HelperList />} />
             <Route path="/helpers/:name" element={<HelperDetails />} />
+            <Route path="/inactive-customers-report" element={<InactiveCustomersReport />} />
             <Route path="/commission" element={<Commission />} />
             <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
             <Route path="/payment-details" element={<PaymentDetails />} />
@@ -2153,13 +2162,16 @@ const AppContent = () => {
             {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
             <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
             <Route path="/daily-report" element={<DailyReport />} />
+            <Route path="/customer-service-activity-report" element={<CustomerServiceActivityReport />} />
+            <Route path="/top-treatment-report" element={<TopTreatmentReport />} />
+            <Route path="/top-treatment-report/treatment-details" element={<TreatmentDetailsReport />} />
             <Route path="/transactions" element={<Transaction />} />
             <Route path="/wallet" element={<Wallet />} />
             <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
             {/* <Route path="/mysql-connector" element={<MySQLConnector />} /> */}{/* Removed mysql connector */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
-        </div>
+        </main>
       </div>
     </>
   );

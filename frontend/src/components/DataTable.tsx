@@ -61,10 +61,10 @@ const COLUMN_WIDTHS: { [key: string]: string } = {
   PaymentNote: '140px'
 };
 
-const DataTable: React.FC<DataTableProps> = ({ 
-  data, 
-  onCustomerClick, 
-  onServiceClick, 
+const DataTable: React.FC<DataTableProps> = ({
+  data,
+  onCustomerClick,
+  onServiceClick,
   onTherapistClick,
   columnAliases = {}
 }): JSX.Element => {
@@ -77,7 +77,7 @@ const DataTable: React.FC<DataTableProps> = ({
   // Dynamically generate headCells based on the first data item
   const headCells: HeadCell[] = useMemo(() => {
     if (data.length === 0) return [];
-    
+
     return Object.keys(data[0]).map(key => ({
       id: key,
       label: columnAliases[key] || key.replace(/([A-Z])/g, ' $1').trim(), // Use alias if available
@@ -145,30 +145,32 @@ const DataTable: React.FC<DataTableProps> = ({
     page * rowsPerPage + rowsPerPage
   );
 
-  const handleCellClick = (columnId: string, value: string) => {
+  const handleCellClick = (columnId: string, value: unknown) => {
     // Don't trigger clicks on empty or undefined values
-    if (!value || value.trim() === '') {
+    if (value === null || value === undefined || String(value).trim() === '') {
       return;
     }
-    
+
+    const displayValue = String(value);
+
     // Map various possible column IDs to standard types
     const lowerColumnId = columnId.toLowerCase();
-    
+
     // Customer name columns
     if ((lowerColumnId.includes('customer') || columnId === 'name' || lowerColumnId.includes('customer_name')) && onCustomerClick) {
       console.log(`Navigating to customer: ${value}`);
-      onCustomerClick(value);
-    } 
+      onCustomerClick(displayValue);
+    }
     // Service name columns
     else if ((lowerColumnId.includes('service') || columnId === 'service' || lowerColumnId.includes('service_name')) && onServiceClick) {
       console.log(`Navigating to service: ${value}`);
-      onServiceClick(value);
-    } 
+      onServiceClick(displayValue);
+    }
     // Therapist/Practitioner name columns
-    else if ((lowerColumnId.includes('practitioner') || lowerColumnId.includes('therapist') || columnId === 'therapist' || 
+    else if ((lowerColumnId.includes('practitioner') || lowerColumnId.includes('therapist') || columnId === 'therapist' ||
               lowerColumnId.includes('therapist_name') || lowerColumnId.includes('practitioner_name')) && onTherapistClick) {
       console.log(`Navigating to therapist: ${value}`);
-      onTherapistClick(value);
+      onTherapistClick(displayValue);
     }
   };
 
@@ -177,33 +179,33 @@ const DataTable: React.FC<DataTableProps> = ({
     if (value === null || value === undefined) {
       return '';
     }
-    
+
     // For InvoiceNetTotal, only show value on the first occurrence of an invoice
     if (columnId === 'InvoiceNetTotal') {
       // Only show the total for the first row of each invoice
       if (!rowData._isFirstInvoiceRow) {
-        return <span style={{ color: '#999' }}>—</span>;
+        return <span style={{ color: 'var(--text-muted)' }}>—</span>;
       }
-      
+
       if (typeof value === 'number') {
         return formatCurrency(value, currentClinic);
       }
     }
-    
+
     // Special handling for WalletTopUp column
     if (columnId === 'WalletTopUp') {
       if (value === null || value === undefined || value === '') {
         return '';
       }
-      
+
       // Check if the value contains "*Point(s)" and display as "Topup"
       if (String(value).includes('*Point') || typeof value === 'number' && value > 0) {
         return <span style={{ color: '#2e7d32', fontWeight: 500 }}>Topup</span>;
       }
-      
+
       return String(value);
     }
-    
+
     if (typeof value === 'number') {
       return value.toString();
     }
@@ -212,7 +214,7 @@ const DataTable: React.FC<DataTableProps> = ({
 
   return (
     <Box sx={{ width: '100%', height: '100%' }}>
-      <TableContainer 
+      <TableContainer
         sx={{
           height: 'calc(100vh - 250px)',
           overflowX: 'auto',
@@ -222,14 +224,14 @@ const DataTable: React.FC<DataTableProps> = ({
             height: '8px',
           },
           '&::-webkit-scrollbar-track': {
-            backgroundColor: '#111923',
+            backgroundColor: 'var(--surface-secondary)',
           },
           '&::-webkit-scrollbar-thumb': {
-            backgroundColor: '#2d3748',
+            backgroundColor: 'var(--border)',
             borderRadius: '4px',
           },
           '&::-webkit-scrollbar-thumb:hover': {
-            backgroundColor: '#4a5568',
+            backgroundColor: 'var(--text-muted)',
           },
         }}
       >
@@ -243,38 +245,38 @@ const DataTable: React.FC<DataTableProps> = ({
               width: '100%'
             }}
           >
-            <Typography sx={{ color: '#d1d5db' }}>
+            <Typography sx={{ color: 'var(--text-secondary)' }}>
               No data available for the selected filters
             </Typography>
           </Box>
         ) : (
-          <Table 
-            stickyHeader 
+          <Table
+            stickyHeader
             size="small"
-            sx={{ 
+            sx={{
               minWidth: '2400px', // Set minimum width to ensure proper column spacing for all columns
               width: '100%',
               tableLayout: 'fixed' // Makes columns respect their width settings
             }}
           >
             <TableHead>
-              <TableRow sx={{ bgcolor: '#101924' }}>
+              <TableRow sx={{ bgcolor: 'var(--surface)' }}>
                 {headCells.map((headCell: HeadCell) => (
                   <TableCell
                     key={headCell.id}
                     align={headCell.numeric ? 'right' : 'left'}
                     sortDirection={orderBy === headCell.id ? order : false}
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       width: COLUMN_WIDTHS[headCell.id] || '120px', // Fallback to 120px for undefined columns
                       minWidth: COLUMN_WIDTHS[headCell.id] || '120px',
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       whiteSpace: 'nowrap',
                       padding: '8px 12px',
                       '&:hover': {
-                        bgcolor: '#121826'
+                        bgcolor: 'var(--background)'
                       }
                     }}
                   >
@@ -283,7 +285,7 @@ const DataTable: React.FC<DataTableProps> = ({
                       direction={orderBy === headCell.id ? order : 'asc'}
                       onClick={() => handleRequestSort(headCell.id)}
                       sx={{
-                        color: '#d1d5db !important',
+                        color: 'var(--text-secondary) !important',
                         '&.MuiTableSortLabel-active': {
                           color: '#3b82f6 !important',
                         },
@@ -306,11 +308,11 @@ const DataTable: React.FC<DataTableProps> = ({
                     key={index}
                     sx={{
                       '&:hover': {
-                        bgcolor: '#242f3d',
+                        bgcolor: 'var(--surface-secondary)',
                       },
-                      bgcolor: '#111923',
+                      bgcolor: 'var(--surface-secondary)',
                       '&:nth-of-type(odd)': {
-                        bgcolor: '#121826',
+                        bgcolor: 'var(--background)',
                       },
                     }}
                   >
@@ -320,8 +322,8 @@ const DataTable: React.FC<DataTableProps> = ({
                         onClick={() => handleCellClick(key, row[key])}
                         align={typeof row[key] === 'number' ? 'right' : 'left'}
                         sx={{
-                          color: key === 'CustomerName' ? '#f3f4f6' : '#d1d5db',
-                          borderBottom: '1px solid #2d3748',
+                          color: key === 'CustomerName' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          borderBottom: '1px solid var(--border)',
                           padding: '6px 12px',
                           fontSize: '0.85rem',
                           width: COLUMN_WIDTHS[key] || '120px',
@@ -341,7 +343,7 @@ const DataTable: React.FC<DataTableProps> = ({
                             (key === 'TherapistName' && onTherapistClick)
                             ? {
                                 '&:hover': {
-                                  color: '#3b82f6',
+                                  color: 'var(--primary)',
                                   textDecoration: 'underline',
                                 },
                               }
@@ -369,26 +371,26 @@ const DataTable: React.FC<DataTableProps> = ({
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
           sx={{
-            color: '#d1d5db',
-            bgcolor: '#121826',
-            borderTop: '1px solid #2d3748',
+            color: 'var(--text-secondary)',
+            bgcolor: 'var(--background)',
+            borderTop: '1px solid var(--border)',
             '.MuiToolbar-root': {
               minHeight: '56px',
             },
             '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-              color: '#d1d5db',
+              color: 'var(--text-secondary)',
             },
             '.MuiSelect-select': {
-              color: '#d1d5db',
+              color: 'var(--text-secondary)',
             },
             '.MuiTablePagination-actions': {
-              color: '#d1d5db',
+              color: 'var(--text-secondary)',
             },
             '.MuiButtonBase-root.Mui-disabled': {
-              color: '#4a5568',
+              color: 'var(--text-muted)',
             },
             '.MuiSelect-icon': {
-              color: '#d1d5db',
+              color: 'var(--text-secondary)',
             },
           }}
         />

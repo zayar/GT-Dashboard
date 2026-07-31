@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatCheckInOutPhoneNumber,
   formatAppointmentDateTime,
   formatGraphqlDateTimeInMyanmar,
+  formatPhoneNumberForSpreadsheet,
   formatReportDateTime,
   getCheckInOutDateRangeBounds,
 } from './checkInOutReport';
@@ -50,6 +52,19 @@ describe('getCheckInOutDateRangeBounds', () => {
     });
 
     expect(bounds).toBeNull();
+  });
+});
+
+describe('check-in/out phone formatting', () => {
+  it('uses the same local display format as gt.report', () => {
+    expect(formatCheckInOutPhoneNumber('+959970100099', 'MMK')).toBe('09970100099');
+    expect(formatCheckInOutPhoneNumber('+85512345678', 'USD')).toBe('012345678');
+    expect(formatCheckInOutPhoneNumber('+12025550123', 'USD')).toBe('+12025550123');
+  });
+
+  it('preserves phone numbers as text in spreadsheet CSV imports', () => {
+    expect(formatPhoneNumberForSpreadsheet('09970100099')).toBe('="09970100099"');
+    expect(formatPhoneNumberForSpreadsheet('customer extension')).toBe('customer extension');
   });
 });
 

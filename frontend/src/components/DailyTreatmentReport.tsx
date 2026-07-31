@@ -54,7 +54,7 @@ const DailyTreatmentReport: React.FC = () => {
     try {
       setLoading(true);
       const formattedDate = date.toISOString().split('T')[0];
-      
+
       // First query for service matrix
       const matrixQuery = `
       WITH ServiceMatrix AS (
@@ -148,7 +148,7 @@ const DailyTreatmentReport: React.FC = () => {
   };
 
   const maxServiceCount = useMemo(() => {
-    return Math.max(...therapistData.flatMap(therapist => 
+    return Math.max(...therapistData.flatMap(therapist =>
       Object.values(therapist.services)
     ), 0);
   }, [therapistData]);
@@ -156,7 +156,7 @@ const DailyTreatmentReport: React.FC = () => {
   const serviceTotals = useMemo(() => {
     const totals: { [key: string]: number } = {};
     uniqueServices.forEach(service => {
-      totals[service] = therapistData.reduce((sum, therapist) => 
+      totals[service] = therapistData.reduce((sum, therapist) =>
         sum + (therapist.services[service] || 0), 0
       );
     });
@@ -166,9 +166,9 @@ const DailyTreatmentReport: React.FC = () => {
   const handleDownloadCSV = () => {
     // Create CSV content
     const headers = ['Therapist', ...uniqueServices, 'Total'];
-    const totalsRow = ['Total Services', ...uniqueServices.map(service => serviceTotals[service]), 
+    const totalsRow = ['Total Services', ...uniqueServices.map(service => serviceTotals[service]),
       Object.values(serviceTotals).reduce((sum, count) => sum + count, 0)];
-    
+
     const rows = therapistData.map(therapist => [
       therapist.therapist_name,
       ...uniqueServices.map(service => therapist.services[service] || 0),
@@ -186,7 +186,7 @@ const DailyTreatmentReport: React.FC = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     const formattedDate = selectedDate.toISOString().split('T')[0];
-    
+
     link.setAttribute('href', url);
     link.setAttribute('download', `daily_treatment_report_${formattedDate}.csv`);
     document.body.appendChild(link);
@@ -211,12 +211,12 @@ const DailyTreatmentReport: React.FC = () => {
 
   if (loading) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
-        bgcolor: '#ffffff'
+        bgcolor: 'var(--surface-secondary)'
       }}>
         <CircularProgress />
       </Box>
@@ -232,16 +232,16 @@ const DailyTreatmentReport: React.FC = () => {
   }
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       p: { xs: 2, sm: 3, md: 4 },
-      bgcolor: '#ffffff',
+      bgcolor: 'var(--surface-secondary)',
       minHeight: '100vh'
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <IconButton
           onClick={handleBack}
           sx={{
-            color: '#1a73e8',
+            color: 'var(--primary)',
             mr: 2,
             '&:hover': {
               bgcolor: 'rgba(26, 115, 232, 0.04)'
@@ -252,24 +252,24 @@ const DailyTreatmentReport: React.FC = () => {
         </IconButton>
       </Box>
 
-      <Paper sx={{ 
-        p: { xs: 2, sm: 3 }, 
-        bgcolor: '#ffffff', 
-        color: '#000000',
+      <Paper sx={{
+        p: { xs: 2, sm: 3 },
+        bgcolor: 'var(--surface-secondary)',
+        color: 'var(--text-primary)',
         mb: 3,
         borderRadius: 2,
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         overflow: 'hidden'
       }}>
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
           mb: 3,
           flexWrap: 'wrap',
           gap: 2
         }}>
-          <Typography variant="h5" sx={{ color: '#000000' }}>
+          <Typography variant="h5" sx={{ color: 'var(--text-primary)' }}>
             Daily Treatment Report
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -280,7 +280,7 @@ const DailyTreatmentReport: React.FC = () => {
                 onChange={handleDateChange}
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    color: '#000000',
+                    color: 'var(--text-primary)',
                     '& fieldset': {
                       borderColor: 'rgba(0, 0, 0, 0.23)'
                     },
@@ -288,7 +288,7 @@ const DailyTreatmentReport: React.FC = () => {
                       borderColor: 'rgba(0, 0, 0, 0.87)'
                     },
                     '&.Mui-focused fieldset': {
-                      borderColor: '#1a73e8'
+                      borderColor: 'var(--primary)'
                     }
                   },
                   '& .MuiInputLabel-root': {
@@ -298,10 +298,10 @@ const DailyTreatmentReport: React.FC = () => {
               />
             </LocalizationProvider>
             <Tooltip title="Download CSV">
-              <IconButton 
+              <IconButton
                 onClick={handleDownloadCSV}
                 sx={{
-                  color: '#1a73e8',
+                  color: 'var(--primary)',
                   '&:hover': {
                     bgcolor: 'rgba(26, 115, 232, 0.04)'
                   }
@@ -313,7 +313,7 @@ const DailyTreatmentReport: React.FC = () => {
           </Box>
         </Box>
 
-        <TableContainer 
+        <TableContainer
           sx={{
             maxHeight: 'calc(100vh - 300px)',
             overflow: 'auto',
@@ -322,22 +322,22 @@ const DailyTreatmentReport: React.FC = () => {
               width: 8
             },
             '&::-webkit-scrollbar-track': {
-              backgroundColor: '#f5f5f5',
+              backgroundColor: 'var(--surface-secondary)',
               borderRadius: 4
             },
             '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#1a73e8',
+              backgroundColor: 'var(--primary)',
               borderRadius: 4,
               '&:hover': {
-                backgroundColor: '#1557b0'
+                backgroundColor: 'var(--primary-hover)'
               }
             }
           }}
         >
-          <Table 
-            size="small" 
-            stickyHeader 
-            sx={{ 
+          <Table
+            size="small"
+            stickyHeader
+            sx={{
               minWidth: uniqueServices.length * 150 + 300,
               borderCollapse: 'separate',
               borderSpacing: 0
@@ -345,10 +345,10 @@ const DailyTreatmentReport: React.FC = () => {
           >
             <TableHead>
               <TableRow>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000',
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     position: 'sticky',
                     left: 0,
@@ -361,11 +361,11 @@ const DailyTreatmentReport: React.FC = () => {
                   Therapist
                 </TableCell>
                 {uniqueServices.map((service) => (
-                  <TableCell 
+                  <TableCell
                     key={service}
-                    sx={{ 
-                      bgcolor: '#f5f5f5',
-                      color: '#000000',
+                    sx={{
+                      bgcolor: 'var(--surface-secondary)',
+                      color: 'var(--text-primary)',
                       fontWeight: 600,
                       minWidth: '150px',
                       borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
@@ -374,10 +374,10 @@ const DailyTreatmentReport: React.FC = () => {
                     {service}
                   </TableCell>
                 ))}
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000',
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     minWidth: '100px',
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
@@ -387,12 +387,12 @@ const DailyTreatmentReport: React.FC = () => {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell 
-                  sx={{ 
+                <TableCell
+                  sx={{
                     position: 'sticky',
                     left: 0,
                     bgcolor: '#e3f2fd',
-                    color: '#000000',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderRight: '1px solid rgba(0, 0, 0, 0.12)',
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)',
@@ -402,12 +402,12 @@ const DailyTreatmentReport: React.FC = () => {
                   Total Services
                 </TableCell>
                 {uniqueServices.map((service) => (
-                  <TableCell 
+                  <TableCell
                     key={`total-${service}`}
                     align="center"
-                    sx={{ 
+                    sx={{
                       bgcolor: '#e3f2fd',
-                      color: '#000000',
+                      color: 'var(--text-primary)',
                       fontWeight: 600,
                       borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
                     }}
@@ -415,10 +415,10 @@ const DailyTreatmentReport: React.FC = () => {
                     {serviceTotals[service]}
                   </TableCell>
                 ))}
-                <TableCell 
-                  sx={{ 
+                <TableCell
+                  sx={{
                     bgcolor: '#e3f2fd',
-                    color: '#000000',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
                   }}
@@ -430,7 +430,7 @@ const DailyTreatmentReport: React.FC = () => {
             </TableHead>
             <TableBody>
               {therapistData.map((therapist) => (
-                <TableRow 
+                <TableRow
                   key={therapist.therapist_name}
                   sx={{
                     '&:hover': {
@@ -438,17 +438,17 @@ const DailyTreatmentReport: React.FC = () => {
                     }
                   }}
                 >
-                  <TableCell 
-                    sx={{ 
+                  <TableCell
+                    sx={{
                       position: 'sticky',
                       left: 0,
                       bgcolor: selectedTherapist === therapist.therapist_name ? 'rgba(26, 115, 232, 0.1)' : '#ffffff',
-                      color: '#1a73e8',
+                      color: 'var(--primary)',
                       fontWeight: 500,
                       borderRight: '1px solid rgba(0, 0, 0, 0.12)',
                       cursor: 'pointer',
                       '&:hover': {
-                        color: '#1557b0',
+                        color: 'var(--primary-hover)',
                         textDecoration: 'underline',
                         bgcolor: 'rgba(26, 115, 232, 0.1)'
                       }
@@ -460,12 +460,12 @@ const DailyTreatmentReport: React.FC = () => {
                   {uniqueServices.map((service) => {
                     const count = therapist.services[service] || 0;
                     return (
-                      <TableCell 
+                      <TableCell
                         key={`${therapist.therapist_name}-${service}`}
                         align="center"
-                        sx={{ 
+                        sx={{
                           bgcolor: getHeatmapColor(count, maxServiceCount),
-                          color: '#000000',
+                          color: 'var(--text-primary)',
                           transition: 'background-color 0.3s ease'
                         }}
                       >
@@ -473,11 +473,11 @@ const DailyTreatmentReport: React.FC = () => {
                       </TableCell>
                     );
                   })}
-                  <TableCell 
-                    sx={{ 
-                      color: '#000000',
+                  <TableCell
+                    sx={{
+                      color: 'var(--text-primary)',
                       fontWeight: 600,
-                      bgcolor: '#f5f5f5'
+                      bgcolor: 'var(--surface-secondary)'
                     }}
                     align="center"
                   >
@@ -491,28 +491,28 @@ const DailyTreatmentReport: React.FC = () => {
       </Paper>
 
       {/* Treatment Records Table */}
-      <Paper sx={{ 
-        p: { xs: 2, sm: 3 }, 
-        bgcolor: '#ffffff', 
-        color: '#000000',
+      <Paper sx={{
+        p: { xs: 2, sm: 3 },
+        bgcolor: 'var(--surface-secondary)',
+        color: 'var(--text-primary)',
         borderRadius: 2,
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         overflow: 'hidden'
       }}>
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
           mb: 2
         }}>
-          <Typography variant="h6" sx={{ color: '#000000' }}>
+          <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>
             Treatment Records {selectedTherapist ? `- ${selectedTherapist}` : ''}
           </Typography>
           {selectedTherapist && (
             <Typography
               variant="body2"
               sx={{
-                color: '#1a73e8',
+                color: 'var(--primary)',
                 cursor: 'pointer',
                 '&:hover': {
                   textDecoration: 'underline'
@@ -524,8 +524,8 @@ const DailyTreatmentReport: React.FC = () => {
             </Typography>
           )}
         </Box>
-        
-        <TableContainer 
+
+        <TableContainer
           sx={{
             maxHeight: '400px',
             overflow: 'auto',
@@ -534,14 +534,14 @@ const DailyTreatmentReport: React.FC = () => {
               height: 8
             },
             '&::-webkit-scrollbar-track': {
-              backgroundColor: '#f5f5f5',
+              backgroundColor: 'var(--surface-secondary)',
               borderRadius: 4
             },
             '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#1a73e8',
+              backgroundColor: 'var(--primary)',
               borderRadius: 4,
               '&:hover': {
-                backgroundColor: '#1557b0'
+                backgroundColor: 'var(--primary-hover)'
               }
             }
           }}
@@ -549,40 +549,40 @@ const DailyTreatmentReport: React.FC = () => {
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000',
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
                   }}
                 >
                   Date & Time
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000',
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
                   }}
                 >
                   Therapist
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000',
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
                   }}
                 >
                   Service
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000',
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '2px solid rgba(0, 0, 0, 0.12)'
                   }}
@@ -593,7 +593,7 @@ const DailyTreatmentReport: React.FC = () => {
             </TableHead>
             <TableBody>
               {filteredTreatmentRecords.map((record, index) => (
-                <TableRow 
+                <TableRow
                   key={index}
                   sx={{
                     '&:hover': {
@@ -602,15 +602,15 @@ const DailyTreatmentReport: React.FC = () => {
                     bgcolor: record.therapist_name === selectedTherapist ? 'rgba(26, 115, 232, 0.04)' : 'transparent'
                   }}
                 >
-                  <TableCell sx={{ color: '#000000' }}>
+                  <TableCell sx={{ color: 'var(--text-primary)' }}>
                     {record.check_in_time}
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#1a73e8',
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
                       cursor: 'pointer',
                       '&:hover': {
-                        color: '#1557b0',
+                        color: 'var(--primary-hover)',
                         textDecoration: 'underline'
                       }
                     }}
@@ -618,12 +618,12 @@ const DailyTreatmentReport: React.FC = () => {
                   >
                     {record.therapist_name}
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#1a73e8',
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
                       cursor: 'pointer',
                       '&:hover': {
-                        color: '#1557b0',
+                        color: 'var(--primary-hover)',
                         textDecoration: 'underline'
                       }
                     }}
@@ -631,12 +631,12 @@ const DailyTreatmentReport: React.FC = () => {
                   >
                     {record.service_name}
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#1a73e8',
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
                       cursor: 'pointer',
                       '&:hover': {
-                        color: '#1557b0',
+                        color: 'var(--primary-hover)',
                         textDecoration: 'underline'
                       }
                     }}
@@ -654,4 +654,4 @@ const DailyTreatmentReport: React.FC = () => {
   );
 };
 
-export default DailyTreatmentReport; 
+export default DailyTreatmentReport;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Paper,
   Table,
@@ -19,55 +19,41 @@ import {
   Stack,
   Chip,
   Button,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  SelectChangeEvent,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ClearIcon from '@mui/icons-material/Clear';
-import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import ReplayIcon from '@mui/icons-material/Replay';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import axios from 'axios';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { LocalizationProvider, DatePicker, DatePickerProps } from '@mui/x-date-pickers';
-import {
-  format,
-  isValid,
-  parse,
-  parseISO,
-  subDays,
-  startOfWeek,
-  endOfWeek,
-  startOfMonth,
-  endOfMonth,
-  isWithinInterval,
-  isSameDay,
-  isSameMonth,
-  isSameWeek
-} from 'date-fns';
+import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
+import { format, startOfMonth } from 'date-fns';
 import { useClinic } from '../contexts/ClinicContext';
+import {
+  buildWalletTransactionsQuery,
+  formatMmk,
+  formatMyanmarWalletDateTime,
+  formatSignedMmk,
+  getMyanmarWalletDateKey,
+  MYANMAR_TIME_ZONE_LABEL,
+  summarizeWalletTransactions,
+} from '../utils/walletTransactionReport';
 
 // Updated interface to match the BigQuery schema
 interface Transaction {
   transactionNumber: string;
   type: string;
   status: string;
-  balance: string;
+  amount: string | number | null;
   comment: string;
-  cash: string;
-  detailBalance: string;
-  accountbalance: string;
-  mainAccount: string;
-  sender_id: string;
+  walletBalanceAfter: string | number | null;
+  mainAccountID: string;
+  walletAccount: string;
   senderName: string;
   senderPhone: string;
-  recipient_id: string;
   recipientName: string;
   recipientPhone: string;
   createddate_myanmar: string;
@@ -75,81 +61,16 @@ interface Transaction {
   ClinicName: string;
 }
 
-// Sample mock data to use when the backend is unavailable
-const MOCK_TRANSACTIONS: Transaction[] = [
-  {
-    transactionNumber: '12574345549536022',
-    type: 'Transfer',
-    status: 'IN',
-    balance: '90000.00',
-    comment: 'Buy package - C~Max Face Serum 10',
-    cash: '',
-    detailBalance: '',
-    accountbalance: '',
-    mainAccount: '',
-    sender_id: '123',
-    senderName: 'Amy',
-    senderPhone: '+9595900252537',
-    recipient_id: '456',
-    recipientName: 'Zun Ko Lwin',
-    recipientPhone: '+959795025455',
-    createddate_myanmar: '2025-04-01 14:48:13',
-    ClinicCode: 'GTP',
-    ClinicName: 'Great Time Plaza'
-  },
-  {
-    transactionNumber: '12573495588204622',
-    type: 'Transfer',
-    status: 'OUT',
-    balance: '2050000.00',
-    comment: 'Ei Kyal',
-    cash: '',
-    detailBalance: '',
-    accountbalance: '',
-    mainAccount: '',
-    sender_id: '789',
-    senderName: 'Kay Thi Maw',
-    senderPhone: '+9594200824444',
-    recipient_id: '101',
-    recipientName: 'Ei Kyal Sin Ko',
-    recipientPhone: '+959266663900',
-    createddate_myanmar: '2025-04-01 14:54:42',
-    ClinicCode: 'GTP',
-    ClinicName: 'Great Time Plaza'
-  },
-  {
-    transactionNumber: '12573495598068122',
-    type: 'Transfer',
-    status: 'OUT',
-    balance: '600000.00',
-    comment: 'Buy package - Underarm Hair Removal x 10 times',
-    cash: '',
-    detailBalance: '',
-    accountbalance: '',
-    mainAccount: '',
-    sender_id: '101',
-    senderName: 'Ei Kyal Sin Ko',
-    senderPhone: '+959266663900',
-    recipient_id: '456',
-    recipientName: 'Zun Ko Lwin',
-    recipientPhone: '+959795025455',
-    createddate_myanmar: '2025-04-01 14:56:20',
-    ClinicCode: 'GTP',
-    ClinicName: 'Great Time Plaza'
-  }
-];
-
 const Transaction: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isMockData, setIsMockData] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [retryCount, setRetryCount] = useState(0);
   
   // Date filter states
-  const [startDate, setStartDate] = useState<Date | null>(new Date());
+  const [startDate, setStartDate] = useState<Date | null>(startOfMonth(new Date()));
   const [endDate, setEndDate] = useState<Date | null>(new Date());
   
   // Get current clinic from context
@@ -172,47 +93,17 @@ const Transaction: React.FC = () => {
     setError(null);
     
     try {
-      // Create date conditions for SQL query
-      let dateCondition = '';
-      if (startDate && endDate) {
-        const formattedStartDate = format(startDate, 'yyyy-MM-dd');
-        const formattedEndDate = format(endDate, 'yyyy-MM-dd');
-        dateCondition = `AND DATE(createddate_myanmar) BETWEEN '${formattedStartDate}' AND '${formattedEndDate}'`;
+      if (!currentClinic?.pass_id) {
+        throw new Error('The selected clinic is not connected to a wallet account.');
       }
+
+      const query = buildWalletTransactionsQuery({
+        clinicCode: currentClinic.pass_id,
+        startDate,
+        endDate,
+      });
       
-      // Build SQL query to fetch wallet transactions by clinic name
-      // Hardcoding 'Fancy House' for testing
-      const query = `
-        SELECT 
-          transactionNumber,
-          type,
-          status,
-          balance,
-          comment,
-          cash,
-          detailBalance,
-          accountbalance,
-          mainAccountName,
-          sender_id,
-          senderName,
-          senderPhone,
-          recipient_id,
-          recipientName,
-          recipientPhone,
-          createddate_myanmar,
-          ClinicCode,
-          ClinicName
-        FROM 
-          \`piti-pass.passdb_prod.wallettransaction\`
-        WHERE 
-          ClinicCode = '${currentClinic?.pass_id}'
-          ${dateCondition}
-        ORDER BY 
-          createddate_myanmar DESC
-        LIMIT 100
-      `;
-      
-      console.log('Executing wallet transaction query with hardcoded clinic:', query);
+      console.log('Executing wallet transaction query:', query);
       const searchQuery = new URLSearchParams({
         projectId: "piti-pass",
         location: "us-central1",
@@ -230,9 +121,8 @@ const Transaction: React.FC = () => {
         );
         
         if (response.data && response.data.success && response.data.data) {
-          console.log(`Fetched ${response.data.data.length} transactions for clinic: Fancy House`);
+          console.log(`Fetched ${response.data.data.length} wallet ledger entries for clinic: ${currentClinic.name}`);
           setTransactions(response.data.data);
-          setIsMockData(false);
         } else {
           console.warn('Invalid data format from backend:', response.data);
           throw new Error('Backend returned invalid data format');
@@ -251,85 +141,32 @@ const Transaction: React.FC = () => {
       console.error('Error loading transactions:', err);
       if (err.name === 'AbortError' || err.code === 'ECONNABORTED' || 
           err.code === 'ETIMEDOUT' || (err.response && err.response.status >= 500)) {
-        setError('Connection to server timed out. Using sample transaction data.');
+        setError('Connection to the wallet service timed out. No transaction data is being shown.');
       } else if (err.response && err.response.status === 401) {
         setError('Authentication failed. Please log in again.');
       } else if (err.response && err.response.status === 403) {
         setError('You do not have permission to access this data.');
       } else {
-        // Include more error details to help debugging
         const errorDetails = err.response?.data?.error || err.message || 'Unknown error';
-        setError(`Error loading transactions: ${errorDetails}. Using sample data instead.`);
+        setError(`Error loading transactions: ${errorDetails}`);
       }
-      
-      // Update mock data to use Fancy House as clinic name
-      const mocksWithFancyHouse = MOCK_TRANSACTIONS.map(t => ({
-        ...t,
-        ClinicName: 'Fancy House',
-        ClinicCode: 'FANCY'
-      }));
-      
-      setTransactions(mocksWithFancyHouse);
-      setIsMockData(true);
+
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate]); // Remove currentClinic from dependencies to prevent rerenders
+  }, [startDate, endDate, currentClinic]);
 
   useEffect(() => {
     fetchTransactions();
   }, [retryCount, fetchTransactions]);
 
-  // Parse transaction date safely
-  const parseTransactionDate = (dateString: string): Date | null => {
-    if (!dateString) return null;
-    try {
-      // Try multiple date formats
-      let date: Date | null = null;
-      
-      // First try as ISO string
-      date = parseISO(dateString);
-      
-      // If not valid, try various formats
-      if (!isValid(date)) {
-        // Try yyyy-MM-dd HH:mm:ss format
-        date = parse(dateString, 'yyyy-MM-dd HH:mm:ss', new Date());
-      }
-      
-      if (!isValid(date)) {
-        // Try dd/MM/yyyy format
-        date = parse(dateString, 'dd/MM/yyyy', new Date());
-      }
-      
-      if (!isValid(date)) {
-        // Try MM/dd/yyyy format
-        date = parse(dateString, 'MM/dd/yyyy', new Date());
-      }
-      
-      // For debugging
-      if (!isValid(date)) {
-        console.warn(`Failed to parse date: ${dateString}`);
-      } else {
-        // Debug parsed date
-        console.debug(`Parsed date: ${dateString} -> ${format(date, 'yyyy-MM-dd')}`);
-      }
-      
-      return isValid(date) ? date : null;
-    } catch (e) {
-      console.error(`Error parsing date: ${dateString}`, e);
-      return null;
-    }
-  };
-
   // Add comparison function for date sorting
   const compareValues = (key: keyof Transaction, a: Transaction, b: Transaction, direction: 'ascending' | 'descending') => {
     if (key === 'createddate_myanmar') {
-      const dateA = parseTransactionDate(a[key] as string) || new Date(0);
-      const dateB = parseTransactionDate(b[key] as string) || new Date(0);
-      
-      return direction === 'ascending' 
-        ? dateA.getTime() - dateB.getTime()
-        : dateB.getTime() - dateA.getTime();
+      return direction === 'ascending'
+        ? a.createddate_myanmar.localeCompare(b.createddate_myanmar)
+        : b.createddate_myanmar.localeCompare(a.createddate_myanmar);
     }
     
     // Default string comparison for other fields
@@ -360,13 +197,14 @@ const Transaction: React.FC = () => {
   const exportToCSV = () => {
     // CSV Headers
     const headers = [
-      'Date',
+      `Date (${MYANMAR_TIME_ZONE_LABEL})`,
       'Transaction Number',
       'Type',
-      'Status',
-      'Amount',
+      'Direction',
+      'Amount (MMK)',
+      'Wallet Account',
+      'Wallet Balance After (MMK)',
       'Comment',
-      'Balance',
       'Sender Name',
       'Sender Phone',
       'Recipient Name',
@@ -379,9 +217,10 @@ const Transaction: React.FC = () => {
       t.transactionNumber,
       t.type,
       t.status,
-      t.balance,
+      t.amount,
+      t.walletAccount || 'N/A',
+      t.walletBalanceAfter,
       t.comment,
-      t.accountbalance,
       t.senderName || 'N/A',
       t.senderPhone || 'N/A',
       t.recipientName || 'N/A',
@@ -425,26 +264,17 @@ const Transaction: React.FC = () => {
     }
     
     // Filter by date range
-    if (startDate && endDate) {
+    if (startDate || endDate) {
+      const startDateKey = startDate ? format(startDate, 'yyyy-MM-dd') : null;
+      const endDateKey = endDate ? format(endDate, 'yyyy-MM-dd') : null;
       filtered = filtered.filter(transaction => {
-        const transactionDate = parseTransactionDate(transaction.createddate_myanmar);
-        if (!transactionDate) return false;
-        
-        // Create end of day for the end date to include the full day
-        const endOfDayDate = new Date(endDate);
-        endOfDayDate.setHours(23, 59, 59, 999);
-        
-        return isWithinInterval(transactionDate, { 
-          start: startDate, 
-          end: endOfDayDate 
-        });
+        const transactionDateKey = getMyanmarWalletDateKey(transaction.createddate_myanmar);
+        if (!transactionDateKey) return false;
+        if (startDateKey && transactionDateKey < startDateKey) return false;
+        if (endDateKey && transactionDateKey > endDateKey) return false;
+        return true;
       });
     }
-    
-    // // Always filter by 'Fancy House' clinic name (hardcoded for testing)
-    // filtered = filtered.filter(transaction => 
-    //   transaction.ClinicName === 'Fancy House'
-    // );
     
     // Apply sorting if a sort key is specified
     if (sortConfig.key) {
@@ -468,6 +298,11 @@ const Transaction: React.FC = () => {
   const handleRetry = () => {
     setRetryCount(prev => prev + 1);
   };
+
+  const walletSummary = useMemo(
+    () => summarizeWalletTransactions(filteredTransactions),
+    [filteredTransactions],
+  );
 
   if (loading) {
     return (
@@ -518,10 +353,13 @@ const Transaction: React.FC = () => {
           </Typography>
         )}
       </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: -2, mb: 2 }}>
+        Ledger-level wallet movements. Dates are shown in {MYANMAR_TIME_ZONE_LABEL}.
+      </Typography>
       
-      {(isMockData || error) && (
+      {error && (
         <Alert 
-          severity={error ? "warning" : "info"} 
+          severity="error"
           sx={{ 
             mb: 2,
             bgcolor: isDarkMode ? (
@@ -557,7 +395,7 @@ const Transaction: React.FC = () => {
             ) : undefined
           }
         >
-          {error || "Using sample transaction data. Real transaction data is currently unavailable due to database access issues."}
+          {error}
         </Alert>
       )}
       
@@ -753,7 +591,7 @@ const Transaction: React.FC = () => {
       {/* Active Filters Display */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box>
-          {(searchTerm || (startDate && endDate)) && (
+          {(searchTerm || startDate || endDate) && (
             <Box 
               display="flex" 
               gap={1} 
@@ -791,9 +629,9 @@ const Transaction: React.FC = () => {
                   }}
                 />
               )}
-              {(startDate && endDate) && (
+              {(startDate || endDate) && (
                 <Chip 
-                  label={`Range: ${format(startDate, 'yyyy-MM-dd')} to ${format(endDate, 'yyyy-MM-dd')}`} 
+                  label={`Range: ${startDate ? format(startDate, 'yyyy-MM-dd') : 'Any'} to ${endDate ? format(endDate, 'yyyy-MM-dd') : 'Any'}`}
                   size="small" 
                   onDelete={handleDateClear}
                   sx={{
@@ -812,25 +650,72 @@ const Transaction: React.FC = () => {
           )}
         </Box>
         
-        {/* Export CSV Button */}
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<FileDownloadIcon />}
-          onClick={exportToCSV}
-          disabled={filteredTransactions.length === 0}
-          sx={{
-            color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
-            borderColor: isDarkMode ? alpha(theme.palette.primary.light, 0.5) : undefined,
-            '&:hover': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : undefined,
-              borderColor: isDarkMode ? theme.palette.primary.light : undefined
-            }
-          }}
-        >
-          Export CSV
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ReplayIcon />}
+            onClick={fetchTransactions}
+          >
+            Refresh
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<FileDownloadIcon />}
+            onClick={exportToCSV}
+            disabled={filteredTransactions.length === 0}
+            sx={{
+              color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
+              borderColor: isDarkMode ? alpha(theme.palette.primary.light, 0.5) : undefined,
+              '&:hover': {
+                backgroundColor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : undefined,
+                borderColor: isDarkMode ? theme.palette.primary.light : undefined
+              }
+            }}
+          >
+            Export CSV
+          </Button>
+        </Stack>
       </Box>
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' },
+          gap: 1.5,
+          mb: 2,
+        }}
+      >
+        {[
+          { label: 'Transactions', value: walletSummary.uniqueTransactions.toLocaleString() },
+          { label: 'Ledger entries', value: walletSummary.ledgerEntryCount.toLocaleString() },
+          { label: 'Incoming', value: formatMmk(walletSummary.incomingAmount), color: theme.palette.success.main },
+          { label: 'Outgoing', value: formatMmk(walletSummary.outgoingAmount), color: theme.palette.error.main },
+        ].map(card => (
+          <Paper
+            key={card.label}
+            variant="outlined"
+            sx={{ p: 1.5, bgcolor: 'transparent', borderColor: alpha(theme.palette.divider, 0.6) }}
+          >
+            <Typography variant="caption" color="text.secondary">{card.label}</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: card.color || 'text.primary' }}>
+              {card.value}
+            </Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
+        A transfer appears as two ledger entries: OUT for the sender wallet and IN for the recipient wallet.
+        “Balance after” belongs to the wallet account shown on that row, so paired balances are expected to differ.
+      </Alert>
+
+      {walletSummary.invalidAmountCount > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {walletSummary.invalidAmountCount} ledger entries have an invalid amount and are excluded from the totals.
+        </Alert>
+      )}
       
       <Box sx={{ mb: 1 }}>
         <Typography 
@@ -838,7 +723,7 @@ const Transaction: React.FC = () => {
           color={isDarkMode ? "rgba(255,255,255,0.7)" : "text.secondary"}
           sx={{ fontStyle: 'italic' }}
         >
-          Showing {filteredTransactions.length} of {transactions.length} transactions
+          Showing {filteredTransactions.length} of {transactions.length} ledger entries
         </Typography>
       </Box>
       
@@ -900,11 +785,9 @@ const Transaction: React.FC = () => {
                       ? alpha(theme.palette.primary.dark, 0.3) 
                       : alpha(theme.palette.primary.light, 0.3)
                   },
-                  display: 'flex',
-                  alignItems: 'center'
                 }}
               >
-                Date
+                Date (MMT)
                 {sortConfig.key === 'createddate_myanmar' && (
                   <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
                     {sortConfig.direction === 'ascending' 
@@ -914,25 +797,37 @@ const Transaction: React.FC = () => {
                   </Box>
                 )}
               </TableCell>
-              <TableCell>Transaction Number</TableCell>
+              <TableCell>Transaction #</TableCell>
               <TableCell>Type</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Amount</TableCell>
+              <TableCell>Direction</TableCell>
+              <TableCell align="right">Amount (MMK)</TableCell>
+              <TableCell>Wallet Account</TableCell>
+              <TableCell align="right">Balance After (MMK)</TableCell>
               <TableCell>Comment</TableCell>
-              <TableCell>Balance</TableCell>
-              <TableCell>Sender Name</TableCell>
-              <TableCell>Sender Phone</TableCell>
-              <TableCell>Recipient Name</TableCell>
-              <TableCell>Recipient Phone</TableCell>
+              <TableCell>Sender</TableCell>
+              <TableCell>Recipient</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {filteredTransactions.length > 0 ? (
-              filteredTransactions.map((transaction, index) => (
-                <TableRow key={`${transaction.transactionNumber}-${index}`}>
-                  {/* Date column - now first */}
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.createddate_myanmar}
+              filteredTransactions.map((transaction, index) => {
+                const startsTransaction = index === 0 ||
+                  filteredTransactions[index - 1].transactionNumber !== transaction.transactionNumber;
+
+                return (
+                <TableRow
+                  key={`${transaction.transactionNumber}-${transaction.status}-${transaction.mainAccountID || index}`}
+                  sx={{
+                    '& > td': startsTransaction
+                      ? { borderTop: `2px solid ${alpha(theme.palette.primary.main, 0.25)}` }
+                      : undefined,
+                  }}
+                >
+                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined, whiteSpace: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {formatMyanmarWalletDateTime(transaction.createddate_myanmar)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">MMT</Typography>
                   </TableCell>
                   
                   <TableCell>
@@ -951,40 +846,7 @@ const Transaction: React.FC = () => {
                   </TableCell>
                   
                   <TableCell>
-                    <Chip
-                      label={transaction.type}
-                      size="small"
-                      color={transaction.type === 'CREDIT' ? 'success' : 
-                             transaction.type === 'DEBIT' ? 'error' : 
-                             transaction.type === 'Transfer' ? 'primary' : 
-                             transaction.type === 'Deposit' ? 'info' : 
-                             transaction.type === 'Share' ? 'secondary' : 
-                             'default'}
-                      variant={isDarkMode ? 'filled' : 'filled'}
-                      sx={{ 
-                        minWidth: '70px',
-                        fontWeight: 'bold',
-                        backgroundColor: isDarkMode ? (
-                          transaction.type === 'CREDIT' ? alpha(theme.palette.success.main, 0.9) : 
-                          transaction.type === 'DEBIT' ? alpha(theme.palette.error.main, 0.9) : 
-                          transaction.type === 'Transfer' ? alpha(theme.palette.primary.main, 0.9) : 
-                          transaction.type === 'Deposit' ? alpha(theme.palette.info.main, 0.9) : 
-                          transaction.type === 'Share' ? alpha(theme.palette.secondary.main, 0.9) : 
-                          alpha(theme.palette.grey[600], 0.9)
-                        ) : undefined,
-                        color: isDarkMode ? theme.palette.common.white : undefined,
-                        '&:hover': {
-                          backgroundColor: isDarkMode ? (
-                            transaction.type === 'CREDIT' ? alpha(theme.palette.success.main, 1) : 
-                            transaction.type === 'DEBIT' ? alpha(theme.palette.error.main, 1) : 
-                            transaction.type === 'Transfer' ? alpha(theme.palette.primary.main, 1) : 
-                            transaction.type === 'Deposit' ? alpha(theme.palette.info.main, 1) : 
-                            transaction.type === 'Share' ? alpha(theme.palette.secondary.main, 1) : 
-                            alpha(theme.palette.grey[600], 1)
-                          ) : undefined
-                        }
-                      }}
-                    />
+                    <Chip label={transaction.type} size="small" color={transaction.type === 'Share' ? 'secondary' : 'primary'} />
                   </TableCell>
                   
                   {/* Status column with colors based on IN/OUT */}
@@ -995,7 +857,7 @@ const Transaction: React.FC = () => {
                       color={transaction.status === 'IN' ? 'success' : 
                              transaction.status === 'OUT' ? 'error' : 
                              'default'}
-                      variant={isDarkMode ? 'filled' : 'filled'}
+                      variant="filled"
                       sx={{ 
                         minWidth: '50px',
                         fontWeight: 'bold',
@@ -1009,48 +871,44 @@ const Transaction: React.FC = () => {
                     />
                   </TableCell>
                   
-                  <TableCell sx={{ 
-                    color: isDarkMode 
-                      ? (transaction.type === 'CREDIT' ? theme.palette.success.light : transaction.type === 'DEBIT' ? theme.palette.error.light : theme.palette.common.white) 
-                      : (transaction.type === 'CREDIT' ? theme.palette.success.main : transaction.type === 'DEBIT' ? theme.palette.error.main : undefined),
+                  <TableCell align="right" sx={{
+                    color: transaction.status === 'IN' ? theme.palette.success.main : theme.palette.error.main,
                     fontWeight: 'bold',
-                    textAlign: 'right'
+                    whiteSpace: 'nowrap',
                   }}>
-                    {parseFloat(transaction.balance || '0').toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })}
+                    {formatSignedMmk(transaction.amount, transaction.status)}
                   </TableCell>
-                  <TableCell sx={{ color: isDarkMode ? alpha(theme.palette.common.white, 0.7) : undefined }}>
-                    {transaction.comment || ''}
+                  <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {transaction.walletAccount || 'Unknown wallet'}
                   </TableCell>
-                  <TableCell sx={{ 
+                  <TableCell align="right" sx={{
                     color: isDarkMode ? theme.palette.common.white : undefined,
                     fontWeight: 'medium',
-                    textAlign: 'right'
+                    whiteSpace: 'nowrap',
                   }}>
-                    {parseFloat(transaction.accountbalance || '0').toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })}
+                    {formatMmk(transaction.walletBalanceAfter)}
+                  </TableCell>
+                  <TableCell sx={{ color: isDarkMode ? alpha(theme.palette.common.white, 0.7) : undefined, minWidth: 220 }}>
+                    {transaction.comment || '—'}
                   </TableCell>
                   <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.senderName || 'N/A'}
+                    <Typography variant="body2">{transaction.senderName || 'Unknown'}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {transaction.senderPhone || 'No phone'}
+                    </Typography>
                   </TableCell>
                   <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.senderPhone || 'N/A'}
-                  </TableCell>
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.recipientName || 'N/A'}
-                  </TableCell>
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.recipientPhone || 'N/A'}
+                    <Typography variant="body2">{transaction.recipientName || 'Unknown'}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {transaction.recipientPhone || 'No phone'}
+                    </Typography>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             ) : (
               <TableRow>
-                <TableCell colSpan={11} align="center">
+                <TableCell colSpan={10} align="center">
                   <Box sx={{ py: 3, color: isDarkMode ? theme.palette.common.white : undefined }}>
                     {transactions.length > 0 ? 
                       `No matches for the current filters. Try changing the date filter.` : 
@@ -1090,4 +948,4 @@ const Transaction: React.FC = () => {
   );
 };
 
-export default Transaction; 
+export default Transaction;

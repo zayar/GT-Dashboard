@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Box, 
-  Typography, 
-  Paper, 
-  Select, 
-  MenuItem, 
-  SelectChangeEvent, 
+import {
+  Box,
+  Typography,
+  Paper,
+  Select,
+  MenuItem,
+  SelectChangeEvent,
   CircularProgress,
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
   TableRow,
   Pagination,
   FormControl,
@@ -111,7 +111,7 @@ const SalesBySalesPerson: React.FC = () => {
 
       // SQL query to get all transactions for the date range
       const query = `
-      SELECT 
+      SELECT
         FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) AS Date,
         InvoiceNumber,
         CustomerName,
@@ -122,15 +122,15 @@ const SalesBySalesPerson: React.FC = () => {
         PaymentStatus,
         CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
         SellerName
-      FROM 
+      FROM
         great_time.MainPaymentView
-      WHERE 
+      WHERE
         DATE(OrderCreatedDate) BETWEEN '${formattedStartDate}' AND '${formattedEndDate}'
         AND PaymentStatus = 'PAID'
         AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
         AND PaymentMethod != 'PASS'
         AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-      ORDER BY 
+      ORDER BY
         Date DESC, InvoiceNumber;
       `;
 
@@ -155,13 +155,13 @@ const SalesBySalesPerson: React.FC = () => {
       console.log('Sales data fetched successfully, records:', salesData.length);
 
       // Filter out records with 0 MMK value
-      const filteredSalesData = salesData.filter((sale: Transaction) => 
+      const filteredSalesData = salesData.filter((sale: Transaction) =>
         sale.InvoiceNetTotal && sale.InvoiceNetTotal > 0
       );
 
       setTransactions(filteredSalesData);
       setFilteredTransactions(filteredSalesData);
-      
+
       // Process data for sales by sales person summary
       processDataForSalesPerson(filteredSalesData);
 
@@ -207,7 +207,7 @@ const SalesBySalesPerson: React.FC = () => {
 
     // Sort by total amount (highest first)
     salesData.sort((a, b) => b.totalAmount - a.totalAmount);
-    
+
     setSalesBySalesPerson(salesData);
   };
 
@@ -233,7 +233,7 @@ const SalesBySalesPerson: React.FC = () => {
     if (salesBySalesPerson.length === 0) return;
 
     const workbook = XLSX.utils.book_new();
-    
+
     // Create data rows including the total row
     const rows = [
       ...salesBySalesPerson.map(person => ({
@@ -241,7 +241,7 @@ const SalesBySalesPerson: React.FC = () => {
         'Transaction Count': person.transactionCount,
         'Total Amount': formatCurrency(person.totalAmount, currentClinic)
       })),
-      { 
+      {
         'Sales Person': 'Total',
         'Transaction Count': totalTransactions,
         'Total Amount': formatCurrency(totalAmount, currentClinic)
@@ -250,7 +250,7 @@ const SalesBySalesPerson: React.FC = () => {
 
     // Create worksheet from data
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    
+
     // Set column widths
     const colWidths = [
       { wch: 25 }, // Sales Person
@@ -261,7 +261,7 @@ const SalesBySalesPerson: React.FC = () => {
 
     // Add worksheet to workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales Summary');
-    
+
     // Generate filename with current date
     const dateStr = format(new Date(), 'yyyy-MM-dd');
     const fileName = `sales_summary_${dateStr}.xlsx`;
@@ -275,7 +275,7 @@ const SalesBySalesPerson: React.FC = () => {
     if (filteredTransactions.length === 0) return;
 
     const workbook = XLSX.utils.book_new();
-    
+
     // Format data for Excel
     const rows = filteredTransactions.map(transaction => ({
       'Date': transaction.Date,
@@ -291,7 +291,7 @@ const SalesBySalesPerson: React.FC = () => {
 
     // Create worksheet from data
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    
+
     // Set column widths
     const colWidths = [
       { wch: 12 }, // Date
@@ -308,7 +308,7 @@ const SalesBySalesPerson: React.FC = () => {
 
     // Add worksheet to workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Detailed Transactions');
-    
+
     // Generate filename with current date
     const dateStr = format(new Date(), 'yyyy-MM-dd');
     const fileName = `transactions_${dateStr}.xlsx`;
@@ -319,20 +319,20 @@ const SalesBySalesPerson: React.FC = () => {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#101924' }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'var(--surface)' }}>
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3, maxWidth: '1200px', margin: '0 auto', bgcolor: '#101924', minHeight: '100vh' }}>
-        <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: '8px', mb: 3 }}>
-          <Typography variant="h5" sx={{ color: '#e2e8f0', mb: 2 }}>
+      <Box sx={{ p: 3, maxWidth: '1200px', margin: '0 auto', bgcolor: 'var(--surface)', minHeight: '100vh' }}>
+        <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: '8px', mb: 3 }}>
+          <Typography variant="h5" sx={{ color: 'var(--text-primary)', mb: 2 }}>
             Error Loading Sales Data
           </Typography>
-          <Typography variant="body1" sx={{ color: '#94a3b8' }}>
+          <Typography variant="body1" sx={{ color: 'var(--text-secondary)' }}>
             {error}
           </Typography>
           {error !== 'Please select a clinic first.' && (
@@ -381,37 +381,37 @@ const SalesBySalesPerson: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: '1200px', margin: '0 auto', bgcolor: '#101924', minHeight: '100vh' }}>
+    <Box sx={{ p: 3, maxWidth: '1200px', margin: '0 auto', bgcolor: 'var(--surface)', minHeight: '100vh' }}>
       {/* Page header */}
-      <Typography variant="h4" sx={{ mb: 3, color: '#e2e8f0', fontWeight: 'bold' }}>
+      <Typography variant="h4" sx={{ mb: 3, color: 'var(--text-primary)', fontWeight: 'bold' }}>
         Sales by Sales Person
       </Typography>
-      
+
       {/* Filters */}
-      <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: '8px', mb: 4 }}>
+      <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: '8px', mb: 4 }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center' }}>
           <Box sx={{ minWidth: 200 }}>
             <FormControl fullWidth variant="outlined" size="small">
-              <InputLabel id="time-period-label" sx={{ color: '#94a3b8' }}>Time Period</InputLabel>
+              <InputLabel id="time-period-label" sx={{ color: 'var(--text-secondary)' }}>Time Period</InputLabel>
               <Select
                 labelId="time-period-label"
                 value={timePeriod}
                 onChange={handleTimePeriodChange}
                 input={<OutlinedInput label="Time Period" />}
                 sx={{
-                  bgcolor: '#101924',
-                  color: '#f1f5f9',
-                  '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' }
+                  bgcolor: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' }
                 }}
               >
-                <MenuItem value="daily" sx={{ bgcolor: '#101924', color: '#f1f5f9' }}>Today</MenuItem>
-                <MenuItem value="weekly" sx={{ bgcolor: '#101924', color: '#f1f5f9' }}>Last 7 Days</MenuItem>
-                <MenuItem value="monthly" sx={{ bgcolor: '#101924', color: '#f1f5f9' }}>Last 30 Days</MenuItem>
-                <MenuItem value="custom" sx={{ bgcolor: '#101924', color: '#f1f5f9' }}>Custom Range</MenuItem>
+                <MenuItem value="daily" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>Today</MenuItem>
+                <MenuItem value="weekly" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>Last 7 Days</MenuItem>
+                <MenuItem value="monthly" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>Last 30 Days</MenuItem>
+                <MenuItem value="custom" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>Custom Range</MenuItem>
               </Select>
             </FormControl>
           </Box>
-          
+
           {timePeriod === 'custom' && (
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
@@ -423,10 +423,10 @@ const SalesBySalesPerson: React.FC = () => {
                     textField: {
                       size: 'small',
                       sx: {
-                        bgcolor: '#101924',
-                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                        '& .MuiInputBase-input': { color: '#f1f5f9' },
+                        bgcolor: 'var(--surface)',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+                        '& .MuiInputLabel-root': { color: 'var(--text-secondary)' },
+                        '& .MuiInputBase-input': { color: 'var(--text-primary)' },
                         width: '160px'
                       }
                     }
@@ -440,10 +440,10 @@ const SalesBySalesPerson: React.FC = () => {
                     textField: {
                       size: 'small',
                       sx: {
-                        bgcolor: '#101924',
-                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                        '& .MuiInputBase-input': { color: '#f1f5f9' },
+                        bgcolor: 'var(--surface)',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+                        '& .MuiInputLabel-root': { color: 'var(--text-secondary)' },
+                        '& .MuiInputBase-input': { color: 'var(--text-primary)' },
                         width: '160px'
                       }
                     }
@@ -459,54 +459,54 @@ const SalesBySalesPerson: React.FC = () => {
             </LocalizationProvider>
           )}
         </Box>
-        
+
         {/* Date range display */}
         <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-            Showing data for: <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>{getDateRangeLabel()}</span>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>
+            Showing data for: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{getDateRangeLabel()}</span>
           </Typography>
-          
+
           <Box>
-            <Typography variant="body2" sx={{ color: '#94a3b8', display: 'inline' }}>
-              Total Sales: <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>{formatCurrency(totalAmount, currentClinic)}</span>
+            <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline' }}>
+              Total Sales: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{formatCurrency(totalAmount, currentClinic)}</span>
             </Typography>
-            <Typography variant="body2" sx={{ color: '#94a3b8', display: 'inline', ml: 3 }}>
-              Transactions: <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>{totalTransactions}</span>
+            <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline', ml: 3 }}>
+              Transactions: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalTransactions}</span>
             </Typography>
           </Box>
         </Box>
       </Paper>
 
       {!loading && !error && (!transactions.length || !salesBySalesPerson.length) && (
-        <Box 
-          sx={{ 
-            p: 3, 
-            bgcolor: '#1a2235', 
+        <Box
+          sx={{
+            p: 3,
+            bgcolor: 'var(--surface)',
             borderRadius: 2,
             textAlign: 'center',
             mb: 2,
-            border: '1px solid #2d3748'
+            border: '1px solid var(--border)'
           }}
         >
-          <Typography variant="body1" color="#d1d5db">
+          <Typography variant="body1" color="var(--text-secondary)">
             No sales data available for the selected time period.
           </Typography>
         </Box>
       )}
-      
+
       {!loading && !error && transactions.length > 0 && salesBySalesPerson.length > 0 && (
         <>
           {/* Sales Summary by Sales Person */}
-          <Paper elevation={0} sx={{ p: 3, bgcolor: '#1a2235', mb: 3, borderRadius: '8px', border: '1px solid #2d3748' }}>
+          <Paper elevation={0} sx={{ p: 3, bgcolor: 'var(--surface)', mb: 3, borderRadius: '8px', border: '1px solid var(--border)' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" color="#f3f4f6">Sales Summary</Typography>
+              <Typography variant="h6" color="var(--text-primary)">Sales Summary</Typography>
               <Button
                 onClick={exportSalesToExcel}
                 variant="contained"
                 size="small"
                 sx={{
-                  bgcolor: '#3b82f6',
-                  '&:hover': { bgcolor: '#2563eb' },
+                  bgcolor: 'var(--primary)',
+                  '&:hover': { bgcolor: 'var(--primary-hover)' },
                   textTransform: 'none',
                   px: 2
                 }}
@@ -518,23 +518,23 @@ const SalesBySalesPerson: React.FC = () => {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }}>Sales Person</TableCell>
-                    <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }} align="center">Transaction Count</TableCell>
-                    <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }} align="right">Total Amount</TableCell>
                   </TableRow>
                 </TableHead>
@@ -542,42 +542,42 @@ const SalesBySalesPerson: React.FC = () => {
                   {salesBySalesPerson.map((salesPerson, index) => (
                     <TableRow key={index} sx={{
                       '&:hover': {
-                        bgcolor: '#242f3d',
+                        bgcolor: 'var(--surface-secondary)',
                       },
-                      bgcolor: '#111923',
+                      bgcolor: 'var(--surface-secondary)',
                       '&:nth-of-type(odd)': {
-                        bgcolor: '#121826',
+                        bgcolor: 'var(--background)',
                       },
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       cursor: 'pointer'
                     }} onClick={() => {
                       // Filter transactions to just this sales person
-                      const filtered = transactions.filter(t => 
+                      const filtered = transactions.filter(t =>
                         (t.SellerName || 'Unknown') === salesPerson.salesPerson
                       );
                       setFilteredTransactions(filtered);
                       setTransactionsPage(0);
                     }}>
-                      <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
+                      <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                         {salesPerson.salesPerson}
                       </TableCell>
-                      <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="center">
+                      <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="center">
                         {salesPerson.transactionCount}
                       </TableCell>
-                      <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
+                      <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
                         {formatCurrency(salesPerson.totalAmount, currentClinic)}
                       </TableCell>
                     </TableRow>
                   ))}
                   {/* Total row */}
-                  <TableRow sx={{ bgcolor: '#1a2235', fontWeight: 'bold' }}>
-                    <TableCell sx={{ color: '#f3f4f6', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }}>
+                  <TableRow sx={{ bgcolor: 'var(--surface)', fontWeight: 'bold' }}>
+                    <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                       Total
                     </TableCell>
-                    <TableCell sx={{ color: '#f3f4f6', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }} align="center">
+                    <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="center">
                       {totalTransactions}
                     </TableCell>
-                    <TableCell sx={{ color: '#f3f4f6', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }} align="right">
+                    <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
                       {formatCurrency(totalAmount, currentClinic)}
                     </TableCell>
                   </TableRow>
@@ -587,9 +587,9 @@ const SalesBySalesPerson: React.FC = () => {
           </Paper>
 
           {/* Detailed Transactions Table */}
-          <Paper elevation={0} sx={{ p: 3, bgcolor: '#1a2235', borderRadius: '8px', border: '1px solid #2d3748' }}>
+          <Paper elevation={0} sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" color="#f3f4f6">Detailed Transactions</Typography>
+              <Typography variant="h6" color="var(--text-primary)">Detailed Transactions</Typography>
               <Box sx={{ display: 'flex', gap: 2 }}>
               {filteredTransactions.length !== transactions.length && (
                 <button
@@ -607,8 +607,8 @@ const SalesBySalesPerson: React.FC = () => {
                   variant="contained"
                   size="small"
                   sx={{
-                    bgcolor: '#3b82f6',
-                    '&:hover': { bgcolor: '#2563eb' },
+                    bgcolor: 'var(--primary)',
+                    '&:hover': { bgcolor: 'var(--primary-hover)' },
                     textTransform: 'none',
                     px: 2
                   }}
@@ -618,121 +618,121 @@ const SalesBySalesPerson: React.FC = () => {
               </Box>
             </Box>
             <Box sx={{ overflowX: 'auto' }}>
-              <TableContainer sx={{ 
-                bgcolor: '#1a2235',
-                border: '1px solid #2d3748',
+              <TableContainer sx={{
+                bgcolor: 'var(--surface)',
+                border: '1px solid var(--border)',
                 '&::-webkit-scrollbar': {
                   width: '8px',
                   height: '8px',
                 },
                 '&::-webkit-scrollbar-track': {
-                  backgroundColor: '#111923',
+                  backgroundColor: 'var(--surface-secondary)',
                 },
                 '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: '#2d3748',
+                  backgroundColor: 'var(--border)',
                   borderRadius: '4px',
                 },
                 '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: '#4a5568',
+                  backgroundColor: 'var(--text-muted)',
                 },
               }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Date</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Sales Person</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Invoice</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Customer Name</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Service</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Package</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Payment Method</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }}>Status</TableCell>
-                      <TableCell sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        borderBottom: '1px solid var(--border)'
                       }} align="right">Amount</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {filteredTransactions
                       .slice(
-                        transactionsPage * transactionsRowsPerPage, 
+                        transactionsPage * transactionsRowsPerPage,
                         transactionsPage * transactionsRowsPerPage + transactionsRowsPerPage
                       )
                       .map((transaction, index) => (
                         <TableRow key={`${transaction.InvoiceNumber}-${index}`} sx={{
                           '&:hover': {
-                            bgcolor: '#242f3d',
+                            bgcolor: 'var(--surface-secondary)',
                           },
-                          bgcolor: '#111923',
+                          bgcolor: 'var(--surface-secondary)',
                           '&:nth-of-type(odd)': {
-                            bgcolor: '#121826',
+                            bgcolor: 'var(--background)',
                           },
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.Date}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.SellerName || '-'}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.InvoiceNumber}</TableCell>
-                          <TableCell 
-                            sx={{ 
-                              color: '#3b82f6', 
-                              borderBottom: '1px solid #2d3748',
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.Date}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.SellerName || '-'}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.InvoiceNumber}</TableCell>
+                          <TableCell
+                            sx={{
+                              color: 'var(--primary)',
+                              borderBottom: '1px solid var(--border)',
                               cursor: 'pointer',
                               '&:hover': {
                                 textDecoration: 'underline'
-                              } 
+                              }
                             }}
                             onClick={() => navigate(`/customers/${encodeURIComponent(transaction.CustomerPhoneNumber || transaction.CustomerName)}`)}
                           >
                             {transaction.CustomerName}
                           </TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.ServiceName}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.ServicePackageName || '-'}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.PaymentMethod}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{transaction.PaymentStatus}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.ServiceName}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.ServicePackageName || '-'}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.PaymentMethod}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.PaymentStatus}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
                             {formatCurrency(Number(transaction.InvoiceNetTotal), currentClinic)}
                           </TableCell>
                         </TableRow>
@@ -749,17 +749,17 @@ const SalesBySalesPerson: React.FC = () => {
                     setTransactionsPage(0);
                   }}
                   sx={{
-                    color: '#f3f4f6',
-                    bgcolor: '#101924',
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4a5568' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' }
+                    color: 'var(--text-primary)',
+                    bgcolor: 'var(--surface)',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--text-muted)' },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
                   }}
                   size="small"
                 >
-                  <MenuItem value={5} sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>5 per page</MenuItem>
-                  <MenuItem value={10} sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>10 per page</MenuItem>
-                  <MenuItem value={25} sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>25 per page</MenuItem>
+                  <MenuItem value={5} sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>5 per page</MenuItem>
+                  <MenuItem value={10} sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>10 per page</MenuItem>
+                  <MenuItem value={25} sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>25 per page</MenuItem>
                 </Select>
                 <Pagination
                   count={Math.ceil(filteredTransactions.length / transactionsRowsPerPage)}
@@ -767,13 +767,13 @@ const SalesBySalesPerson: React.FC = () => {
                   onChange={(event, newPage) => setTransactionsPage(newPage - 1)}
                   sx={{
                     '& .MuiPaginationItem-root': {
-                      color: '#d1d5db',
+                      color: 'var(--text-secondary)',
                     },
                     '& .MuiPaginationItem-root.Mui-selected': {
-                      bgcolor: '#3b82f6',
-                      color: '#ffffff',
+                      bgcolor: 'var(--primary)',
+                      color: 'var(--text-primary)',
                       '&:hover': {
-                        bgcolor: '#2563eb'
+                        bgcolor: 'var(--primary-hover)'
                       }
                     }
                   }}
@@ -787,4 +787,4 @@ const SalesBySalesPerson: React.FC = () => {
   );
 };
 
-export default SalesBySalesPerson; 
+export default SalesBySalesPerson;

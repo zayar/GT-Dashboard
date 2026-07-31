@@ -22,7 +22,7 @@ const generateColorFromString = (str: string) => {
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
-  
+
   // Use a limited palette of good-looking colors
   const colors = [
     '#3b82f6', // blue
@@ -36,7 +36,7 @@ const generateColorFromString = (str: string) => {
     '#d946ef', // fuchsia
     '#84cc16', // lime
   ];
-  
+
   return colors[Math.abs(hash) % colors.length];
 };
 
@@ -63,25 +63,25 @@ const getClinicLogo = (clinicId: string) => {
 // Custom clinic avatar component that handles fallbacks gracefully
 const ClinicAvatar = ({ clinic, size = 32, mr = 1 }: { clinic: Clinic, size?: number, mr?: number }) => {
   const [useLetterFallback, setUseLetterFallback] = useState(false);
-  
+
   // If clinic.logo is a full URL (starts with http/https), use it directly
   // Otherwise, use our getClinicLogo function as a fallback
   const logoUrl = clinic.logo && (clinic.logo.startsWith('http://') || clinic.logo.startsWith('https://'))
-    ? clinic.logo 
+    ? clinic.logo
     : getClinicLogo(clinic.id);
-    
+
   const bgColor = generateColorFromString(clinic.id);
-  
+
   const handleImageError = () => {
     console.log(`Image load error for clinic: ${clinic.name}, URL: ${logoUrl}`);
     setUseLetterFallback(true);
   };
-  
+
   return (
-    <Box 
-      sx={{ 
-        width: size, 
-        height: size, 
+    <Box
+      sx={{
+        width: size,
+        height: size,
         mr,
         display: 'flex',
         alignItems: 'center',
@@ -89,13 +89,13 @@ const ClinicAvatar = ({ clinic, size = 32, mr = 1 }: { clinic: Clinic, size?: nu
         borderRadius: '50%',
         overflow: 'hidden',
         backgroundColor: useLetterFallback ? bgColor : 'transparent',
-        border: '1px solid rgba(255, 255, 255, 0.1)'
+        border: '1px solid var(--border)'
       }}
     >
       {useLetterFallback ? (
-        <Typography 
-          sx={{ 
-            color: 'white', 
+        <Typography
+          sx={{
+            color: 'var(--text-primary)',
             fontSize: size * 0.5,
             fontWeight: 'bold',
             textTransform: 'uppercase'
@@ -104,15 +104,15 @@ const ClinicAvatar = ({ clinic, size = 32, mr = 1 }: { clinic: Clinic, size?: nu
           {clinic.name.charAt(0)}
         </Typography>
       ) : (
-        <img 
-          src={logoUrl} 
+        <img
+          src={logoUrl}
           alt={clinic.name}
-          style={{ 
-            width: '80%', 
-            height: '80%', 
+          style={{
+            width: '80%',
+            height: '80%',
             objectFit: 'contain',
             padding: '2px'
-          }} 
+          }}
           onError={handleImageError}
         />
       )}
@@ -121,7 +121,7 @@ const ClinicAvatar = ({ clinic, size = 32, mr = 1 }: { clinic: Clinic, size?: nu
 };
 
 // Fallback clinic data can be removed if not used elsewhere, or kept for reference
-// export const FALLBACK_CLINICS: Clinic[] = [ ... ]; 
+// export const FALLBACK_CLINICS: Clinic[] = [ ... ];
 
 interface ClinicSelectorProps {
   onClinicChange?: (clinic: Clinic) => void;
@@ -130,13 +130,13 @@ interface ClinicSelectorProps {
 const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
   // Get state from context
   const {
-    availableClinics, 
+    availableClinics,
     currentClinic,
     setCurrentClinic,
     loadingClinics,
-    isUsingFallbackData 
+    isUsingFallbackData
   } = useClinic();
-  
+
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   // Remove internal state for clinics, loading, error, usingFallback
@@ -154,7 +154,7 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
 
   // Remove useEffect that updated internal selectedClinic based on internal clinics state
   // useEffect(() => { ... }, [clinics]);
-  
+
   // Update local storage and context when clinic changes (use provided setCurrentClinic)
   const handleClinicSelect = (clinic: Clinic) => {
     if (currentClinic?.id !== clinic.id) {
@@ -192,13 +192,13 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
   }
 
   return (
-    <Box sx={{ 
-      display: 'flex', 
-      alignItems: 'center', 
-      p: 1, 
+    <Box sx={{
+      display: 'flex',
+      alignItems: 'center',
+      p: 1,
       cursor: availableClinics.length > 0 ? 'pointer' : 'default', // Only allow click if clinics exist
       borderRadius: 1,
-      '&:hover': { bgcolor: availableClinics.length > 0 ? 'rgba(255, 255, 255, 0.08)' : 'transparent' }
+      '&:hover': { bgcolor: availableClinics.length > 0 ? 'var(--surface-secondary)' : 'transparent' }
     }}>
       <Box onClick={availableClinics.length > 0 ? handleClick : undefined} sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
         {currentClinic ? (
@@ -209,16 +209,16 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
                {currentClinic.name?.charAt(0)?.toUpperCase() || 'C'}
              </Avatar>
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              <Typography variant="body1" noWrap component="div" sx={{ color: 'white' }}>
+              <Typography variant="body1" noWrap component="div" sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>
                 {currentClinic.name}
                  {isUsingFallbackData && <Typography variant="caption" color="warning.light" sx={{ml: 1}}>(Local)</Typography>}
               </Typography>
-              <Typography variant="caption" noWrap component="div" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+              <Typography variant="caption" noWrap component="div" sx={{ color: 'var(--text-secondary)' }}>
                 {currentClinic.code}
               </Typography>
             </Box>
             {availableClinics.length > 1 && ( // Only show dropdown if more than one clinic
-                <IconButton size="small" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                <IconButton size="small" sx={{ color: 'var(--text-secondary)' }}>
                   <ArrowDropDownIcon />
                 </IconButton>
             )}
@@ -236,8 +236,8 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
           sx: {
             maxHeight: 300,
             width: 280,
-            bgcolor: '#1a2235',
-            color: 'white',
+            bgcolor: 'var(--surface-elevated)',
+            color: 'var(--text-primary)',
             '& .MuiMenuItem-root': {
               py: 1.5
             }
@@ -245,23 +245,23 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
         }}
       >
         {isUsingFallbackData && (
-          <Box sx={{ px: 2, py: 1, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <Box sx={{ px: 2, py: 1, borderBottom: '1px solid var(--border)' }}>
             <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.7rem' }}>
               Using local data. API connection may have failed.
             </Typography>
           </Box>
         )}
-        
+
         {availableClinics.map((clinic) => (
-          <MenuItem 
-            key={clinic.id} 
+          <MenuItem
+            key={clinic.id}
             onClick={() => handleClinicSelect(clinic)}
             selected={currentClinic?.id === clinic.id}
             sx={{
               borderLeft: currentClinic?.id === clinic.id ? '3px solid #3f83f8' : '3px solid transparent',
               bgcolor: currentClinic?.id === clinic.id ? 'rgba(63, 131, 248, 0.1)' : 'transparent',
               '&:hover': {
-                bgcolor: currentClinic?.id === clinic.id ? 'rgba(63, 131, 248, 0.2)' : 'rgba(255, 255, 255, 0.08)'
+                bgcolor: currentClinic?.id === clinic.id ? 'var(--primary-soft)' : 'var(--surface-secondary)'
               }
             }}
           >
@@ -272,10 +272,10 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
                    {clinic.name?.charAt(0)?.toUpperCase() || 'C'}
                  </Avatar>
               <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                <Typography variant="body2" noWrap sx={{ color: 'white' }}>
+                <Typography variant="body2" noWrap sx={{ color: 'var(--text-primary)' }}>
                   {clinic.name}
                 </Typography>
-                <Typography variant="caption" noWrap sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                <Typography variant="caption" noWrap sx={{ color: 'var(--text-secondary)' }}>
                   {clinic.code}
                 </Typography>
               </Box>
@@ -287,4 +287,4 @@ const ClinicSelector: React.FC<ClinicSelectorProps> = ({ onClinicChange }) => {
   );
 };
 
-export default ClinicSelector; 
+export default ClinicSelector;

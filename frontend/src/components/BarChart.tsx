@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '@mui/material/styles';
 import { Bar } from 'react-chartjs-2';
 
 interface BarChartProps {
@@ -13,6 +14,8 @@ interface BarChartProps {
 }
 
 const BarChart: React.FC<BarChartProps> = React.memo(({ data }) => {
+  const theme = useTheme();
+
   return (
     <Bar
       data={data}
@@ -26,12 +29,12 @@ const BarChart: React.FC<BarChartProps> = React.memo(({ data }) => {
         scales: {
           y: {
             beginAtZero: true,
-            ticks: { color: '#fff' },
-            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+            ticks: { color: theme.palette.text.secondary },
+            grid: { color: theme.palette.divider }
           },
           x: {
-            ticks: { color: '#fff' },
-            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+            ticks: { color: theme.palette.text.secondary },
+            grid: { color: theme.palette.divider }
           }
         }
       }}

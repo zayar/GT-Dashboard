@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -13,7 +13,12 @@ import {
   TableRow,
   IconButton,
   Button,
-  Chip
+  Chip,
+  TextField,
+  InputAdornment,
+  TablePagination,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -21,14 +26,18 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import PeopleIcon from '@mui/icons-material/People';
-import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import { useClinic } from '../contexts/ClinicContext';
 import axios from 'axios';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import SearchIcon from '@mui/icons-material/Search';
 import { formatCurrency } from '../utils/currency';
+import {
+  buildCustomerServiceActivityQuery,
+  CustomerServiceActivityPeriod,
+  getCustomerServiceActivityRange,
+} from '../utils/customerServiceActivity';
 
 interface DailyReportData {
   CustomerName: string;
@@ -45,15 +54,45 @@ interface DailyReportData {
   SellerNames?: string | null;
 }
 
-const DailyReport: React.FC = () => {
+interface DailyReportProps {
+  rangeEnabled?: boolean;
+}
+
+const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<DailyReportData[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [period, setPeriod] = useState<CustomerServiceActivityPeriod>('week');
+  const [periodDate, setPeriodDate] = useState<Date | null>(new Date());
+  const [customStartDate, setCustomStartDate] = useState<Date | null>(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [customEndDate, setCustomEndDate] = useState<Date | null>(new Date());
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const latestRequestIdRef = useRef(0);
+  const deferredSearchTerm = useDeferredValue(searchTerm.trim().toLowerCase());
+
+  const reportRange = useMemo(() => getCustomerServiceActivityRange(
+    rangeEnabled
+      ? {
+          period,
+          anchorDate: periodDate,
+          customStartDate,
+          customEndDate,
+        }
+      : {
+          period: 'day',
+          anchorDate: selectedDate,
+        }
+  ), [customEndDate, customStartDate, period, periodDate, rangeEnabled, selectedDate]);
 
   const fetchDailyData = useCallback(async () => {
+    const requestId = ++latestRequestIdRef.current;
+    const isLatestRequest = () => latestRequestIdRef.current === requestId;
     if (!currentClinic) {
       setError('No clinic selected');
       setLoading(false);
@@ -64,103 +103,41 @@ const DailyReport: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const selectedDateStr = format(selectedDate || new Date(), 'yyyy-MM-dd');
-
-      const query = `
-        WITH TodayVisits AS (
-          SELECT
-            CustomerName,
-            CustomerPhoneNumber,
-            CustomerId,
-            ServiceName,
-            CheckInTime,
-            PractitionerName,
-            HelperName
-          FROM great_time.MainDataView
-          WHERE DATE(CheckInTime) = '${selectedDateStr}'
-            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-            AND CustomerName IS NOT NULL
-            AND ServiceName IS NOT NULL
-        ),
-        FirstVisits AS (
-          SELECT
-            CustomerPhoneNumber,
-            MIN(DATE(CheckInTime)) AS first_visit_date
-          FROM great_time.MainDataView
-          WHERE LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-            AND CustomerName IS NOT NULL
-          GROUP BY CustomerPhoneNumber
-        ),
-        PaymentData AS (
-          -- First deduplicate invoices (since MainPaymentView has multiple rows per invoice for each line item)
-          WITH DeduplicatedInvoices AS (
-            SELECT
-              CustomerPhoneNumber,
-              InvoiceNumber,
-              MAX(CAST(NetTotal AS FLOAT64)) AS InvoiceNetTotal,
-              MAX(PaymentMethod) AS PaymentMethod,
-              MAX(CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END) AS PaymentNote,
-              MAX(SellerName) AS SellerName
-            FROM great_time.MainPaymentView
-            WHERE DATE(OrderCreatedDate) = '${selectedDateStr}'
-              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-            GROUP BY CustomerPhoneNumber, InvoiceNumber
-          )
-          SELECT
-            CustomerPhoneNumber,
-            SUM(InvoiceNetTotal) AS TotalPaymentAmount,
-            STRING_AGG(DISTINCT PaymentMethod, ', ') AS PaymentMethods,
-            STRING_AGG(DISTINCT CASE WHEN PaymentNote IS NOT NULL AND PaymentNote != '' THEN PaymentNote END, ' | ') AS PaymentNotes,
-            STRING_AGG(DISTINCT SellerName, ', ') AS SellerNames
-          FROM DeduplicatedInvoices
-          GROUP BY CustomerPhoneNumber
-        )
-        SELECT
-          t.*,
-          CASE 
-            WHEN f.first_visit_date = '${selectedDateStr}' THEN 'Yes'
-            ELSE 'No'
-          END AS IsNewCustomer,
-          p.TotalPaymentAmount,
-          p.PaymentMethods,
-          p.PaymentNotes,
-          p.SellerNames
-        FROM TodayVisits t
-        LEFT JOIN FirstVisits f ON t.CustomerPhoneNumber = f.CustomerPhoneNumber
-        LEFT JOIN PaymentData p ON t.CustomerPhoneNumber = p.CustomerPhoneNumber
-        ORDER BY t.CustomerName, t.ServiceName
-      `;
-
-      console.log('Executing daily report query:', query);
+      const query = buildCustomerServiceActivityQuery({
+        clinicCode: currentClinic.code,
+        startDate: reportRange.startDateKey,
+        endDate: reportRange.endDateKey,
+      });
 
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/query`,
         { query },
         {
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
+            'Content-Type': 'application/json'
           },
-          timeout: 15000
+          timeout: rangeEnabled ? 30000 : 15000
         }
       );
 
+      if (!isLatestRequest()) return;
+
       if (!response.data.success) {
         console.error('BigQuery Error:', response.data.error);
-        throw new Error(response.data.error || 'Failed to fetch daily report data');
+        throw new Error(response.data.error || 'Failed to fetch customer service activity');
       }
 
       const data = response.data.data || [];
-      console.log('Daily report data fetched:', data.length, 'records');
       setRawData(data);
+      setLastUpdated(new Date());
     } catch (err: any) {
+      if (!isLatestRequest()) return;
       console.error('Error fetching daily report:', err);
-      console.error('Full error details:', err.response?.data);
-      setError(err.response?.data?.error || err.message || 'Failed to fetch daily report data');
+      setError(err.response?.data?.error || err.message || 'Failed to fetch customer service activity');
     } finally {
-      setLoading(false);
+      if (isLatestRequest()) setLoading(false);
     }
-  }, [currentClinic, selectedDate]);
+  }, [currentClinic, rangeEnabled, reportRange.endDateKey, reportRange.startDateKey]);
 
   useEffect(() => {
     if (currentClinic) {
@@ -174,13 +151,38 @@ const DailyReport: React.FC = () => {
 
   // Calculate summary statistics
   const summary = useMemo(() => {
-    const uniqueCustomers = new Set(rawData.map(r => r.CustomerPhoneNumber));
+    const uniqueCustomers = new Map<string, DailyReportData>();
     const uniqueServices = new Set(rawData.map(r => r.ServiceName));
-    
+    const serviceCounts = new Map<string, number>();
+    const practitionerCounts = new Map<string, number>();
+
+    rawData.forEach((record, index) => {
+      const customerKey = record.CustomerPhoneNumber?.trim() || record.CustomerId?.trim() || `${record.CustomerName}-${index}`;
+      if (!uniqueCustomers.has(customerKey)) uniqueCustomers.set(customerKey, record);
+      serviceCounts.set(record.ServiceName, (serviceCounts.get(record.ServiceName) || 0) + 1);
+      if (record.PractitionerName) {
+        practitionerCounts.set(record.PractitionerName, (practitionerCounts.get(record.PractitionerName) || 0) + 1);
+      }
+    });
+
+    const customerRecords = Array.from(uniqueCustomers.values());
+    const collectedRevenue = customerRecords.reduce((sum, record) => sum + (Number(record.TotalPaymentAmount) || 0), 0);
+    const payingCustomers = customerRecords.filter(record => (Number(record.TotalPaymentAmount) || 0) > 0);
+    const topEntry = (counts: Map<string, number>) =>
+      Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0];
+    const topService = topEntry(serviceCounts);
+    const topPractitioner = topEntry(practitionerCounts);
+
     return {
       totalCustomers: uniqueCustomers.size,
       totalServices: uniqueServices.size,
-      totalVisits: rawData.length
+      servicesDelivered: rawData.length,
+      newCustomers: customerRecords.filter(record => record.IsNewCustomer === 'Yes').length,
+      collectedRevenue,
+      averageSpend: payingCustomers.length ? collectedRevenue / payingCustomers.length : 0,
+      sellerAssignedCustomers: customerRecords.filter(record => record.SellerNames?.trim()).length,
+      topService: topService ? { name: topService[0], count: topService[1] } : null,
+      topPractitioner: topPractitioner ? { name: topPractitioner[0], count: topPractitioner[1] } : null
     };
   }, [rawData]);
 
@@ -197,18 +199,20 @@ const DailyReport: React.FC = () => {
     const customerPaymentMethodMap: { [customer: string]: string } = {};
     const customerPaymentNoteMap: { [customer: string]: string } = {};
     const customerSellerMap: { [customer: string]: string } = {};
+    const customerNameMap: { [customer: string]: string } = {};
 
-    rawData.forEach(record => {
-      const customer = record.CustomerName;
+    rawData.forEach((record, index) => {
+      const customer = record.CustomerPhoneNumber?.trim() || record.CustomerId?.trim() || `${record.CustomerName}-${index}`;
       const service = record.ServiceName;
-      
+      customerNameMap[customer] = record.CustomerName;
+
       // Store phone number and customer ID for reference
       customerPhoneMap[customer] = record.CustomerPhoneNumber;
       customerIdMap[customer] = record.CustomerId;
-      
+
       // Store new customer status
       customerNewStatusMap[customer] = record.IsNewCustomer;
-      
+
       // Store payment information (same for all records of a customer)
       customerPaymentAmountMap[customer] = record.TotalPaymentAmount || 0;
       customerPaymentMethodMap[customer] = record.PaymentMethods || '-';
@@ -222,7 +226,7 @@ const DailyReport: React.FC = () => {
       if (!customerHelperMap[customer]) {
         customerHelperMap[customer] = new Set();
       }
-      
+
       if (record.PractitionerName) {
         customerPractitionerMap[customer].add(record.PractitionerName);
       }
@@ -243,12 +247,14 @@ const DailyReport: React.FC = () => {
     });
 
     const services = Array.from(allServices).sort();
-    const customers = Object.keys(customerServiceMap).sort();
+    const customers = Object.keys(customerServiceMap).sort((a, b) =>
+      customerNameMap[a].localeCompare(customerNameMap[b])
+    );
 
     // Convert Sets to comma-separated strings
     const practitionerMap: { [customer: string]: string } = {};
     const helperMap: { [customer: string]: string } = {};
-    
+
     customers.forEach(customer => {
       practitionerMap[customer] = Array.from(customerPractitionerMap[customer] || []).join(', ') || '-';
       helperMap[customer] = Array.from(customerHelperMap[customer] || []).join(', ') || '-';
@@ -258,6 +264,7 @@ const DailyReport: React.FC = () => {
       customers,
       services,
       data: customerServiceMap,
+      customerNameMap,
       phoneMap: customerPhoneMap,
       customerIdMap,
       practitionerMap,
@@ -274,7 +281,7 @@ const DailyReport: React.FC = () => {
   const getHeatmapColor = (count: number, maxValue: number) => {
     if (count === 0 || !count) return 'transparent';
     const opacity = 0.2 + (count / (maxValue || 1)) * 0.7;
-    return `rgba(59, 130, 246, ${opacity})`; // Blue theme
+    return `color-mix(in srgb, var(--primary) ${Math.round(opacity * 100)}%, transparent)`;
   };
 
   // Get maximum value for color scaling
@@ -285,11 +292,38 @@ const DailyReport: React.FC = () => {
     return allCounts.length > 0 ? Math.max(...allCounts) : 1;
   }, [heatmapData]);
 
+  const filteredCustomers = useMemo(() => {
+    if (!deferredSearchTerm) return heatmapData.customers;
+    return heatmapData.customers.filter(customer => {
+      const searchable = [
+        heatmapData.customerNameMap[customer],
+        heatmapData.phoneMap[customer],
+        heatmapData.customerIdMap[customer],
+        heatmapData.practitionerMap[customer],
+        heatmapData.helperMap[customer],
+        heatmapData.sellerMap[customer],
+        heatmapData.paymentMethodMap[customer]
+      ].join(' ').toLowerCase();
+      return searchable.includes(deferredSearchTerm);
+    });
+  }, [deferredSearchTerm, heatmapData]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [deferredSearchTerm, reportRange.endDateKey, reportRange.startDateKey, rowsPerPage]);
+
+  const lastPage = Math.max(0, Math.ceil(filteredCustomers.length / rowsPerPage) - 1);
+  const effectivePage = Math.min(page, lastPage);
+  const paginatedCustomers = useMemo(
+    () => filteredCustomers.slice(effectivePage * rowsPerPage, effectivePage * rowsPerPage + rowsPerPage),
+    [effectivePage, filteredCustomers, rowsPerPage]
+  );
+
   const handleBack = () => {
     navigate(-1);
   };
 
-  const handleCustomerClick = (customerName: string, phoneNumber: string) => {
+  const handleCustomerClick = (phoneNumber: string) => {
     navigate(`/customers/${encodeURIComponent(phoneNumber)}`);
   };
 
@@ -298,30 +332,30 @@ const DailyReport: React.FC = () => {
   };
 
   const exportToExcel = () => {
-    if (heatmapData.customers.length === 0) {
+    if (filteredCustomers.length === 0) {
       return;
     }
 
     // Prepare data for Excel export
-    const exportData = heatmapData.customers.map(customer => {
+    const exportData = filteredCustomers.map(customer => {
       const row: any = {
-        'Customer Name': customer,
+        'Customer Name': heatmapData.customerNameMap[customer],
         'Customer ID': heatmapData.customerIdMap[customer],
         'Phone Number': heatmapData.phoneMap[customer],
         'New Customer': heatmapData.newCustomerMap[customer],
         'Practitioner(s)': heatmapData.practitionerMap[customer],
         'Helper(s)': heatmapData.helperMap[customer],
-        'Seller(s)': (heatmapData as any).sellerMap[customer],
+        'Seller(s)': heatmapData.sellerMap[customer],
         'Payment Amount': heatmapData.paymentAmountMap[customer] || 0,
         'Payment Method(s)': heatmapData.paymentMethodMap[customer],
         'Payment Note(s)': heatmapData.paymentNoteMap[customer]
       };
-      
+
       // Add service columns
       heatmapData.services.forEach(service => {
         row[service] = heatmapData.data[customer]?.[service] || 0;
       });
-      
+
       return row;
     });
 
@@ -349,11 +383,11 @@ const DailyReport: React.FC = () => {
 
     // Create workbook
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Daily Report');
+    XLSX.utils.book_append_sheet(wb, ws, rangeEnabled ? 'Customer Service Activity' : 'Daily Report');
 
-    // Generate filename with date
-    const dateStr = format(selectedDate || new Date(), 'yyyy-MM-dd');
-    const filename = `daily_report_${currentClinic?.code}_${dateStr}.xlsx`;
+    const filename = rangeEnabled
+      ? `customer_service_activity_${currentClinic?.code}_${reportRange.startDateKey}_to_${reportRange.endDateKey}.xlsx`
+      : `daily_report_${currentClinic?.code}_${reportRange.startDateKey}.xlsx`;
 
     // Download file
     XLSX.writeFile(wb, filename);
@@ -366,17 +400,17 @@ const DailyReport: React.FC = () => {
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
-        bgcolor: '#111923'
+        bgcolor: 'var(--surface-secondary)'
       }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ bgcolor: '#111923', minHeight: '100vh', p: 3 }}>
-        <Paper sx={{ p: 4, bgcolor: '#1a2234', textAlign: 'center', borderRadius: 2 }}>
+      <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
+        <Paper sx={{ p: 4, bgcolor: 'var(--surface)', textAlign: 'center', borderRadius: 2 }}>
           <Typography color="error" sx={{ mb: 2 }}>
             {error}
           </Typography>
@@ -385,8 +419,8 @@ const DailyReport: React.FC = () => {
             onClick={fetchDailyData}
             startIcon={<RefreshIcon />}
             sx={{
-              bgcolor: '#3b82f6',
-              '&:hover': { bgcolor: '#2563eb' }
+              bgcolor: 'var(--primary)',
+              '&:hover': { bgcolor: 'var(--primary-hover)' }
             }}
           >
             Retry
@@ -398,82 +432,160 @@ const DailyReport: React.FC = () => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box sx={{ bgcolor: '#111923', minHeight: '100vh', p: 3 }}>
+      <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: { xs: 1.5, md: 3 } }}>
         {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: { xs: 'flex-start', sm: 'center' }, gap: 2, flexWrap: 'wrap' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <IconButton
               onClick={handleBack}
               sx={{
                 mr: 2,
-                color: 'white',
+                color: 'var(--text-primary)',
                 bgcolor: 'rgba(255,255,255,0.1)',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
               }}
             >
               <ArrowBackIcon />
             </IconButton>
-            <Typography variant="h5" component="h1" sx={{ color: 'white', fontWeight: 'bold' }}>
-              Daily Report
-            </Typography>
+            <Box>
+              <Typography variant="h5" component="h1" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
+                {rangeEnabled ? 'Customer Service Activity Report' : 'Daily Performance'}
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
+                {reportRange.label}{lastUpdated ? ` · Updated ${format(lastUpdated, 'h:mm a')}` : ''}
+              </Typography>
+            </Box>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => setSelectedDate(new Date())}
-              sx={{
-                fontSize: '0.75rem',
-                minWidth: 'auto',
-                px: 2,
-                py: 0.5,
-                borderColor: '#2d3748',
-                color: '#9ca3af',
-                bgcolor: '#1a2234',
-                '&:hover': {
-                  borderColor: '#3b82f6',
-                  color: '#3b82f6',
-                  bgcolor: 'rgba(59, 130, 246, 0.08)'
-                }
-              }}
-            >
-              Today
-            </Button>
-            <DatePicker
-              value={selectedDate}
-              onChange={handleDateChange}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  sx: {
-                    bgcolor: '#1a2234',
-                    borderRadius: 1,
-                    '& .MuiOutlinedInput-root': {
-                      color: '#d1d5db',
-                      '& fieldset': {
-                        borderColor: '#2d3748',
-                      },
-                      '&:hover fieldset': {
-                        borderColor: '#4a5568',
-                      },
-                      '&.Mui-focused fieldset': {
-                        borderColor: '#3b82f6',
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            {rangeEnabled ? (
+              <>
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={period}
+                  onChange={(_, nextPeriod: CustomerServiceActivityPeriod | null) => {
+                    if (nextPeriod) setPeriod(nextPeriod);
+                  }}
+                  aria-label="Report period"
+                  sx={{
+                    bgcolor: 'var(--surface)',
+                    '& .MuiToggleButton-root': {
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      textTransform: 'none',
+                      px: 1.75,
+                      '&.Mui-selected': {
+                        bgcolor: 'var(--primary)',
+                        color: 'var(--text-on-primary)',
+                        '&:hover': { bgcolor: 'var(--primary-hover)' },
                       },
                     },
-                    '& .MuiInputLabel-root': {
-                      color: '#9ca3af',
-                    },
-                    '& .MuiSvgIcon-root': {
-                      color: '#d1d5db',
-                    },
-                  }
-                }
-              }}
-            />
+                  }}
+                >
+                  <ToggleButton value="week">Week</ToggleButton>
+                  <ToggleButton value="month">Month</ToggleButton>
+                  <ToggleButton value="custom">Custom Range</ToggleButton>
+                </ToggleButtonGroup>
+                {period !== 'custom' ? (
+                  <>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setPeriodDate(new Date())}
+                      sx={{
+                        borderColor: 'var(--border)',
+                        color: 'var(--text-secondary)',
+                        bgcolor: 'var(--surface)',
+                        textTransform: 'none',
+                        '&:hover': { borderColor: 'var(--primary)', color: 'var(--primary)', bgcolor: 'var(--primary-soft)' },
+                      }}
+                    >
+                      {period === 'month' ? 'This Month' : 'This Week'}
+                    </Button>
+                    <DatePicker
+                      label={period === 'month' ? 'Month' : 'Week containing'}
+                      value={periodDate}
+                      onChange={(date) => {
+                        if (date) setPeriodDate(date);
+                      }}
+                      views={period === 'month' ? ['year', 'month'] : ['year', 'month', 'day']}
+                      openTo={period === 'month' ? 'month' : 'day'}
+                      slotProps={{ textField: { size: 'small', sx: { width: period === 'month' ? 165 : 190, bgcolor: 'var(--surface)' } } }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <DatePicker
+                      label="Start date"
+                      value={customStartDate}
+                      maxDate={customEndDate || undefined}
+                      onChange={(date) => {
+                        if (date) setCustomStartDate(date);
+                      }}
+                      slotProps={{ textField: { size: 'small', sx: { width: 155, bgcolor: 'var(--surface)' } } }}
+                    />
+                    <DatePicker
+                      label="End date"
+                      value={customEndDate}
+                      minDate={customStartDate || undefined}
+                      onChange={(date) => {
+                        if (date) setCustomEndDate(date);
+                      }}
+                      slotProps={{ textField: { size: 'small', sx: { width: 155, bgcolor: 'var(--surface)' } } }}
+                    />
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setSelectedDate(new Date())}
+                  sx={{
+                    fontSize: '0.75rem',
+                    minWidth: 'auto',
+                    px: 2,
+                    py: 0.5,
+                    borderColor: 'var(--border)',
+                    color: 'var(--text-secondary)',
+                    bgcolor: 'var(--surface)',
+                    '&:hover': {
+                      borderColor: 'var(--primary)',
+                      color: 'var(--primary)',
+                      bgcolor: 'var(--primary-soft)'
+                    }
+                  }}
+                >
+                  Today
+                </Button>
+                <DatePicker
+                  value={selectedDate}
+                  onChange={handleDateChange}
+                  slotProps={{
+                    textField: {
+                      size: 'small',
+                      sx: {
+                        bgcolor: 'var(--surface)',
+                        borderRadius: 1,
+                        '& .MuiOutlinedInput-root': {
+                          color: 'var(--text-secondary)',
+                          '& fieldset': { borderColor: 'var(--border)' },
+                          '&:hover fieldset': { borderColor: 'var(--text-muted)' },
+                          '&.Mui-focused fieldset': { borderColor: 'var(--primary)' },
+                        },
+                        '& .MuiInputLabel-root': { color: 'var(--text-secondary)' },
+                        '& .MuiSvgIcon-root': { color: 'var(--text-secondary)' },
+                      }
+                    }
+                  }}
+                />
+              </>
+            )}
             <IconButton
               onClick={fetchDailyData}
               sx={{
-                color: 'white',
+                color: 'var(--text-primary)',
                 bgcolor: 'rgba(255,255,255,0.1)',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
               }}
@@ -483,158 +595,101 @@ const DailyReport: React.FC = () => {
           </Box>
         </Box>
 
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={4}>
-          <Paper
-            sx={{
-              p: 3,
-              bgcolor: '#1a2234',
-              borderRadius: 2,
-              border: '1px solid #2d3748',
-              transition: 'transform 0.2s',
-              '&:hover': {
-                transform: 'translateY(-2px)',
-                boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)'
-              }
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Box
-                sx={{
-                  p: 1.5,
-                  borderRadius: 2,
-                  bgcolor: 'rgba(59, 130, 246, 0.1)',
-                  mr: 2
-                }}
-              >
-                <PeopleIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
-              </Box>
-              <Box>
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 0.5 }}>
-                  Total Customers
-                </Typography>
-                <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
-                  {summary.totalCustomers}
-                </Typography>
-              </Box>
-            </Box>
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12} sm={4}>
-          <Paper
-            sx={{
-              p: 3,
-              bgcolor: '#1a2234',
-              borderRadius: 2,
-              border: '1px solid #2d3748',
-              transition: 'transform 0.2s',
-              '&:hover': {
-                transform: 'translateY(-2px)',
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)'
-              }
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Box
-                sx={{
-                  p: 1.5,
-                  borderRadius: 2,
-                  bgcolor: 'rgba(16, 185, 129, 0.1)',
-                  mr: 2
-                }}
-              >
-                <MedicalServicesIcon sx={{ fontSize: 32, color: '#10b981' }} />
-              </Box>
-              <Box>
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 0.5 }}>
-                  Unique Services
-                </Typography>
-                <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
-                  {summary.totalServices}
-                </Typography>
-              </Box>
-            </Box>
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12} sm={4}>
-          <Paper
-            sx={{
-              p: 3,
-              bgcolor: '#1a2234',
-              borderRadius: 2,
-              border: '1px solid #2d3748',
-              transition: 'transform 0.2s',
-              '&:hover': {
-                transform: 'translateY(-2px)',
-                boxShadow: '0 4px 12px rgba(168, 85, 247, 0.2)'
-              }
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Box
-                sx={{
-                  p: 1.5,
-                  borderRadius: 2,
-                  bgcolor: 'rgba(168, 85, 247, 0.1)',
-                  mr: 2
-                }}
-              >
-                <MedicalServicesIcon sx={{ fontSize: 32, color: '#a855f7' }} />
-              </Box>
-              <Box>
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 0.5 }}>
-                  Total Visits
-                </Typography>
-                <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
-                  {summary.totalVisits}
-                </Typography>
-              </Box>
-            </Box>
-          </Paper>
-        </Grid>
+      {/* Owner-focused summary */}
+      <Grid container spacing={2} sx={{ mb: 2.5 }}>
+        {[
+          {
+            label: 'Collected from visitors',
+            value: formatCurrency(summary.collectedRevenue, currentClinic),
+            detail: `${summary.totalCustomers} customers`
+          },
+          {
+            label: 'Customers served',
+            value: summary.totalCustomers.toLocaleString(),
+            detail: `${summary.newCustomers} new customers`
+          },
+          {
+            label: 'Services delivered',
+            value: summary.servicesDelivered.toLocaleString(),
+            detail: `${summary.totalServices} unique services`
+          },
+          {
+            label: 'Average spend',
+            value: formatCurrency(summary.averageSpend, currentClinic),
+            detail: 'Per paying customer'
+          }
+        ].map(card => (
+          <Grid item xs={12} sm={6} lg={3} key={card.label}>
+            <Paper sx={{ p: 2.5, height: '100%', bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+              <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>{card.label}</Typography>
+              <Typography variant="h5" sx={{ color: 'var(--text-primary)', fontWeight: 700, mt: 1 }}>{card.value}</Typography>
+              <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>{card.detail}</Typography>
+            </Paper>
+          </Grid>
+        ))}
       </Grid>
 
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2.5 }}>
+        {summary.topService && <Chip label={`Top service: ${summary.topService.name} (${summary.topService.count})`} variant="outlined" />}
+        {summary.topPractitioner && <Chip label={`Top practitioner: ${summary.topPractitioner.name} (${summary.topPractitioner.count})`} variant="outlined" />}
+        {!!summary.totalCustomers && (
+          <Chip label={`Seller assigned: ${summary.sellerAssignedCustomers}/${summary.totalCustomers}`} variant="outlined" sx={{ color: 'var(--text-secondary)', borderColor: 'var(--border)' }} />
+        )}
+      </Box>
+
       {/* Customer-Service Heatmap */}
-      <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 3 }}>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<FileDownloadIcon />}
-            onClick={exportToExcel}
-            disabled={heatmapData.customers.length === 0}
-            sx={{
-              borderColor: '#2d3748',
-              color: '#d1d5db',
-              bgcolor: '#1a2234',
-              '&:hover': {
-                borderColor: '#3b82f6',
-                color: '#3b82f6',
-                bgcolor: 'rgba(59, 130, 246, 0.08)'
-              },
-              '&.Mui-disabled': {
-                borderColor: '#1f2937',
-                color: '#4b5563'
-              }
-            }}
-          >
-            Export to Excel
-          </Button>
+      <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, gap: 2, mb: 3, flexDirection: { xs: 'column', md: 'row' } }}>
+          <Box>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>Customer service activity</Typography>
+            <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
+              Customer-level payments, staff assignments, and service usage
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <TextField
+              size="small"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search customer, phone, staff or seller"
+              sx={{ minWidth: { xs: '100%', sm: 300 } }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>
+                )
+              }}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<FileDownloadIcon />}
+              onClick={exportToExcel}
+              disabled={filteredCustomers.length === 0}
+              sx={{
+                borderColor: 'var(--border)',
+                color: 'var(--text-secondary)',
+                bgcolor: 'var(--surface)',
+                '&:hover': { borderColor: 'var(--primary)', color: 'var(--primary)', bgcolor: 'var(--primary-soft)' },
+                '&.Mui-disabled': { borderColor: 'var(--surface-secondary)', color: 'var(--border-strong)' }
+              }}
+            >
+              Export to Excel
+            </Button>
+          </Box>
         </Box>
 
-        {heatmapData.customers.length === 0 ? (
+        {filteredCustomers.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 8 }}>
-            <Typography sx={{ color: '#9ca3af' }}>
-              No service usage data available for today
+            <Typography sx={{ color: 'var(--text-secondary)' }}>
+              {searchTerm
+                ? 'No customers match your search.'
+                : `No service usage data is available for ${rangeEnabled ? 'this period' : 'this date'}.`}
             </Typography>
           </Box>
         ) : (
           <TableContainer
             sx={{
-              maxHeight: 'calc(100vh - 450px)',
+              maxHeight: '58vh',
               overflowY: 'auto',
               overflowX: 'auto',
               '&::-webkit-scrollbar': {
@@ -642,30 +697,40 @@ const DailyReport: React.FC = () => {
                 height: '8px',
               },
               '&::-webkit-scrollbar-track': {
-                backgroundColor: '#111923',
+                backgroundColor: 'var(--surface-secondary)',
               },
               '&::-webkit-scrollbar-thumb': {
-                backgroundColor: '#2d3748',
+                backgroundColor: 'var(--border)',
                 borderRadius: '4px',
               },
               '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: '#3b82f6',
+                backgroundColor: 'var(--primary)',
               }
             }}
           >
-            <Table size="small" stickyHeader>
+            <Table
+              size="small"
+              stickyHeader
+              aria-label={rangeEnabled ? 'Customer service activity report' : 'Daily customer service activity'}
+              sx={{
+                '& th:not(:first-of-type), & td:not(:first-of-type)': {
+                  position: 'static !important',
+                  left: 'auto !important'
+                }
+              }}
+            >
               <TableHead>
                 <TableRow>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 0,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 200
                     }}
                   >
@@ -673,14 +738,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 200,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 120,
                       textAlign: 'center'
                     }}
@@ -689,14 +754,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 320,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 100,
                       textAlign: 'center'
                     }}
@@ -705,14 +770,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 420,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 150
                     }}
                   >
@@ -720,14 +785,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 570,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 150
                     }}
                   >
@@ -735,14 +800,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 720,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 150
                     }}
                   >
@@ -750,14 +815,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 870,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 120,
                       textAlign: 'right'
                     }}
@@ -766,14 +831,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 990,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 130
                     }}
                   >
@@ -781,14 +846,14 @@ const DailyReport: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 1120,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748',
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)',
                       minWidth: 200
                     }}
                   >
@@ -798,15 +863,15 @@ const DailyReport: React.FC = () => {
                     <TableCell
                       key={service}
                       sx={{
-                        bgcolor: '#101924',
-                        color: '#d1d5db',
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748',
+                        borderBottom: '1px solid var(--border)',
                         minWidth: 120,
                         textAlign: 'center',
                         cursor: 'pointer',
                         '&:hover': {
-                          color: '#3b82f6',
+                          color: 'var(--primary)',
                           textDecoration: 'underline'
                         }
                       }}
@@ -818,48 +883,49 @@ const DailyReport: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {heatmapData.customers.map((customer) => (
+                {paginatedCustomers.map((customer) => (
                   <TableRow
                     key={customer}
                     sx={{
-                      '&:hover': { bgcolor: '#1a2234' }
+                      '&:hover': { bgcolor: 'var(--surface)' }
                     }}
                   >
                     <TableCell
                       sx={{
-                        color: '#f3f4f6',
+                        color: 'var(--text-primary)',
                         position: 'sticky',
                         left: 0,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        zIndex: 1,
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
                         padding: '12px 16px',
                         fontWeight: 500,
                         '&:hover': {
-                          color: '#3b82f6',
+                          color: 'var(--primary)',
                           textDecoration: 'underline'
                         }
                       }}
-                      onClick={() => handleCustomerClick(customer, heatmapData.phoneMap[customer])}
+                      onClick={() => handleCustomerClick(heatmapData.phoneMap[customer])}
                     >
                       <Box>
-                        <Typography sx={{ color: '#f3f4f6', fontSize: '0.9rem', fontWeight: 500 }}>
-                          {customer}
+                        <Typography sx={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 500 }}>
+                          {heatmapData.customerNameMap[customer]}
                         </Typography>
-                        <Typography sx={{ color: '#9ca3af', fontSize: '0.75rem', mt: 0.5 }}>
+                        <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.75rem', mt: 0.5 }}>
                           {heatmapData.phoneMap[customer]}
                         </Typography>
                       </Box>
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         position: 'sticky',
                         left: 200,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         textAlign: 'center',
                         fontSize: '0.85rem',
@@ -872,9 +938,9 @@ const DailyReport: React.FC = () => {
                       sx={{
                         position: 'sticky',
                         left: 320,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         textAlign: 'center'
                       }}
@@ -883,8 +949,9 @@ const DailyReport: React.FC = () => {
                         label={heatmapData.newCustomerMap[customer]}
                         size="small"
                         sx={{
-                          bgcolor: heatmapData.newCustomerMap[customer] === 'Yes' ? '#10b981' : '#6b7280',
-                          color: 'white',
+                          bgcolor: heatmapData.newCustomerMap[customer] === 'Yes' ? 'var(--success-soft)' : 'var(--surface-secondary)',
+                          color: heatmapData.newCustomerMap[customer] === 'Yes' ? 'var(--success)' : 'var(--text-secondary)',
+                          border: `1px solid ${heatmapData.newCustomerMap[customer] === 'Yes' ? 'var(--success)' : 'var(--border)'}`,
                           fontWeight: 600,
                           fontSize: '0.75rem'
                         }}
@@ -892,12 +959,12 @@ const DailyReport: React.FC = () => {
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         position: 'sticky',
                         left: 420,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         fontSize: '0.85rem'
                       }}
@@ -906,12 +973,12 @@ const DailyReport: React.FC = () => {
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         position: 'sticky',
                         left: 570,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         fontSize: '0.85rem'
                       }}
@@ -920,26 +987,26 @@ const DailyReport: React.FC = () => {
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         position: 'sticky',
                         left: 720,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         fontSize: '0.85rem'
                       }}
                     >
-                      {(heatmapData as any).sellerMap[customer]}
+                      {heatmapData.sellerMap[customer]}
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#10b981',
+                        color: 'var(--success)',
                         position: 'sticky',
                         left: 870,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         fontSize: '0.85rem',
                         fontWeight: 600,
@@ -950,12 +1017,12 @@ const DailyReport: React.FC = () => {
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         position: 'sticky',
                         left: 990,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         fontSize: '0.85rem'
                       }}
@@ -964,12 +1031,12 @@ const DailyReport: React.FC = () => {
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         position: 'sticky',
                         left: 1120,
-                        bgcolor: '#1a2234',
-                        borderRight: '1px solid #2d3748',
-                        borderBottom: '1px solid #2d3748',
+                        bgcolor: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
                         padding: '12px 16px',
                         fontSize: '0.85rem',
                         maxWidth: 200,
@@ -988,18 +1055,18 @@ const DailyReport: React.FC = () => {
                           key={`${customer}-${service}`}
                           align="center"
                           sx={{
-                            color: count > 0 ? '#f3f4f6' : '#6b7280',
+                            color: count > 0 ? 'var(--text-primary)' : 'var(--text-muted)',
                             bgcolor: getHeatmapColor(count, maxValue),
-                            borderBottom: '1px solid #2d3748',
+                            borderBottom: '1px solid var(--border)',
                             padding: '12px 16px',
                             fontWeight: count > 0 ? 600 : 400,
                             fontSize: count > 0 ? '0.95rem' : '0.85rem',
                             transition: 'all 0.2s ease',
                             cursor: count > 0 ? 'pointer' : 'default',
                             '&:hover': count > 0 ? {
-                              bgcolor: `rgba(59, 130, 246, ${Math.min((count / maxValue) * 0.9 + 0.3, 1)})`,
+                              bgcolor: `color-mix(in srgb, var(--primary) ${Math.min(Math.round(((count / maxValue) * 0.9 + 0.3) * 100), 100)}%, transparent)`,
                               transform: 'scale(1.05)',
-                              boxShadow: '0 0 8px rgba(59, 130, 246, 0.4)'
+                              boxShadow: '0 0 0 2px var(--primary-soft)'
                             } : {}
                           }}
                         >
@@ -1013,6 +1080,18 @@ const DailyReport: React.FC = () => {
             </Table>
           </TableContainer>
         )}
+        {!!filteredCustomers.length && (
+          <TablePagination
+            component="div"
+            count={filteredCustomers.length}
+            page={effectivePage}
+            onPageChange={(_, newPage) => setPage(newPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(event) => setRowsPerPage(Number(event.target.value))}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            labelRowsPerPage="Customers"
+          />
+        )}
       </Paper>
       </Box>
     </LocalizationProvider>
@@ -1020,4 +1099,3 @@ const DailyReport: React.FC = () => {
 };
 
 export default DailyReport;
-

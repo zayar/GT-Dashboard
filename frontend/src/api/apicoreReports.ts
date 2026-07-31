@@ -53,12 +53,16 @@ export interface CheckInOutRecord {
   CustomerPhoneNumber: string;
   PaymentMethod: string | null;
   PaymentStatus: string | null;
+  OriginalAmount: number | null;
   Total: number | null;
+  ActualInvoice: number | null;
   Discount: number | null;
+  ItemDiscount: number | null;
   SellerName: string | null;
   VisitStatus: string;
   OrderStatus: string | null;
   BookingStatus: string | null;
+  Note: string | null;
 }
 
 interface GraphqlEnvelope<T> {
@@ -76,7 +80,9 @@ interface BookingDetailsResponse {
 interface RawCheckInRow {
   id: string;
   in_time: string;
+  created_at?: string | null;
   out_time?: string | null;
+  merchant_note?: string | null;
   status: string;
   isUsePurchaseService?: boolean | null;
   order_id?: string | null;
@@ -86,6 +92,7 @@ interface RawCheckInRow {
     price?: number | string | null;
   } | null;
   practitioner?: {
+    id?: string | null;
     name?: string | null;
   } | null;
   member?: {
@@ -98,13 +105,11 @@ interface RawCheckInRow {
   } | null;
   booking?: {
     status?: string | null;
-    service_helper?: {
-      name?: string | null;
-    } | null;
   } | null;
   orders?: {
     order_id?: string | null;
     discount?: number | string | null;
+    net_total?: number | string | null;
     payment_method?: string | null;
     payment_status?: string | null;
     status?: string | null;
@@ -130,9 +135,18 @@ interface RawOrderItem {
   id: string;
   order_id: string;
   service_id?: string | null;
+  practitioner_id?: string | null;
+  quantity?: number | null;
   price?: number | string | null;
+  original_price?: number | string | null;
   total?: number | string | null;
+  metadata?: string | null;
+  created_at?: string | null;
 }
+
+type IndexedOrderItem = RawOrderItem & {
+  __inputIndex: number;
+};
 
 interface OrderItemsResponse {
   orderItems?: RawOrderItem[];
@@ -186,7 +200,9 @@ const GET_CHECKIN_OUT_DATA = `
     checkIns(where: $where, orderBy: $orderBy, take: $take, skip: $skip) {
       id
       in_time
+      created_at
       out_time
+      merchant_note
       status
       isUsePurchaseService
       order_id
@@ -196,6 +212,7 @@ const GET_CHECKIN_OUT_DATA = `
         price
       }
       practitioner {
+        id
         name
       }
       member {
@@ -208,13 +225,11 @@ const GET_CHECKIN_OUT_DATA = `
       }
       booking {
         status
-        service_helper {
-          name
-        }
       }
       orders {
         order_id
         discount
+        net_total
         payment_method
         payment_status
         status
@@ -243,13 +258,18 @@ const GET_CHECKIN_ORDER_ITEMS = `
       id
       order_id
       service_id
+      practitioner_id
+      quantity
       price
+      original_price
       total
+      metadata
+      created_at
     }
   }
 `;
 
-async function postApicoreGraphql<T>(input: {
+export async function postApicoreGraphql<T>(input: {
   query: string;
   variables: Record<string, unknown>;
   accessToken: string;
@@ -390,7 +410,10 @@ export function buildCheckInOutVariables(input: {
         equals: input.clinicId,
       },
     },
-    orderBy: [{ in_time: 'desc' }, { id: 'desc' }],
+    // Keep the same ordering contract as gt.report. In particular, do not add
+    // an id-desc tie breaker: it reverses service rows that share a check-in
+    // timestamp compared with the operational report.
+    orderBy: [{ in_time: 'desc' }],
     take: input.take ?? REPORT_BATCH_SIZE,
     skip: input.skip,
   };
@@ -447,23 +470,29 @@ async function fetchOrderItems(input: {
     const data = await postApicoreGraphql<OrderItemsResponse>({
       query: GET_CHECKIN_ORDER_ITEMS,
       accessToken: input.accessToken,
-      variables: {
-        where: {
-          order_id: {
-            in: orderIds,
-          },
-          service_id: {
-            not: null,
-          },
-        },
-        orderBy: [{ updated_at: 'desc' }],
-      },
+      variables: buildCheckInOrderItemVariables(orderIds),
     });
 
     items.push(...(data.orderItems ?? []));
   }
 
   return items;
+}
+
+export function buildCheckInOrderItemVariables(orderIds: string[]) {
+  return {
+    where: {
+      order_id: {
+        in: orderIds,
+      },
+      service_id: {
+        not: null,
+      },
+    },
+    // gt.report resolves duplicate service lines from the newest-created
+    // matching item. updated_at can change later and select a different item.
+    orderBy: [{ created_at: 'desc' }],
+  };
 }
 
 function parseNumber(value: unknown): number | null {
@@ -483,44 +512,163 @@ function parseNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function buildOrderItemLookup(items: RawOrderItem[]) {
-  const lookup = new Map<string, RawOrderItem[]>();
+function timestampValue(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
 
-  items.forEach((item) => {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildOrderItemLookup(items: RawOrderItem[]) {
+  const lookup = new Map<string, IndexedOrderItem[]>();
+
+  items.forEach((item, index) => {
     if (!item.service_id) {
       return;
     }
 
     const key = `${item.order_id}::${item.service_id}`;
     const current = lookup.get(key) ?? [];
-    current.push(item);
+    current.push({ ...item, __inputIndex: index });
     lookup.set(key, current);
+  });
+
+  lookup.forEach((matches) => {
+    matches.sort((left, right) => {
+      const leftTimestamp = timestampValue(left.created_at);
+      const rightTimestamp = timestampValue(right.created_at);
+
+      if (leftTimestamp !== null && rightTimestamp !== null && leftTimestamp !== rightTimestamp) {
+        return rightTimestamp - leftTimestamp;
+      }
+
+      return left.__inputIndex - right.__inputIndex;
+    });
   });
 
   return lookup;
 }
 
-function findMatchedOrderItem(
-  row: RawCheckInRow,
-  lookup: Map<string, RawOrderItem[]>,
+function matchOrderItemsToCheckIns(
+  rows: RawCheckInRow[],
+  orderItems: RawOrderItem[],
 ) {
-  if (!row.order_id || !row.service?.id) {
+  const itemLookup = buildOrderItemLookup(orderItems);
+  const assignments = new Map<string, RawOrderItem>();
+  const orderedRows = rows
+    .map((row, inputIndex) => ({ row, inputIndex }))
+    .filter(({ row }) => (
+      row.status?.trim().toUpperCase() === 'CHECKOUT'
+      && Boolean(row.order_id)
+      && Boolean(row.service?.id)
+    ))
+    .sort((left, right) => {
+      const leftTimestamp = timestampValue(left.row.created_at);
+      const rightTimestamp = timestampValue(right.row.created_at);
+
+      if (leftTimestamp !== null && rightTimestamp !== null && leftTimestamp !== rightTimestamp) {
+        return rightTimestamp - leftTimestamp;
+      }
+
+      return left.inputIndex - right.inputIndex;
+    });
+
+  orderedRows.forEach(({ row }) => {
+    const key = `${row.order_id}::${row.service?.id}`;
+    const matches = itemLookup.get(key) ?? [];
+    const isPurchasedService = Boolean(row.isUsePurchaseService);
+    const matchesPurchaseType = (item: RawOrderItem) => (
+      isPurchasedService
+        ? parseNumber(item.total) === 0
+        : parseNumber(item.total) !== 0
+    );
+    const practitionerId = row.practitioner?.id;
+    let matchIndex = practitionerId
+      ? matches.findIndex((item) => (
+          item.practitioner_id === practitionerId
+          && matchesPurchaseType(item)
+        ))
+      : -1;
+
+    if (matchIndex === -1) {
+      matchIndex = matches.findIndex(matchesPurchaseType);
+    }
+
+    // A zero-total line can also be a genuine 100% discount rather than a
+    // purchased service. If there is no non-zero candidate, use the remaining
+    // service item exactly once.
+    if (matchIndex === -1 && !isPurchasedService) {
+      matchIndex = practitionerId
+        ? matches.findIndex((item) => item.practitioner_id === practitionerId)
+        : -1;
+      if (matchIndex === -1 && matches.length > 0) {
+        matchIndex = 0;
+      }
+    }
+
+    if (matchIndex === -1) {
+      return;
+    }
+
+    const [matchedItem] = matches.splice(matchIndex, 1);
+    assignments.set(row.id, matchedItem);
+  });
+
+  return assignments;
+}
+
+function parseItemMetadata(metadata: string | null | undefined) {
+  if (!metadata) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(metadata);
+    return parsed && typeof parsed === 'object'
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function getOrderItemDiscount(
+  row: RawCheckInRow,
+  item: RawOrderItem | undefined,
+) {
+  if (!item || row.isUsePurchaseService) {
     return null;
   }
 
-  const matches = lookup.get(`${row.order_id}::${row.service.id}`) ?? [];
-  if (row.isUsePurchaseService) {
-    return matches.find((item) => parseNumber(item.price) === 0) ?? matches[0] ?? null;
+  // APICORE stores a real line discount in order-item metadata. Differences
+  // between original_price, sold price, and total can also be manual price
+  // changes, so inferring a discount from those fields creates false values.
+  const discount = parseNumber(parseItemMetadata(item.metadata).discount) ?? 0;
+
+  return discount > 0 ? discount : 0;
+}
+
+function getOrderItemOriginalAmount(item: RawOrderItem | undefined) {
+  if (!item) {
+    return null;
   }
 
-  return matches[0] ?? null;
+  const price = parseNumber(item.price);
+  if (price === null) {
+    return null;
+  }
+
+  const quantity = parseNumber(item.quantity) ?? 1;
+  return price * quantity;
 }
 
 export function mapCheckInOutRecords(
   rows: RawCheckInRow[],
   orderItems: RawOrderItem[],
 ): CheckInOutRecord[] {
-  const itemLookup = buildOrderItemLookup(orderItems);
+  const matchedItems = matchOrderItemsToCheckIns(rows, orderItems);
 
   return rows.map((row) => {
     const order = row.orders;
@@ -529,7 +677,7 @@ export function mapCheckInOutRecords(
     const visitStatus = row.status?.trim().toUpperCase() || 'UNKNOWN';
     const merchantCancelled = bookingStatus === 'MERCHANT_CANCEL';
     const orderCancelled = orderStatus === 'CANCEL' || visitStatus === 'CANCEL';
-    const matchedItem = findMatchedOrderItem(row, itemLookup);
+    const matchedItem = matchedItems.get(row.id);
     const paymentStatus = merchantCancelled
       ? MERCHANT_CANCEL_STATUS
       : orderCancelled
@@ -543,7 +691,10 @@ export function mapCheckInOutRecords(
       CheckOutTime: row.out_time ?? null,
       Servicename: row.service?.name ?? '',
       TherapicName: row.practitioner?.name ?? '',
-      HelperName: row.booking?.service_helper?.name ?? row.helper?.name ?? null,
+      // A sale checkout can attach every service line to one shared booking.
+      // That booking stores the first service's helper, while the check-in row
+      // stores the helper actually assigned to this individual service.
+      HelperName: row.helper?.name ?? null,
       CustomerName: row.member?.clinic_members?.[0]?.name ?? row.member?.name ?? null,
       CustomerPhoneNumber:
         row.member?.clinic_members?.[0]?.phonenumber
@@ -551,15 +702,21 @@ export function mapCheckInOutRecords(
         ?? '',
       PaymentMethod: order?.payment_method ?? null,
       PaymentStatus: paymentStatus,
-      Total:
-        parseNumber(matchedItem?.price)
-        ?? parseNumber(matchedItem?.total)
-        ?? parseNumber(row.service?.price),
-      Discount: parseNumber(order?.discount) ?? 0,
+      // "Original Amount" follows the invoice line's price before its explicit
+      // item discount. Catalog original_price can differ after a manual sale
+      // price change and must not be used here.
+      OriginalAmount: getOrderItemOriginalAmount(matchedItem),
+      // Match the operational item amount: this is the line total after any
+      // explicit item discount or price adjustment has been applied.
+      Total: parseNumber(matchedItem?.total),
+      ActualInvoice: order ? parseNumber(order.net_total) : null,
+      Discount: order ? parseNumber(order.discount) ?? 0 : null,
+      ItemDiscount: getOrderItemDiscount(row, matchedItem),
       SellerName: order?.seller?.display_name ?? null,
       VisitStatus: visitStatus,
       OrderStatus: orderStatus,
       BookingStatus: bookingStatus,
+      Note: row.merchant_note?.trim() || null,
     };
   });
 }
@@ -607,6 +764,7 @@ export async function fetchCheckInOutRecords(input: {
   const checkIns = await fetchAllCheckIns(input);
   const orderIds = Array.from(new Set(
     checkIns
+      .filter((row) => row.status?.trim().toUpperCase() === 'CHECKOUT')
       .map((row) => row.order_id)
       .filter((orderId): orderId is string => Boolean(orderId)),
   ));

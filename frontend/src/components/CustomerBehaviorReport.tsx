@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Box, 
-  Typography, 
-  Paper, 
-  Grid, 
-  Select, 
-  MenuItem, 
-  FormControl, 
+import {
+  Box,
+  Typography,
+  Paper,
+  Grid,
+  Select,
+  MenuItem,
+  FormControl,
   InputLabel,
   CircularProgress,
   Table,
@@ -20,7 +20,8 @@ import {
   TextField,
   InputAdornment,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Tooltip
 } from '@mui/material';
 import axios from 'axios';
 import ReactApexChart from 'react-apexcharts';
@@ -36,22 +37,52 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 
 // Define period type for time selection
 type PeriodType = 'monthly' | 'quarterly' | 'annual';
+type ActivityWindow = 3 | 6 | 12;
 
 interface CustomerVisit {
   customerName: string;
   month: string;
+  periodKey: string;
   visitCount: number;
-}
-
-interface MonthlyActivity {
-  month: string;
-  totalVisits: number;
 }
 
 interface MonthlyCustomers {
   month: string;
+  periodKey: string;
   uniqueCustomers: number;
 }
+
+const periodLabels: Record<PeriodType, string> = {
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  annual: 'Annual'
+};
+
+const generateMonthsForYear = (year: number): Array<Pick<MonthlyCustomers, 'month' | 'periodKey'>> => (
+  Array.from({ length: 12 }, (_, monthIndex) => {
+    const date = new Date(year, monthIndex, 1);
+    return {
+      month: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      periodKey: `${year}-${String(monthIndex + 1).padStart(2, '0')}`
+    };
+  })
+);
+
+const getHeatmapCellStyle = (visitCount: number) => {
+  if (visitCount === 0) {
+    return { backgroundColor: 'transparent', color: 'var(--text-muted)' };
+  }
+  if (visitCount === 1) {
+    return { backgroundColor: 'var(--heatmap-1)', color: 'var(--text-primary)' };
+  }
+  if (visitCount <= 3) {
+    return { backgroundColor: 'var(--heatmap-2)', color: 'var(--text-primary)' };
+  }
+  if (visitCount <= 6) {
+    return { backgroundColor: 'var(--heatmap-3)', color: 'var(--heatmap-text)' };
+  }
+  return { backgroundColor: 'var(--heatmap-4)', color: 'var(--heatmap-text)' };
+};
 
 const CustomerBehaviorReport: React.FC = () => {
   const { currentClinic } = useClinic();
@@ -59,11 +90,11 @@ const CustomerBehaviorReport: React.FC = () => {
   const [period, setPeriod] = useState<PeriodType>('monthly');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [monthlyActivity, setMonthlyActivity] = useState<MonthlyActivity[]>([]);
   const [monthlyCustomers, setMonthlyCustomers] = useState<MonthlyCustomers[]>([]);
   const [customerVisits, setCustomerVisits] = useState<CustomerVisit[]>([]);
   const [yearSelection, setYearSelection] = useState<number>(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [activityWindow, setActivityWindow] = useState<ActivityWindow>(6);
   // Top 10 filter controls
   const [topMode, setTopMode] = useState<'single' | 'range'>('single');
   const [topStartMonth, setTopStartMonth] = useState<Date>(() => {
@@ -85,7 +116,7 @@ const CustomerBehaviorReport: React.FC = () => {
   const formatMonthRange = (): string => {
     const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     if (topMode === 'single') return fmt(topStartMonth);
-    return `${fmt(topStartMonth)}_to_${fmt(topEndMonth)} }`;
+    return `${fmt(topStartMonth)}_to_${fmt(topEndMonth)}`;
   };
 
   const handleExportTopCsv = () => {
@@ -98,7 +129,7 @@ const CustomerBehaviorReport: React.FC = () => {
       r.purchases,
       r.spend,
       rankBy,
-      topMode === 'single' 
+      topMode === 'single'
         ? `${topStartMonth.getFullYear()}-${String(topStartMonth.getMonth()+1).padStart(2,'0')}`
         : `${topStartMonth.getFullYear()}-${String(topStartMonth.getMonth()+1).padStart(2,'0')} to ${topEndMonth.getFullYear()}-${String(topEndMonth.getMonth()+1).padStart(2,'0')}`
     ]);
@@ -120,7 +151,7 @@ const CustomerBehaviorReport: React.FC = () => {
     a.click();
     URL.revokeObjectURL(url);
   };
-  
+
   const years = useMemo(() => {
     const currentYear = new Date().getFullYear();
     return [
@@ -137,7 +168,7 @@ const CustomerBehaviorReport: React.FC = () => {
   useEffect(() => {
     fetchTopCustomers();
   }, [currentClinic, topMode, topStartMonth, topEndMonth, rankBy]);
-  
+
   // Keep end month in sync when switching to single mode or when start > end
   useEffect(() => {
     if (topMode === 'single') {
@@ -152,66 +183,73 @@ const CustomerBehaviorReport: React.FC = () => {
   const fetchCustomerActivityData = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      let timeFilterSQL;
-      let groupFormat;
-      
-      // Configure time filter based on period selection
-      if (period === 'monthly') {
-        timeFilterSQL = `EXTRACT(YEAR FROM CheckInTime) = ${yearSelection}`;
-        groupFormat = "FORMAT_TIMESTAMP('%b %Y', CheckInTime)";
-      } else if (period === 'quarterly') {
-        timeFilterSQL = `EXTRACT(YEAR FROM CheckInTime) = ${yearSelection}`;
-        groupFormat = "CONCAT('Q', EXTRACT(QUARTER FROM CheckInTime), ' ', EXTRACT(YEAR FROM CheckInTime))";
-      } else if (period === 'annual') {
-        timeFilterSQL = `EXTRACT(YEAR FROM CheckInTime) >= ${yearSelection - 2} AND EXTRACT(YEAR FROM CheckInTime) <= ${yearSelection}`;
-        groupFormat = "EXTRACT(YEAR FROM CheckInTime)::text";
-      }
-      
+      const timeGrouping = period === 'monthly'
+        ? {
+            timeFilterSQL: `EXTRACT(YEAR FROM CheckInTime) = ${yearSelection}`,
+            groupFormat: "FORMAT_TIMESTAMP('%b %Y', CheckInTime)",
+            groupKeyFormat: "FORMAT_TIMESTAMP('%Y-%m', CheckInTime)"
+          }
+        : period === 'quarterly'
+          ? {
+              timeFilterSQL: `EXTRACT(YEAR FROM CheckInTime) = ${yearSelection}`,
+              groupFormat: "FORMAT('Q%d %04d', EXTRACT(QUARTER FROM CheckInTime), EXTRACT(YEAR FROM CheckInTime))",
+              groupKeyFormat: "FORMAT('%04d-Q%d', EXTRACT(YEAR FROM CheckInTime), EXTRACT(QUARTER FROM CheckInTime))"
+            }
+          : {
+              timeFilterSQL: `EXTRACT(YEAR FROM CheckInTime) >= ${yearSelection - 2} AND EXTRACT(YEAR FROM CheckInTime) <= ${yearSelection}`,
+              groupFormat: 'CAST(EXTRACT(YEAR FROM CheckInTime) AS STRING)',
+              groupKeyFormat: 'CAST(EXTRACT(YEAR FROM CheckInTime) AS STRING)'
+            };
+
+      const { timeFilterSQL, groupFormat, groupKeyFormat } = timeGrouping;
+
       if (!currentClinic) {
         setError('No clinic selected. Please select a clinic first.');
         setLoading(false);
         return;
       }
-      
+
       // SQL for individual customer activity - NO limit, to get ALL active members
       const customerVisitsSQL = `
-        SELECT 
+        SELECT
           CustomerName AS customerName,
           ${groupFormat} AS month,
+          ${groupKeyFormat} AS periodKey,
           COUNT(*) AS visitCount
         FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND CustomerName IS NOT NULL
         AND ClinicCode = '${currentClinic.code}'
-        GROUP BY CustomerName, ${groupFormat}
-        ORDER BY CustomerName, ${groupFormat} DESC
+        GROUP BY CustomerName, ${groupFormat}, ${groupKeyFormat}
+        ORDER BY CustomerName, periodKey DESC
       `;
-      
+
       // SQL for monthly unique customer counts
       const monthlyCustomersSQL = `
-        SELECT 
+        SELECT
           ${groupFormat} AS month,
+          ${groupKeyFormat} AS periodKey,
           COUNT(DISTINCT CustomerName) AS uniqueCustomers
         FROM great_time.MainDataView
         WHERE ${timeFilterSQL}
         AND CustomerName IS NOT NULL
         AND ClinicCode = '${currentClinic.code}'
-        GROUP BY ${groupFormat}
-        ORDER BY ${groupFormat} ASC
+        GROUP BY ${groupFormat}, ${groupKeyFormat}
+        ORDER BY periodKey ASC
       `;
-      
+
       // Execute queries in parallel
       const [visitsResponse, customersResponse] = await Promise.all([
-        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`,
           { query: customerVisitsSQL },
           {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000
           }
         ),
-        axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+        axios.post(`${import.meta.env.VITE_API_URL}/query`,
           { query: monthlyCustomersSQL },
           {
             headers: { 'Content-Type': 'application/json' },
@@ -219,68 +257,38 @@ const CustomerBehaviorReport: React.FC = () => {
           }
         )
       ]);
-      
+
       if (visitsResponse.data.success) {
-        let customerVisitsData = visitsResponse.data.data || [];
-        
-        // For year 2024 and monthly period, ensure all months are represented
-        if (yearSelection === 2024 && period === 'monthly') {
-          const allMonths = generateMonthsForYear(2024);
-          const allCustomers = Array.from(new Set(customerVisitsData.map((visit:any) => visit.customerName)));
-          
-          // For each customer, make sure they have entries for all months
-          // Even if they have no visits (will be displayed as "-")
-          allCustomers.forEach(customerName => {
-            allMonths.forEach(month => {
-              // Check if this customer-month combo exists
-              const exists = customerVisitsData.some(
-                (visit:any) => visit.customerName === customerName && visit.month === month
-              );
-              
-              // If not, add an entry with zero visits
-              if (!exists) {
-                customerVisitsData.push({
-                  customerName,
-                  month,
-                  visitCount: 0
-                });
-              }
-            });
-          });
-        }
-        
+        const customerVisitsData: CustomerVisit[] = (visitsResponse.data.data || [])
+          .map((visit: CustomerVisit) => ({
+            ...visit,
+            visitCount: Number(visit.visitCount) || 0
+          }))
+          .sort((a: CustomerVisit, b: CustomerVisit) => b.periodKey.localeCompare(a.periodKey));
+
         setCustomerVisits(customerVisitsData);
       } else {
         setError(visitsResponse.data.error || 'Failed to fetch customer visit data.');
         return;
       }
-      
+
       if (customersResponse.data.success) {
-        let monthlyCustomersData = customersResponse.data.data || [];
-        
-        // For year 2024, make sure all 12 months are included even if no data
-        if (yearSelection === 2024 && period === 'monthly') {
-          const allMonths = generateMonthsForYear(2024);
-          const existingMonths = new Set(monthlyCustomersData.map((item:any) => item.month));
-          
-          // Add missing months with zero counts
-          allMonths.forEach(month => {
-            if (!existingMonths.has(month)) {
-              monthlyCustomersData.push({
-                month,
-                uniqueCustomers: 0
-              });
-            }
-          });
-          
-          // Sort months chronologically
-          monthlyCustomersData = monthlyCustomersData.sort((a:any, b:any) => {
-            const dateA = new Date(a.month);
-            const dateB = new Date(b.month);
-            return dateA.getTime() - dateB.getTime();
-          });
-        }
-        
+        const fetchedCustomerCounts: MonthlyCustomers[] = (customersResponse.data.data || [])
+          .map((item: MonthlyCustomers) => ({
+            ...item,
+            uniqueCustomers: Number(item.uniqueCustomers) || 0
+          }));
+
+        const monthlyCustomersData = period === 'monthly'
+          ? generateMonthsForYear(yearSelection).map(month => {
+              const matchingCount = fetchedCustomerCounts.find(item => item.periodKey === month.periodKey);
+              return {
+                ...month,
+                uniqueCustomers: matchingCount?.uniqueCustomers ?? 0
+              };
+            })
+          : fetchedCustomerCounts.sort((a, b) => a.periodKey.localeCompare(b.periodKey));
+
         setMonthlyCustomers(monthlyCustomersData);
       } else {
         setError(customersResponse.data.error || 'Failed to fetch monthly customer data.');
@@ -289,7 +297,7 @@ const CustomerBehaviorReport: React.FC = () => {
     } catch (err: any) {
       console.error('Error fetching customer data:', err);
       let errorMessage = 'An unexpected error occurred while fetching data.';
-      
+
       if (err.response) {
         errorMessage = `Server error (${err.response.status}): ${err.response.data?.error || 'Unknown error'}`;
       } else if (err.request) {
@@ -297,7 +305,7 @@ const CustomerBehaviorReport: React.FC = () => {
       } else {
         errorMessage = err.message || 'Unknown error occurred';
       }
-      
+
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -320,7 +328,7 @@ const CustomerBehaviorReport: React.FC = () => {
       const query = `
         -- Visits within selected range from appointment data
         WITH Visits AS (
-          SELECT 
+          SELECT
             CustomerName,
             CustomerPhoneNumber,
             COUNT(*) AS visits
@@ -333,7 +341,7 @@ const CustomerBehaviorReport: React.FC = () => {
         ),
         -- Member ID from payments if available
         Member AS (
-          SELECT 
+          SELECT
             CustomerName,
             CustomerPhoneNumber,
             ANY_VALUE(MemberId) AS MemberId
@@ -343,23 +351,35 @@ const CustomerBehaviorReport: React.FC = () => {
             AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
           GROUP BY CustomerName, CustomerPhoneNumber
         ),
-        -- Purchases and spend within selected range from payments
-        Purchases AS (
-          SELECT 
+        -- MainPaymentView contains one row per invoice line/service, with NetTotal
+        -- repeated on every row. Collapse it to one row per invoice before summing.
+        InvoicePurchases AS (
+          SELECT
             CustomerName,
             CustomerPhoneNumber,
-            COUNT(DISTINCT InvoiceNumber) AS purchases,
-            CAST(SUM(CAST(NetTotal AS FLOAT64)) AS INT64) AS spend
+            InvoiceNumber,
+            MAX(CAST(NetTotal AS FLOAT64)) AS invoiceSpend
           FROM great_time.MainPaymentView
           WHERE CustomerName IS NOT NULL
             AND CustomerPhoneNumber IS NOT NULL
+            AND InvoiceNumber IS NOT NULL
             AND PaymentStatus = 'PAID'
             AND PaymentMethod != 'PASS'
+            AND CAST(NetTotal AS FLOAT64) > 0
             AND DATE(OrderCreatedDate) BETWEEN DATE('${startStr}') AND DATE('${endStr}')
             AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          GROUP BY CustomerName, CustomerPhoneNumber, InvoiceNumber
+        ),
+        Purchases AS (
+          SELECT
+            CustomerName,
+            CustomerPhoneNumber,
+            COUNT(*) AS purchases,
+            CAST(SUM(invoiceSpend) AS INT64) AS spend
+          FROM InvoicePurchases
           GROUP BY CustomerName, CustomerPhoneNumber
         )
-        SELECT 
+        SELECT
           v.CustomerName AS name,
           v.CustomerPhoneNumber AS phone,
           COALESCE(m.MemberId, 'N/A') AS memberId,
@@ -394,51 +414,17 @@ const CustomerBehaviorReport: React.FC = () => {
       setTopLoading(false);
     }
   };
-  
-  // Helper to format month display (YYYY-MM to Month YYYY)
-  const formatMonthDisplay = (monthStr: string): string => {
-    try {
-      const [year, month] = monthStr.split('-');
-      const date = new Date(parseInt(year), parseInt(month) - 1, 1);
-      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    } catch (e) {
-      return monthStr;
-    }
-  };
-  
-  // Generate time constraint based on period selection
-  const getTimeConstraint = (): string => {
-    const currentDate = new Date();
-    const selectedYear = yearSelection;
-    
-    if (period === 'annual') {
-      return `AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}`;
-    } else if (period === 'quarterly') {
-      // Default to current quarter if in selected year
-      const currentQuarter = Math.floor(currentDate.getMonth() / 3) + 1;
-      const startMonth = (currentQuarter - 1) * 3 + 1;
-      const endMonth = currentQuarter * 3;
-      
-      return `
-        AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-        AND EXTRACT(MONTH FROM CheckInTime) BETWEEN ${startMonth} AND ${endMonth}
-      `;
-    } else {
-      // Monthly - default to showing all months in the selected year
-      return `AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}`;
-    }
-  };
 
   // Handle period change
   const handlePeriodChange = (event: SelectChangeEvent<string>) => {
     setPeriod(event.target.value as PeriodType);
   };
-  
+
   // Handle year change
   const handleYearChange = (event: SelectChangeEvent<string>) => {
     setYearSelection(Number(event.target.value));
   };
-  
+
   // Handle search term change
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
@@ -449,12 +435,26 @@ const CustomerBehaviorReport: React.FC = () => {
     if (!searchTerm.trim()) {
       return Array.from(new Set(customerVisits.map(visit => visit.customerName))).sort();
     }
-    
+
     const searchLower = searchTerm.toLowerCase();
     return Array.from(new Set(customerVisits.map(visit => visit.customerName)))
       .filter(name => name.toLowerCase().includes(searchLower))
       .sort();
   }, [customerVisits, searchTerm]);
+
+  const activityPeriods = useMemo(() => (
+    [...monthlyCustomers]
+      .sort((a, b) => a.periodKey.localeCompare(b.periodKey))
+      .slice(0, activityWindow)
+  ), [monthlyCustomers, activityWindow]);
+
+  const visitsByCustomerAndPeriod = useMemo(() => {
+    const visitMap = new Map<string, number>();
+    customerVisits.forEach(visit => {
+      visitMap.set(`${visit.customerName}\u0000${visit.periodKey}`, visit.visitCount);
+    });
+    return visitMap;
+  }, [customerVisits]);
 
   // Monthly Customers Chart Options
   const monthlyCustomersChartOptions: ApexOptions = {
@@ -473,7 +473,7 @@ const CustomerBehaviorReport: React.FC = () => {
         columnWidth: '60%',
       }
     },
-    colors: ['#60a5fa'],
+    colors: ['var(--primary)'],
     dataLabels: {
       enabled: false
     },
@@ -482,7 +482,7 @@ const CustomerBehaviorReport: React.FC = () => {
       width: 2
     },
     grid: {
-      borderColor: '#334155',
+      borderColor: 'var(--chart-grid)',
       strokeDashArray: 4,
       xaxis: {
         lines: {
@@ -499,39 +499,44 @@ const CustomerBehaviorReport: React.FC = () => {
       categories: monthlyCustomers.map(item => item.month),
       labels: {
         style: {
-          colors: '#d1d5db',
+          colors: 'var(--text-secondary)',
           fontSize: '12px'
         }
       },
       axisBorder: {
         show: true,
-        color: '#334155'
+        color: 'var(--border-strong)'
       },
       axisTicks: {
         show: true,
-        color: '#334155'
+        color: 'var(--border-strong)'
       }
     },
     yaxis: {
       title: {
         text: 'Unique Customers',
         style: {
-          color: '#d1d5db',
+          color: 'var(--text-secondary)',
           fontSize: '13px',
           fontWeight: 500
         }
       },
       labels: {
         style: {
-          colors: '#d1d5db',
+          colors: 'var(--text-secondary)',
           fontSize: '12px'
         }
       }
     },
     tooltip: {
+      shared: false,
+      intersect: true,
+      marker: {
+        show: false
+      },
       y: {
         formatter: function (val: number) {
-          return val.toString() + ' customers';
+          return `${val.toLocaleString()} customers`;
         }
       }
     },
@@ -550,140 +555,108 @@ const CustomerBehaviorReport: React.FC = () => {
     }
   ];
 
-  // Group customer data by customer name for the top customers chart
-  const topCustomers = useMemo(() => {
-    const customerTotals = customerVisits.reduce((acc: {[key: string]: number}, visit) => {
-      if (!acc[visit.customerName]) {
-        acc[visit.customerName] = 0;
-      }
-      acc[visit.customerName] += visit.visitCount;
-      return acc;
-    }, {});
-    
-    return Object.entries(customerTotals)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-  }, [customerVisits]);
-
-  // Add this function after the formatMonthDisplay function to generate all months for a year
-  // Function to generate all months for a given year
-  const generateMonthsForYear = (year: number): string[] => {
-    const months = [];
-    for (let i = 0; i < 12; i++) {
-      const date = new Date(year, i, 1);
-      months.push(date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
-    }
-    return months;
-  };
-
   return (
-    <Box sx={{ 
-      p: 3, 
-      bgcolor: '#0f172a', 
+    <Box sx={{
+      p: 3,
+      bgcolor: 'var(--background)',
       minHeight: '100vh',
-      color: '#e2e8f0'
+      color: 'var(--text-primary)'
     }}>
-      <Typography variant="h5" component="h1" sx={{ mb: 4, fontWeight: 600, color: '#e2e8f0' }}>
+      <Typography variant="h5" component="h1" sx={{ mb: 0.75, fontWeight: 600, color: 'var(--text-primary)' }}>
         Customer Behavior Report
+      </Typography>
+      <Typography variant="body2" sx={{ mb: 3, color: 'var(--text-secondary)' }}>
+        Monitor customer reach, top spenders, and visit frequency for {currentClinic?.name || 'the selected clinic'}.
       </Typography>
 
       {/* Filters header */}
-      <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        <FormControl sx={{ minWidth: 120, bgcolor: '#1e293b', borderRadius: 1 }}>
-          <InputLabel id="period-select-label" sx={{ color: '#94a3b8' }}>Period</InputLabel>
-          <Select
-            labelId="period-select-label"
-            id="period-select"
-            value={period}
-            label="Period"
-            onChange={handlePeriodChange}
-            sx={{ 
-              color: 'white',
-              '& .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#334155'
-              },
-              '&:hover .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#475569'
-              },
-              '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#3b82f6'
-              },
-              '& .MuiSvgIcon-root': {
-                color: '#94a3b8'
-              }
+      <Paper sx={{ mb: 3, p: 2, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+        <Box sx={{ mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+            Trend and activity filters
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+            These controls update the customer count chart and active customer table. Top 10 uses its own filters below.
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          <FormControl sx={{ minWidth: 120, bgcolor: 'var(--surface-secondary)', borderRadius: 1 }}>
+            <InputLabel id="period-select-label" sx={{ color: 'var(--text-secondary)' }}>Period</InputLabel>
+            <Select
+              labelId="period-select-label"
+              id="period-select"
+              value={period}
+              label="Period"
+              onChange={handlePeriodChange}
+              sx={{
+                color: 'var(--text-primary)',
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-strong)' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-strong)' },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
+                '& .MuiSvgIcon-root': { color: 'var(--text-secondary)' }
+              }}
+            >
+              <MenuItem value="monthly">Monthly</MenuItem>
+              <MenuItem value="quarterly">Quarterly</MenuItem>
+              <MenuItem value="annual">Annual</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl sx={{ minWidth: 120, bgcolor: 'var(--surface-secondary)', borderRadius: 1 }}>
+            <InputLabel id="year-select-label" sx={{ color: 'var(--text-secondary)' }}>Year</InputLabel>
+            <Select
+              labelId="year-select-label"
+              id="year-select"
+              value={yearSelection.toString()}
+              label="Year"
+              onChange={handleYearChange}
+              sx={{
+                color: 'var(--text-primary)',
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-strong)' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-strong)' },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
+                '& .MuiSvgIcon-root': { color: 'var(--text-secondary)' }
+              }}
+            >
+              {years.map(year => (
+                <MenuItem key={year} value={year.toString()}>{year}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Button
+            variant="contained"
+            onClick={fetchCustomerActivityData}
+            sx={{
+              bgcolor: 'var(--primary)',
+              color: 'var(--text-on-primary)',
+              '&:hover': { bgcolor: 'var(--primary-hover)' }
             }}
           >
-            <MenuItem value="monthly">Monthly</MenuItem>
-            <MenuItem value="quarterly">Quarterly</MenuItem>
-            <MenuItem value="annual">Annual</MenuItem>
-          </Select>
-        </FormControl>
-
-        <FormControl sx={{ minWidth: 120, bgcolor: '#1e293b', borderRadius: 1 }}>
-          <InputLabel id="year-select-label" sx={{ color: '#94a3b8' }}>Year</InputLabel>
-          <Select
-            labelId="year-select-label"
-            id="year-select"
-            value={yearSelection.toString()}
-            label="Year"
-            onChange={handleYearChange}
-            sx={{ 
-              color: 'white',
-              '& .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#334155'
-              },
-              '&:hover .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#475569'
-              },
-              '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#3b82f6'
-              },
-              '& .MuiSvgIcon-root': {
-                color: '#94a3b8'
-              }
-            }}
-          >
-            {years.map(year => (
-              <MenuItem key={year} value={year.toString()}>{year}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <Button 
-          variant="contained" 
-          onClick={fetchCustomerActivityData}
-          sx={{ 
-            bgcolor: '#1e40af', 
-            color: 'white',
-            '&:hover': {
-              bgcolor: '#1e3a8a'
-            }
-          }}
-        >
-          Refresh Data
-        </Button>
-      </Box>
+            Refresh Data
+          </Button>
+        </Box>
+      </Paper>
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
-          <CircularProgress sx={{ color: '#3b82f6' }} />
+          <CircularProgress sx={{ color: 'var(--primary)' }} />
         </Box>
       ) : error ? (
-        <Paper sx={{ 
-          p: 4, 
-          bgcolor: '#111827', 
-          color: '#e2e8f0',
-          border: '1px solid #334155',
+        <Paper sx={{
+          p: 4,
+          bgcolor: 'var(--surface)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border-strong)',
           textAlign: 'center'
         }}>
           <Typography color="error" variant="h6" sx={{ mb: 2 }}>
             {error}
           </Typography>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={fetchCustomerActivityData}
-            sx={{ bgcolor: '#1e40af' }}
+            sx={{ bgcolor: 'var(--primary)', color: 'var(--text-on-primary)' }}
           >
             Try Again
           </Button>
@@ -692,22 +665,27 @@ const CustomerBehaviorReport: React.FC = () => {
         <Grid container spacing={3}>
           {/* Monthly Customer Count Chart */}
           <Grid item xs={12}>
-            <Paper sx={{ 
-              p: 3, 
-              bgcolor: '#111827', 
+            <Paper sx={{
+              p: 3,
+              bgcolor: 'var(--surface)',
               borderRadius: 2,
-              border: '1px solid #334155',
+              border: '1px solid var(--border-strong)',
               height: '100%'
             }}>
-              <Typography variant="h6" sx={{ mb: 3, fontWeight: 500, color: '#e2e8f0' }}>
-                Monthly Customer Count
-              </Typography>
+              <Box sx={{ mb: 2.5 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {periodLabels[period]} Customer Count
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+                  Chronological trend for {period === 'annual' ? `${yearSelection - 2}–${yearSelection}` : yearSelection}
+                </Typography>
+              </Box>
               <Box sx={{ height: 350 }}>
-                <ReactApexChart 
-                  options={monthlyCustomersChartOptions} 
-                  series={monthlyCustomersChartSeries} 
-                  type="bar" 
-                  height={350} 
+                <ReactApexChart
+                  options={monthlyCustomersChartOptions}
+                  series={monthlyCustomersChartSeries}
+                  type="bar"
+                  height={350}
                 />
               </Box>
             </Paper>
@@ -715,9 +693,12 @@ const CustomerBehaviorReport: React.FC = () => {
 
           {/* Top 10 Customers with month or range filter - full width */}
           <Grid item xs={12}>
-            <Paper sx={{ p: 3, bgcolor: '#111827', borderRadius: 2, border: '1px solid #334155' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 500, color: '#e2e8f0' }}>Top 10 Customers</Typography>
+            <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border-strong)' }}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'var(--text-primary)' }}>Top 10 Customers</Typography>
+                <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+                  This section uses the independent date and ranking filters below.
+                </Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 2 }}>
                 <ToggleButtonGroup
@@ -739,7 +720,7 @@ const CustomerBehaviorReport: React.FC = () => {
                       const normalized = new Date(d.getFullYear(), d.getMonth(), 1);
                       setTopStartMonth(normalized);
                     }}
-                    slotProps={{ textField: { size: 'small', sx: { bgcolor: '#1e293b', '& .MuiInputBase-input': { color: '#e2e8f0' } } } }}
+                    slotProps={{ textField: { size: 'small', sx: { bgcolor: 'var(--surface-secondary)', '& .MuiInputBase-input': { color: 'var(--text-primary)' } } } }}
                   />
                   {topMode === 'range' && (
                     <DatePicker
@@ -752,19 +733,29 @@ const CustomerBehaviorReport: React.FC = () => {
                         setTopEndMonth(normalized);
                       }}
                       minDate={topStartMonth}
-                      slotProps={{ textField: { size: 'small', sx: { bgcolor: '#1e293b', '& .MuiInputBase-input': { color: '#e2e8f0' } } } }}
+                      slotProps={{ textField: { size: 'small', sx: { bgcolor: 'var(--surface-secondary)', '& .MuiInputBase-input': { color: 'var(--text-primary)' } } } }}
                     />
                   )}
                 </LocalizationProvider>
-                <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 500 }}>
-                  Ranked by: Spend
-                </Typography>
-                <Button 
+                <FormControl size="small" sx={{ minWidth: 140 }}>
+                  <InputLabel id="rank-by-label">Rank by</InputLabel>
+                  <Select
+                    labelId="rank-by-label"
+                    value={rankBy}
+                    label="Rank by"
+                    onChange={(event) => setRankBy(event.target.value as typeof rankBy)}
+                  >
+                    <MenuItem value="spend">Spend</MenuItem>
+                    <MenuItem value="visits">Visits</MenuItem>
+                    <MenuItem value="purchases">Purchases</MenuItem>
+                  </Select>
+                </FormControl>
+                <Button
                   variant="outlined"
                   size="small"
                   startIcon={<FileDownloadIcon />}
                   onClick={handleExportTopCsv}
-                  sx={{ borderColor: '#2d3748', color: '#e2e8f0' }}
+                  sx={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
                 >
                   Export CSV
                 </Button>
@@ -773,36 +764,38 @@ const CustomerBehaviorReport: React.FC = () => {
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Name</TableCell>
-                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Phone</TableCell>
-                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Member ID</TableCell>
-                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Visits</TableCell>
-                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Purchases</TableCell>
-                      <TableCell sx={{ bgcolor: '#e2e8f0', color: '#111923', fontWeight: 700 }}>Spend</TableCell>
+                      <TableCell align="center" sx={{ width: 64, bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Rank</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Name</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Phone</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Member ID</TableCell>
+                      <TableCell align="right" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Visits</TableCell>
+                      <TableCell align="right" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Purchases</TableCell>
+                      <TableCell align="right" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 700 }}>Spend</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {topLoading ? (
                       <TableRow>
-                        <TableCell colSpan={6} sx={{ color: '#e2e8f0' }}>Loading...</TableCell>
+                        <TableCell colSpan={7} sx={{ color: 'var(--text-secondary)', textAlign: 'center', py: 4 }}>Loading top customers…</TableCell>
                       </TableRow>
                     ) : topCustomersRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} sx={{ color: '#e2e8f0' }}>No data for the selected period.</TableCell>
+                        <TableCell colSpan={7} sx={{ color: 'var(--text-secondary)', textAlign: 'center', py: 4 }}>No customers found for the selected period.</TableCell>
                       </TableRow>
                     ) : topCustomersRows.map((row, idx) => (
                       <TableRow
                         key={idx}
                         hover
-                        sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#1c2a41' } }}
+                        sx={{ cursor: 'pointer', '&:hover': { bgcolor: 'var(--primary-soft)' } }}
                         onClick={() => navigate(`/customers/${encodeURIComponent(row.phone)}`)}
                       >
-                        <TableCell sx={{ color: '#e2e8f0' }}>{row.name}</TableCell>
-                        <TableCell sx={{ color: '#e2e8f0' }}>{row.phone}</TableCell>
-                        <TableCell sx={{ color: '#e2e8f0' }}>{row.memberId}</TableCell>
-                        <TableCell sx={{ color: '#e2e8f0' }}>{row.visits}</TableCell>
-                        <TableCell sx={{ color: '#e2e8f0' }}>{row.purchases}</TableCell>
-                        <TableCell sx={{ color: '#e2e8f0' }}>{formatCurrency(row.spend, currentClinic)}</TableCell>
+                        <TableCell className="customer-rank-cell" align="center" sx={{ color: 'var(--primary)', fontWeight: 700 }}>{idx + 1}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)' }}>{row.name}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-secondary)' }}>{row.phone}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-secondary)' }}>{row.memberId}</TableCell>
+                        <TableCell align="right" sx={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{row.visits}</TableCell>
+                        <TableCell align="right" sx={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{row.purchases}</TableCell>
+                        <TableCell align="right" sx={{ color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(row.spend, currentClinic)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -810,54 +803,87 @@ const CustomerBehaviorReport: React.FC = () => {
               </TableContainer>
             </Paper>
           </Grid>
-          
+
           {/* Member Activity Table with search */}
           <Grid item xs={12}>
-            <Paper sx={{ 
-              p: 3, 
-              bgcolor: '#111827', 
+            <Paper sx={{
+              p: 3,
+              bgcolor: 'var(--surface)',
               borderRadius: 2,
-              border: '1px solid #334155',
+              border: '1px solid var(--border-strong)',
               overflow: 'hidden'
             }}>
-              <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6" sx={{ fontWeight: 500, color: '#e2e8f0' }}>
-                  All Active Members
-                </Typography>
-                <Box sx={{ width: '300px' }}>
-                  <TextField
-                    placeholder="Search members..."
-                    fullWidth
-                    variant="outlined"
+              <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Active Customer Visits
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+                    Showing the first {activityPeriods.length} {period === 'monthly' ? 'months' : period === 'quarterly' ? 'quarters' : 'years'} in chronological order.
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                  <ToggleButtonGroup
+                    exclusive
+                    value={activityWindow}
+                    onChange={(_event, value: ActivityWindow | null) => value && setActivityWindow(value)}
                     size="small"
-                    value={searchTerm}
-                    onChange={handleSearchChange}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <SearchIcon sx={{ color: '#94a3b8' }} />
-                        </InputAdornment>
-                      ),
-                      sx: {
-                        color: 'white',
-                        bgcolor: '#1e293b',
-                        borderRadius: 1,
-                        '& .MuiOutlinedInput-notchedOutline': {
-                          borderColor: '#334155'
-                        },
-                        '&:hover .MuiOutlinedInput-notchedOutline': {
-                          borderColor: '#475569'
-                        },
-                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                          borderColor: '#3b82f6'
+                    aria-label="Number of recent periods shown"
+                  >
+                    <ToggleButton value={3}>3 periods</ToggleButton>
+                    <ToggleButton value={6}>6 periods</ToggleButton>
+                    <ToggleButton value={12}>12 periods</ToggleButton>
+                  </ToggleButtonGroup>
+                  <Box sx={{ width: { xs: '100%', sm: '280px' } }}>
+                    <TextField
+                      placeholder="Search customers…"
+                      fullWidth
+                      variant="outlined"
+                      size="small"
+                      value={searchTerm}
+                      onChange={handleSearchChange}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <SearchIcon sx={{ color: 'var(--text-secondary)' }} />
+                          </InputAdornment>
+                        ),
+                        sx: {
+                          color: 'var(--text-primary)',
+                          bgcolor: 'var(--surface-secondary)',
+                          borderRadius: 1,
+                          '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-strong)' },
+                          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-strong)' },
+                          '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
                         }
-                      }
-                    }}
-                  />
+                      }}
+                    />
+                  </Box>
                 </Box>
               </Box>
-              
-              <TableContainer sx={{ 
+
+              <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }} aria-label="Visit frequency legend">
+                <Typography variant="caption" sx={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  Visits
+                </Typography>
+                {[
+                  { label: '0', count: 0 },
+                  { label: '1', count: 1 },
+                  { label: '2–3', count: 2 },
+                  { label: '4–6', count: 4 },
+                  { label: '7+', count: 7 }
+                ].map(item => {
+                  const heatmapStyle = getHeatmapCellStyle(item.count);
+                  return (
+                    <Box key={item.label} sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.6 }}>
+                      <Box sx={{ width: 18, height: 18, borderRadius: 0.75, border: '1px solid var(--border)', ...heatmapStyle }} />
+                      <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>{item.label}</Typography>
+                    </Box>
+                  );
+                })}
+              </Box>
+
+              <TableContainer sx={{
                 overflowX: 'auto',
                 maxHeight: '650px',
                 '&::-webkit-scrollbar': {
@@ -865,134 +891,112 @@ const CustomerBehaviorReport: React.FC = () => {
                   height: '8px',
                 },
                 '&::-webkit-scrollbar-track': {
-                  backgroundColor: '#111923',
+                  backgroundColor: 'var(--surface-secondary)',
                 },
                 '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: '#2d3748',
+                  backgroundColor: 'var(--border)',
                   borderRadius: '4px',
                 },
                 '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: '#4a5568',
+                  backgroundColor: 'var(--text-muted)',
                 }
               }}>
-                <Table size="small" stickyHeader>
+                <Table size="small" stickyHeader sx={{ minWidth: 680 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ 
-                        bgcolor: '#e2e8f0', 
-                        color: '#111923', 
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontWeight: 'bold',
                         padding: '12px 16px',
-                        borderBottom: '1px solid #2d3748',
+                        borderBottom: '1px solid var(--border)',
                         whiteSpace: 'nowrap',
-                        minWidth: '200px'
+                        minWidth: '220px',
+                        position: 'sticky',
+                        left: 0,
+                        zIndex: 4,
+                        boxShadow: '2px 0 0 var(--border)'
                       }}>
-                        MEMBER NAME
+                        CUSTOMER NAME
                       </TableCell>
-                      
-                      {/* Dynamic month columns - get unique months from data and sort them */}
-                      {Array.from(new Set(customerVisits.map(visit => visit.month)))
-                        .sort((a, b) => {
-                          // For year 2024, sort chronologically (January to December)
-                          // Otherwise sort in reverse chronological order (newest first)
-                          const dateA = new Date(a);
-                          const dateB = new Date(b);
-                          return yearSelection === 2024 
-                            ? dateA.getTime() - dateB.getTime() 
-                            : dateB.getTime() - dateA.getTime();
-                        })
-                        // Show all 12 months for year 2024, otherwise show 3 most recent months
-                        .slice(0, yearSelection === 2024 ? 12 : 3)
-                        .map(month => (
-                        <TableCell 
-                          key={month} 
+
+                      {activityPeriods.map(activityPeriod => (
+                        <TableCell
+                          key={activityPeriod.periodKey}
                           align="center"
-                          sx={{ 
-                            bgcolor: '#e2e8f0', 
-                            color: '#111923', 
+                          sx={{
+                            bgcolor: 'var(--surface-secondary)',
+                            color: 'var(--text-primary)',
                             fontWeight: 'bold',
                             padding: '12px 16px',
-                            borderBottom: '1px solid #2d3748',
+                            borderBottom: '1px solid var(--border)',
                             width: '120px',
                             whiteSpace: 'nowrap'
                           }}
                         >
-                          {month}
+                          {activityPeriod.month}
                         </TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {/* Get all active customers (those with at least one visit in the period) */}
-                    {filteredCustomers
-                      .map(customerName => {
-                        const uniqueMonths = Array.from(new Set(customerVisits.map(visit => visit.month)))
-                          .sort((a, b) => {
-                            // For year 2024, sort chronologically (January to December)
-                            // Otherwise sort in reverse chronological order (newest first)
-                            const dateA = new Date(a);
-                            const dateB = new Date(b);
-                            return yearSelection === 2024 
-                              ? dateA.getTime() - dateB.getTime() 
-                              : dateB.getTime() - dateA.getTime();
-                          })
-                          // Show all 12 months for year 2024, otherwise show 3 most recent months
-                          .slice(0, yearSelection === 2024 ? 12 : 3);
-                        
-                        // Check if customer has any visits to determine if they're active
-                        const customerHasVisits = customerVisits.some(
-                          visit => visit.customerName === customerName && visit.visitCount > 0
-                        );
-                        
-                        // Only show active customers
-                        if (!customerHasVisits) return null;
-                        
-                        return (
-                          <TableRow 
+                    {filteredCustomers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={activityPeriods.length + 1} sx={{ py: 5, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                          No active customers match this search.
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredCustomers.map(customerName => (
+                          <TableRow
                             key={customerName}
                             sx={{
-                              '&:nth-of-type(odd)': { bgcolor: '#162032' },
-                              '&:nth-of-type(even)': { bgcolor: '#111923' },
-                              '&:hover': { bgcolor: '#1c2a41' },
+                              '&:nth-of-type(odd)': { bgcolor: 'var(--surface)' },
+                              '&:nth-of-type(even)': { bgcolor: 'var(--surface-secondary)' },
+                              '&:hover': { bgcolor: 'var(--primary-soft)' },
                             }}
                           >
-                            <TableCell sx={{ 
-                              color: '#e2e8f0',
+                            <TableCell sx={{
+                              color: 'var(--text-primary)',
                               padding: '12px 16px',
-                              borderBottom: '1px solid #2d3748',
+                              borderBottom: '1px solid var(--border)',
                               fontWeight: 500,
-                              whiteSpace: 'nowrap'
+                              whiteSpace: 'nowrap',
+                              bgcolor: 'var(--surface)',
+                              position: 'sticky',
+                              left: 0,
+                              zIndex: 2,
+                              boxShadow: '2px 0 0 var(--border)'
                             }}>
                               {customerName}
                             </TableCell>
-                            
-                            {/* Display visit counts for each month */}
-                            {uniqueMonths.map(month => {
-                              const monthVisit = customerVisits.find(
-                                visit => visit.customerName === customerName && visit.month === month
-                              );
-                              
-                              const visitCount = monthVisit ? monthVisit.visitCount : 0;
-                              
+
+                            {activityPeriods.map(activityPeriod => {
+                              const visitCount = visitsByCustomerAndPeriod.get(`${customerName}\u0000${activityPeriod.periodKey}`) ?? 0;
+                              const heatmapStyle = getHeatmapCellStyle(visitCount);
+
                               return (
-                                <TableCell 
-                                  key={`${customerName}-${month}`} 
+                                <TableCell
+                                  key={`${customerName}-${activityPeriod.periodKey}`}
                                   align="center"
-                                  sx={{ 
-                                    bgcolor: visitCount > 0 ? '#1e40af' : 'transparent', 
-                                    color: '#e2e8f0',
+                                  className={visitCount === 0 ? 'customer-visit-cell--empty' : visitCount >= 4 ? 'customer-visit-cell--strong' : undefined}
+                                  sx={{
+                                    ...heatmapStyle,
                                     fontWeight: visitCount > 0 ? 600 : 400,
-                                    borderBottom: '1px solid #2d3748',
-                                    padding: '12px 16px'
+                                    borderBottom: '1px solid var(--border)',
+                                    padding: '12px 16px',
+                                    fontVariantNumeric: 'tabular-nums'
                                   }}
                                 >
-                                  {visitCount > 0 ? visitCount : '-'}
+                                  <Tooltip title={`${customerName} · ${activityPeriod.month}: ${visitCount} ${visitCount === 1 ? 'visit' : 'visits'}`} arrow>
+                                    <Box component="span" sx={{ display: 'inline-block', minWidth: 20 }}>
+                                      {visitCount > 0 ? visitCount : '–'}
+                                    </Box>
+                                  </Tooltip>
                                 </TableCell>
                               );
                             })}
                           </TableRow>
-                        );
-                    }).filter(Boolean)}
+                    ))}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -1004,4 +1008,4 @@ const CustomerBehaviorReport: React.FC = () => {
   );
 };
 
-export default CustomerBehaviorReport; 
+export default CustomerBehaviorReport;

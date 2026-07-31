@@ -86,10 +86,10 @@ const CheckInOut: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       let dateCondition: string;
       const currentDate = selectedDate || new Date();
-      
+
       if (filterType === 'day') {
         const dateStr = format(currentDate, 'yyyy-MM-dd');
         dateCondition = `DATE(CheckInTime) = '${dateStr}'`;
@@ -105,12 +105,12 @@ const CheckInOut: React.FC = () => {
         const dateStr = format(currentDate, 'yyyy-MM-dd');
         dateCondition = `DATE(CheckInTime) = '${dateStr}'`;
       }
-      
+
       console.log('Fetching check-in/out data with filter:', filterType);
       console.log('Date condition:', dateCondition);
       console.log('Current Clinic:', currentClinic);
       console.log('Current Clinic Code:', currentClinic?.code);
-      
+
       const query = `
         SELECT
           FORMAT_TIMESTAMP('%Y-%m-%d %I:%M %p', CheckInTime) as CheckInTime,
@@ -137,21 +137,21 @@ const CheckInOut: React.FC = () => {
         AND ClinicCode = '${currentClinic?.code}'
         ORDER BY CheckInTime DESC
       `;
-    
+
       console.log('Executing query:', query);
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query });
-      
+
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch check-in/out data');
       }
-      
+
       const data = response.data.data;
-      
+
       if (data && data.length > 0) {
         const paymentStatuses = [...new Set(data.map((record: any) => record.PaymentStatus))]
           .filter((status): status is string => typeof status === 'string' && status !== '')
           .sort();
-        
+
         console.log('Available payment status values:', paymentStatuses);
         console.log('Sample record with SellerName:', data[0]?.SellerName);
         console.log('Full sample record:', data[0]);
@@ -159,9 +159,9 @@ const CheckInOut: React.FC = () => {
       } else {
         setAvailablePaymentStatuses([]);
       }
-      
+
       setRecords(data);
-      
+
     } catch (err: any) {
       console.error('Error fetching check-in/out data:', err);
       setError(err.message || 'Failed to fetch check-in/out data');
@@ -172,21 +172,21 @@ const CheckInOut: React.FC = () => {
 
   const applyFilters = () => {
     let filtered = [...records];
-    
+
     if (paymentStatusFilter !== 'all') {
       filtered = filtered.filter(record => {
-        console.log('Record PaymentStatus:', record.PaymentStatus, 
-                   'Filter value:', paymentStatusFilter, 
+        console.log('Record PaymentStatus:', record.PaymentStatus,
+                   'Filter value:', paymentStatusFilter,
                    'Comparison result:', record.PaymentStatus?.toLowerCase() === paymentStatusFilter.toLowerCase());
-        
-        return record.PaymentStatus && 
+
+        return record.PaymentStatus &&
                record.PaymentStatus.toLowerCase() === paymentStatusFilter.toLowerCase();
       });
     }
-    
+
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(record => 
+      filtered = filtered.filter(record =>
         record.CustomerName?.toLowerCase().includes(query) ||
         record.Servicename?.toLowerCase().includes(query) ||
         record.TherapicName?.toLowerCase().includes(query) ||
@@ -197,7 +197,7 @@ const CheckInOut: React.FC = () => {
         record.SellerName?.toLowerCase().includes(query)
       );
     }
-    
+
     setFilteredRecords(filtered);
   };
 
@@ -262,10 +262,10 @@ const CheckInOut: React.FC = () => {
   const downloadCSV = async () => {
     try {
       setExportingCSV(true);
-      
+
       let dateCondition: string;
       const currentDate = selectedDate || new Date();
-      
+
       if (filterType === 'day') {
         const dateStr = format(currentDate, 'yyyy-MM-dd');
         dateCondition = `DATE(CheckInTime) = '${dateStr}'`;
@@ -281,9 +281,9 @@ const CheckInOut: React.FC = () => {
         const dateStr = format(currentDate, 'yyyy-MM-dd');
         dateCondition = `DATE(CheckInTime) = '${dateStr}'`;
       }
-      
+
       let dataToExport = filteredRecords;
-      
+
       if (records.length < 100 && !searchQuery) {
         const query = `
           SELECT
@@ -313,7 +313,7 @@ const CheckInOut: React.FC = () => {
           ORDER BY CheckInTime DESC
           LIMIT 1000
         `;
-        
+
         const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query }, {
           headers: {
             'Content-Type': 'application/json',
@@ -321,12 +321,12 @@ const CheckInOut: React.FC = () => {
           },
           timeout: 30000
         });
-        
+
         if (response.data.success) {
           dataToExport = response.data.data;
         }
       }
-      
+
       let filenameDate: string;
       if (filterType === 'day') {
         filenameDate = format(currentDate, 'yyyy-MM-dd');
@@ -337,12 +337,12 @@ const CheckInOut: React.FC = () => {
         const startDate = format(new Date(currentDate.getTime() - 29 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
         filenameDate = `${startDate}_to_${format(currentDate, 'yyyy-MM-dd')}`;
       }
-      
+
       const headers = [
-        'Check-In Time', 
-        'Check-Out Time', 
-        'Service', 
-        'Therapist', 
+        'Check-In Time',
+        'Check-Out Time',
+        'Service',
+        'Therapist',
         'Customer',
         'Seller Name',
         'Phone Number',
@@ -355,7 +355,7 @@ const CheckInOut: React.FC = () => {
         'Tax',
         'Total'
       ];
-      
+
       const rows = dataToExport.map(record => [
         record.CheckInTime,
         record.CheckOutTime || '',
@@ -373,12 +373,12 @@ const CheckInOut: React.FC = () => {
         record.Tax?.toString() || '',
         record.Total?.toString() || ''
       ]);
-      
+
       const csvContent = [
         headers.join(','),
         ...rows.map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
       ].join('\n');
-      
+
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -401,30 +401,30 @@ const CheckInOut: React.FC = () => {
 
   if (loading && records.length === 0) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
         width: '100%',
-        bgcolor: '#111923'
+        bgcolor: 'var(--surface-secondary)'
       }}>
-        <CircularProgress sx={{ color: 'white' }} />
+        <CircularProgress sx={{ color: 'var(--text-primary)' }} />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ bgcolor: '#111923', minHeight: '100vh', p: 3 }}>
+    <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <IconButton 
-            onClick={handleBack} 
-            sx={{ mr: 2, color: 'white', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}
+          <IconButton
+            onClick={handleBack}
+            sx={{ mr: 2, color: 'var(--text-primary)', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}
           >
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" component="h1" sx={{ color: 'white', fontWeight: 'bold' }}>
+          <Typography variant="h5" component="h1" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
             Check-In/Out Records
           </Typography>
         </Box>
@@ -432,14 +432,14 @@ const CheckInOut: React.FC = () => {
           <Tooltip title="Export to CSV">
             <Button
               variant="outlined"
-              startIcon={exportingCSV ? <CircularProgress size={20} sx={{ color: 'white' }} /> : <FileDownloadIcon />}
+              startIcon={exportingCSV ? <CircularProgress size={20} sx={{ color: 'var(--text-primary)' }} /> : <FileDownloadIcon />}
               onClick={downloadCSV}
               disabled={exportingCSV || loading || filteredRecords.length === 0}
-              sx={{ 
+              sx={{
                 mr: 2,
-                color: 'white', 
-                borderColor: '#3b82f6',
-                '&:hover': { 
+                color: 'var(--text-primary)',
+                borderColor: 'var(--primary)',
+                '&:hover': {
                   borderColor: 'white',
                   backgroundColor: 'rgba(59, 130, 246, 0.1)'
                 }
@@ -448,59 +448,59 @@ const CheckInOut: React.FC = () => {
               {exportingCSV ? 'Exporting...' : 'Export CSV'}
             </Button>
           </Tooltip>
-          <IconButton 
-            onClick={handleRefresh} 
-            sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}
+          <IconButton
+            onClick={handleRefresh}
+            sx={{ color: 'var(--text-primary)', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}
           >
             <RefreshIcon />
           </IconButton>
         </Box>
       </Box>
 
-      <Paper sx={{ bgcolor: '#1a2234', p: 2, mb: 3, borderRadius: 2 }}>
+      <Paper sx={{ bgcolor: 'var(--surface)', p: 2, mb: 3, borderRadius: 2 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={6}>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', mb: { xs: 2, sm: 0 } }}>
-                  <Typography sx={{ color: 'white', mb: 1, fontWeight: 'medium' }}>Date Range</Typography>
+                  <Typography sx={{ color: 'var(--text-primary)', mb: 1, fontWeight: 'medium' }}>Date Range</Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    <Button 
+                    <Button
                       variant={filterType === 'day' ? 'contained' : 'outlined'}
                       size="small"
                       onClick={() => handleFilterTypeChange('day')}
-                      sx={{ 
+                      sx={{
                         minWidth: '60px',
-                        color: 'white',
-                        borderColor: '#3b82f6',
+                        color: 'var(--text-primary)',
+                        borderColor: 'var(--primary)',
                         bgcolor: filterType === 'day' ? '#3b82f6' : 'transparent',
                         '&:hover': { borderColor: 'white', bgcolor: filterType === 'day' ? '#3b82f6' : 'rgba(59, 130, 246, 0.1)' }
                       }}
                     >
                       Day
                     </Button>
-                    <Button 
+                    <Button
                       variant={filterType === 'week' ? 'contained' : 'outlined'}
                       size="small"
                       onClick={() => handleFilterTypeChange('week')}
-                      sx={{ 
+                      sx={{
                         minWidth: '60px',
-                        color: 'white',
-                        borderColor: '#3b82f6',
+                        color: 'var(--text-primary)',
+                        borderColor: 'var(--primary)',
                         bgcolor: filterType === 'week' ? '#3b82f6' : 'transparent',
                         '&:hover': { borderColor: 'white', bgcolor: filterType === 'week' ? '#3b82f6' : 'rgba(59, 130, 246, 0.1)' }
                       }}
                     >
                       Week
                     </Button>
-                    <Button 
+                    <Button
                       variant={filterType === 'month' ? 'contained' : 'outlined'}
                       size="small"
                       onClick={() => handleFilterTypeChange('month')}
-                      sx={{ 
+                      sx={{
                         minWidth: '60px',
-                        color: 'white',
-                        borderColor: '#3b82f6',
+                        color: 'var(--text-primary)',
+                        borderColor: 'var(--primary)',
                         bgcolor: filterType === 'month' ? '#3b82f6' : 'transparent',
                         '&:hover': { borderColor: 'white', bgcolor: filterType === 'month' ? '#3b82f6' : 'rgba(59, 130, 246, 0.1)' }
                       }}
@@ -512,11 +512,11 @@ const CheckInOut: React.FC = () => {
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <Typography sx={{ color: 'white', mb: 1, fontWeight: 'medium' }}>
+                  <Typography sx={{ color: 'var(--text-primary)', mb: 1, fontWeight: 'medium' }}>
                     {filterType === 'day' ? "Select Date" : "End Date"}
                   </Typography>
                   <LocalizationProvider dateAdapter={AdapterDateFns}>
-                    <DatePicker 
+                    <DatePicker
                       value={selectedDate}
                       onChange={handleDateChange}
                       slotProps={{
@@ -528,9 +528,9 @@ const CheckInOut: React.FC = () => {
                             '& .MuiOutlinedInput-root': {
                               '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' },
                               '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.5)' },
-                              '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                              '&.Mui-focused fieldset': { borderColor: 'var(--primary)' },
                             },
-                            '& .MuiInputBase-input': { color: 'white', py: 1 },
+                            '& .MuiInputBase-input': { color: 'var(--text-primary)', py: 1 },
                             '& .MuiSvgIcon-root': { color: 'rgba(255,255,255,0.7)' },
                           }
                         }
@@ -545,16 +545,16 @@ const CheckInOut: React.FC = () => {
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Typography sx={{ color: 'white', mb: 1, fontWeight: 'medium' }}>Payment Status</Typography>
+                  <Typography sx={{ color: 'var(--text-primary)', mb: 1, fontWeight: 'medium' }}>Payment Status</Typography>
                   <FormControl fullWidth variant="outlined" size="small">
                     <Select
                       value={paymentStatusFilter}
                       onChange={handlePaymentStatusFilterChange}
                       sx={{
-                        color: 'white',
+                        color: 'var(--text-primary)',
                         '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' },
                         '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
-                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
                         '& .MuiSvgIcon-root': { color: 'rgba(255,255,255,0.7)' }
                       }}
                     >
@@ -568,7 +568,7 @@ const CheckInOut: React.FC = () => {
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Typography sx={{ color: 'white', mb: 1, fontWeight: 'medium' }}>Search Records</Typography>
+                  <Typography sx={{ color: 'var(--text-primary)', mb: 1, fontWeight: 'medium' }}>Search Records</Typography>
                   <TextField
                     fullWidth
                     variant="outlined"
@@ -577,11 +577,11 @@ const CheckInOut: React.FC = () => {
                     onChange={handleFilterChange}
                     placeholder="Customer, service, therapist..."
                     InputProps={{
-                      sx: { 
-                        color: 'white',
+                      sx: {
+                        color: 'var(--text-primary)',
                         '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' },
                         '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
-                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
                       }
                     }}
                   />
@@ -593,13 +593,13 @@ const CheckInOut: React.FC = () => {
       </Paper>
 
       {error ? (
-        <Paper sx={{ bgcolor: '#1a2234', p: 4, textAlign: 'center', borderRadius: 2 }}>
+        <Paper sx={{ bgcolor: 'var(--surface)', p: 4, textAlign: 'center', borderRadius: 2 }}>
           <Typography color="error" sx={{ mb: 2 }}>
             {error}
           </Typography>
-          <Button 
-            variant="contained" 
-            color="primary" 
+          <Button
+            variant="contained"
+            color="primary"
             onClick={handleRefresh}
             startIcon={<RefreshIcon />}
           >
@@ -609,28 +609,28 @@ const CheckInOut: React.FC = () => {
       ) : (
         <>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, alignItems: 'center' }}>
-            <Typography variant="subtitle1" sx={{ color: 'white' }}>
+            <Typography variant="subtitle1" sx={{ color: 'var(--text-primary)' }}>
               {filteredRecords.length} records found
             </Typography>
           </Box>
 
-          <Paper sx={{ bgcolor: '#1a2234', overflowX: 'auto', borderRadius: 2 }}>
+          <Paper sx={{ bgcolor: 'var(--surface)', overflowX: 'auto', borderRadius: 2 }}>
             <TableContainer sx={{ maxHeight: 'calc(100vh - 300px)', overflowX: 'auto', width: '100%' }}>
               <Table stickyHeader sx={{ minWidth: 1500 }}>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 100 }}>Order ID</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Check-In Time</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Check-Out Time</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Service</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 120 }}>Therapist</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 120 }}>Helper</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 150 }}>Customer</TableCell>
-                    <TableCell sx={{ bgcolor: '#2563eb', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Seller Name</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Phone</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 130 }}>Payment Method</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 100 }}>Status</TableCell>
-                    <TableCell sx={{ bgcolor: '#131b2c', color: 'white', fontWeight: 'bold', minWidth: 100 }}>Total</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 100 }}>Order ID</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 150 }}>Check-In Time</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 150 }}>Check-Out Time</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 150 }}>Service</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 120 }}>Therapist</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 120 }}>Helper</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 150 }}>Customer</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--primary-hover)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 130 }}>Seller Name</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 130 }}>Phone</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 130 }}>Payment Method</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 100 }}>Status</TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)', fontWeight: 'bold', minWidth: 100 }}>Total</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -642,29 +642,29 @@ const CheckInOut: React.FC = () => {
                     </TableRow>
                   ) : (
                     paginatedRecords.map((record, index) => (
-                      <TableRow key={`${record.OrderId}-${index}`} hover sx={{ '&:hover': { bgcolor: '#1e293b !important' } }}>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 100 }}>{record.OrderId}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.CheckInTime}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.CheckOutTime || '-'}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.Servicename}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 120 }}>{record.TherapicName}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 120 }}>{record.HelperName || '-'}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 150 }}>{record.CustomerName}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 130, bgcolor: '#1e40af' }}>{record.SellerName || 'NO SELLER'}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 130 }}>{record.CustomerPhoneNumber}</TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 130 }}>{record.PaymentMethod}</TableCell>
-                        <TableCell sx={{ borderBottom: '1px solid #1e293b', minWidth: 100 }}>
-                          <Chip 
-                            label={record.PaymentStatus} 
+                      <TableRow key={`${record.OrderId}-${index}`} hover sx={{ '&:hover': { bgcolor: 'var(--surface-secondary) !important' } }}>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 100 }}>{record.OrderId}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 150 }}>{record.CheckInTime}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 150 }}>{record.CheckOutTime || '-'}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 150 }}>{record.Servicename}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 120 }}>{record.TherapicName}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 120 }}>{record.HelperName || '-'}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 150 }}>{record.CustomerName}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 130, bgcolor: '#1e40af' }}>{record.SellerName || 'NO SELLER'}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 130 }}>{record.CustomerPhoneNumber}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 130 }}>{record.PaymentMethod}</TableCell>
+                        <TableCell sx={{ borderBottom: '1px solid var(--surface-secondary)', minWidth: 100 }}>
+                          <Chip
+                            label={record.PaymentStatus}
                             size="small"
-                            sx={{ 
+                            sx={{
                               bgcolor: getPaymentStatusColor(record.PaymentStatus),
-                              color: 'white',
+                              color: 'var(--text-primary)',
                               fontWeight: 'bold'
                             }}
                           />
                         </TableCell>
-                        <TableCell sx={{ color: 'white', borderBottom: '1px solid #1e293b', minWidth: 100 }}>
+                        <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-secondary)', minWidth: 100 }}>
                           {formatCurrency(record.Total)}
                         </TableCell>
                       </TableRow>
@@ -673,16 +673,16 @@ const CheckInOut: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-            
+
             {filteredRecords.length > rowsPerPage && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', p: 2, borderTop: '1px solid #1e293b' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', p: 2, borderTop: '1px solid var(--surface-secondary)' }}>
                 <Pagination
                   count={Math.ceil(filteredRecords.length / rowsPerPage)}
                   page={page}
                   onChange={handleChangePage}
                   color="primary"
                   sx={{
-                    '& .MuiPaginationItem-root': { color: 'white' },
+                    '& .MuiPaginationItem-root': { color: 'var(--text-primary)' },
                     '& .Mui-selected': { bgcolor: '#3b82f6 !important' }
                   }}
                 />
@@ -695,4 +695,4 @@ const CheckInOut: React.FC = () => {
   );
 };
 
-export default CheckInOut; 
+export default CheckInOut;

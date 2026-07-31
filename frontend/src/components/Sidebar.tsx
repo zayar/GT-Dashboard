@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Logout as LogoutIcon, 
+import {
+  ChevronLeft,
+  ChevronRight,
+  Logout as LogoutIcon,
   AccountBalanceWallet as AccountBalanceWalletIcon,
   Payments as PaymentsIcon,
   ExpandMore as ExpandMoreIcon,
@@ -11,11 +11,11 @@ import {
   Menu as MenuIcon,
   Close as CloseIcon
 } from '@mui/icons-material';
-import { 
-  ListSubheader, 
-  ListItem, 
-  ListItemButton, 
-  ListItemIcon, 
+import {
+  ListSubheader,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
   ListItemText,
   Box,
   Paper,
@@ -34,7 +34,6 @@ interface BaseMenuItem {
   id: string;
   label: string;
   icon: string;
-  isAiFeature?: boolean;
 }
 
 interface RegularMenuItem extends BaseMenuItem {
@@ -82,7 +81,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
   useEffect(() => {
     localStorage.setItem('sidebarMinimized', JSON.stringify(isMinimized));
   }, [isMinimized]);
-  
+
+  useEffect(() => {
+    if (location.pathname.startsWith('/top-treatment-report')) {
+      setExpandedMenus(prev => prev.includes('treatment') ? prev : [...prev, 'treatment']);
+    }
+    if (location.pathname === '/inactive-customers-report') {
+      setExpandedMenus(prev => prev.includes('therapists') ? prev : [...prev, 'therapists']);
+    }
+  }, [location.pathname]);
+
   // Close sidebar when screen resizes and handle initial state
   useEffect(() => {
     const handleResize = () => {
@@ -92,10 +100,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         setIsOpen(true);
       }
     };
-    
+
     // Set initial state based on screen size
     handleResize();
-    
+
     // Add event listener with passive option for better performance
     window.addEventListener('resize', handleResize, { passive: true });
     return () => window.removeEventListener('resize', handleResize);
@@ -125,18 +133,18 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
 
   // Toggle submenu
   const toggleSubmenu = (id: string) => {
-    setExpandedMenus(prev => 
-      prev.includes(id) 
-        ? prev.filter(item => item !== id) 
+    setExpandedMenus(prev =>
+      prev.includes(id)
+        ? prev.filter(item => item !== id)
         : [...prev, id]
     );
   };
 
   // Menu items data
   const menuItems: MenuItemOrGroup[] = [
-    { 
-      id: 'dashboard', 
-      label: 'Dashboard', 
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
       icon: 'fas fa-tachometer-alt',
       hasSubmenu: true,
       submenu: [
@@ -149,10 +157,20 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     { id: 'appointments-list-mysql', label: 'Appointments List', icon: 'fas fa-list', path: '/appointments-list' },
     { id: 'checkin-records', label: 'CheckIn/Out Records', icon: 'fas fa-clipboard-list', path: '/checkin-checkout-page' },
     { id: 'daily-report', label: 'Daily Report', icon: 'fas fa-calendar-day', path: '/daily-report' },
-    { id: 'conversational-ai', label: 'Conversational AI', icon: 'fas fa-robot', path: '/conversational-ai', isAiFeature: true },
-    { 
-      id: 'sales', 
-      label: 'Sales', 
+    { id: 'customer-service-activity-report', label: 'Customer Service Activity', icon: 'fas fa-table-list', path: '/customer-service-activity-report' },
+    {
+      id: 'treatment',
+      label: 'Treatment',
+      icon: 'fas fa-notes-medical',
+      hasSubmenu: true,
+      submenu: [
+        { id: 'top-treatment-report', label: 'Top Treatment Report', icon: 'fas fa-chart-bar', path: '/top-treatment-report' },
+        { id: 'treatment-details-report', label: 'Treatment Details Report', icon: 'fas fa-table', path: '/top-treatment-report/treatment-details' },
+      ]
+    },
+    {
+      id: 'sales',
+      label: 'Sales',
       icon: 'fas fa-chart-line',
       hasSubmenu: true,
       submenu: [
@@ -164,9 +182,9 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     },
     { id: 'customers', label: 'Customers', icon: 'fas fa-users', path: '/customers' },
     { id: 'services', label: 'Services', icon: 'fas fa-spa', path: '/services' },
-    { 
-      id: 'therapists', 
-      label: 'Therapists', 
+    {
+      id: 'therapists',
+      label: 'Therapists',
       icon: 'fas fa-user-md',
       hasSubmenu: true,
       submenu: [
@@ -174,6 +192,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { id: 'helper-list', label: 'Helpers', icon: 'fas fa-hands-helping', path: '/helpers' },
       ]
     },
+    { id: 'inactive-customers', label: 'Inactive Customers', icon: 'fas fa-user-clock', path: '/inactive-customers-report' },
     // Commission menu item removed
     {
       type: 'group',
@@ -205,11 +224,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
 
   const renderMenuItem = (item: MenuItemOrGroup) => {
     // Styles for menu items
-    const activeItemStyle = { 
-      backgroundColor: isDarkMode 
+    const activeItemStyle = {
+      backgroundColor: isDarkMode
         ? alpha(theme.palette.primary.main, 0.2)  // Slightly higher opacity for better visibility
         : alpha(theme.palette.primary.main, 0.1),
-      color: isDarkMode 
+      color: isDarkMode
         ? '#ffffff'  // Pure white for maximum contrast when active
         : theme.palette.primary.main,
       borderRight: `3px solid ${theme.palette.primary.main}`,
@@ -223,16 +242,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         backgroundColor: theme.palette.primary.main,
       },
     };
-    
-    const itemTextColor = isDarkMode 
+
+    const itemTextColor = isDarkMode
       ? alpha(theme.palette.common.white, 0.85)  // Slightly higher base text contrast
       : theme.palette.text.primary;
-    
-    const iconColor = isDarkMode 
+
+    const iconColor = isDarkMode
       ? alpha(theme.palette.common.white, 0.7)
       : theme.palette.primary.main;
-    
-    const hoverStyle = isDarkMode 
+
+    const hoverStyle = isDarkMode
       ? alpha(theme.palette.primary.main, 0.15)  // More noticeable hover
       : alpha(theme.palette.primary.light, 0.2);
 
@@ -252,24 +271,24 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           >
             {item.group}
           </ListSubheader>
-          <Divider 
-            sx={{ 
-              mb: 1, 
+          <Divider
+            sx={{
+              mb: 1,
               opacity: 0.2,
-              borderColor: isDarkMode ? alpha(theme.palette.divider, 0.3) : undefined 
-            }} 
+              borderColor: isDarkMode ? alpha(theme.palette.divider, 0.3) : undefined
+            }}
           />
           {item.items.map((subItem) => {
             const isItemActive = isActive(subItem.path);
-            
+
             return (
-              <ListItem 
-                key={subItem.path} 
+              <ListItem
+                key={subItem.path}
                 disablePadding
                 sx={{ mb: 0.5 }}
               >
-                <ListItemButton 
-                  component={Link} 
+                <ListItemButton
+                  component={Link}
                   to={subItem.path}
                   sx={{
                     py: 1.5,
@@ -285,10 +304,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                     minHeight: '48px',
                   }}
                 >
-                  <ListItemIcon 
-                    sx={{ 
-                      minWidth: isMinimized ? 0 : 40, 
-                      color: isItemActive 
+                  <ListItemIcon
+                    sx={{
+                      minWidth: isMinimized ? 0 : 40,
+                      color: isItemActive
                         ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                         : iconColor,
                       transition: 'color 0.2s ease-in-out'
@@ -296,14 +315,14 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                   >
                     {subItem.icon}
                   </ListItemIcon>
-                  
+
                   {!isMinimized && (
-                    <ListItemText 
-                      primary={subItem.text} 
+                    <ListItemText
+                      primary={subItem.text}
                       primaryTypographyProps={{
                         fontSize: '0.9rem',
                         fontWeight: isItemActive ? 600 : 400,
-                        color: isItemActive 
+                        color: isItemActive
                           ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                           : itemTextColor,
                         overflow: 'hidden',
@@ -324,7 +343,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
     if (item.hasSubmenu) {
       const isExpanded = expandedMenus.includes(item.id);
       const hasActive = hasActivePath(item.submenu);
-      
+
       return (
         <Box key={item.id} sx={{ mb: 0.5 }}>
           <ListItemButton
@@ -340,56 +359,56 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
               borderRadius: hasActive ? '0 8px 8px 0' : 0,
             }}
           >
-            <ListItemIcon 
-              sx={{ 
-                minWidth: isMinimized ? 0 : 40, 
-                color: hasActive 
+            <ListItemIcon
+              sx={{
+                minWidth: isMinimized ? 0 : 40,
+                color: hasActive
                   ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                   : iconColor
               }}
             >
               <i className={`${item.icon}`} style={{ fontSize: '1.1rem' }} />
             </ListItemIcon>
-            
+
             {!isMinimized && (
               <>
-                <ListItemText 
-                  primary={item.label} 
+                <ListItemText
+                  primary={item.label}
                   primaryTypographyProps={{
                     fontSize: '0.9rem',
                     fontWeight: hasActive ? 600 : 400,
-                    color: hasActive 
+                    color: hasActive
                       ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                       : itemTextColor,
                   }}
                 />
                 {isExpanded ? (
-                  <ExpandLessIcon 
-                    fontSize="small" 
-                    sx={{ 
-                      color: hasActive 
+                  <ExpandLessIcon
+                    fontSize="small"
+                    sx={{
+                      color: hasActive
                         ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
-                        : iconColor 
-                    }} 
+                        : iconColor
+                    }}
                   />
                 ) : (
-                  <ExpandMoreIcon 
-                    fontSize="small" 
-                    sx={{ 
-                      color: hasActive 
+                  <ExpandMoreIcon
+                    fontSize="small"
+                    sx={{
+                      color: hasActive
                         ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
-                        : iconColor 
-                    }} 
+                        : iconColor
+                    }}
                   />
                 )}
               </>
             )}
           </ListItemButton>
-          
+
           {/* Collapsible submenu */}
           {isExpanded && !isMinimized && (
-            <Box 
-              sx={{ 
+            <Box
+              sx={{
                 pl: 2,
                 overflow: 'hidden',
                 transition: 'max-height 0.3s ease',
@@ -398,7 +417,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             >
               {item.submenu.map(subItem => {
                 const isSubItemActive = isActive(subItem.path);
-                
+
                 return (
                   <ListItemButton
                     key={subItem.id}
@@ -407,12 +426,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                     sx={{
                       pl: 4,
                       py: 1.2,
-                      borderLeft: `1px solid ${isDarkMode 
-                        ? alpha(theme.palette.divider, 0.2) 
+                      borderLeft: `1px solid ${isDarkMode
+                        ? alpha(theme.palette.divider, 0.2)
                         : alpha(theme.palette.divider, 0.5)
                       }`,
                       ...(isSubItemActive ? {
-                        backgroundColor: isDarkMode 
+                        backgroundColor: isDarkMode
                           ? alpha(theme.palette.primary.main, 0.25)
                           : alpha(theme.palette.primary.light, 0.2),
                         borderLeft: `2px solid ${theme.palette.primary.main}`,
@@ -424,24 +443,24 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                       borderRadius: '0 8px 8px 0',
                     }}
                   >
-                    <ListItemIcon 
-                      sx={{ 
-                        minWidth: 32, 
-                        color: isSubItemActive 
+                    <ListItemIcon
+                      sx={{
+                        minWidth: 32,
+                        color: isSubItemActive
                           ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                           : iconColor
                       }}
                     >
                       <i className={`${subItem.icon}`} style={{ fontSize: '0.9rem' }} />
                     </ListItemIcon>
-                    
-                    <ListItemText 
-                      primary={subItem.label} 
+
+                    <ListItemText
+                      primary={subItem.label}
                       primaryTypographyProps={{
                         fontSize: '0.85rem',
                         fontWeight: isSubItemActive ? 600 : 400,
-                        color: isSubItemActive 
-                          ? (isDarkMode ? '#ffffff' : theme.palette.primary.main) 
+                        color: isSubItemActive
+                          ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                           : itemTextColor,
                       }}
                     />
@@ -453,13 +472,13 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         </Box>
       );
     }
-    
+
     // Regular menu item without submenu
     const isItemActive = isActive((item as RegularMenuItem).path);
-    
+
     return (
-      <ListItem 
-        key={item.id} 
+      <ListItem
+        key={item.id}
         disablePadding
         sx={{ mb: 0.5 }}
       >
@@ -486,24 +505,24 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             } : {},
           }}
         >
-          <ListItemIcon 
-            sx={{ 
-              minWidth: isMinimized ? 0 : 40, 
-              color: isItemActive 
+          <ListItemIcon
+            sx={{
+              minWidth: isMinimized ? 0 : 40,
+              color: isItemActive
                 ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
-                : iconColor 
+                : iconColor
             }}
           >
             <i className={`${item.icon}`} style={{ fontSize: '1.1rem' }} />
           </ListItemIcon>
-          
+
           {!isMinimized && (
-            <ListItemText 
-              primary={item.label} 
+            <ListItemText
+              primary={item.label}
               primaryTypographyProps={{
                 fontSize: '0.9rem',
                 fontWeight: isItemActive ? 600 : 400,
-                color: isItemActive 
+                color: isItemActive
                   ? (isDarkMode ? '#ffffff' : theme.palette.primary.main)
                   : itemTextColor,
                 overflow: 'hidden',
@@ -530,7 +549,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           display: { xs: 'flex', lg: 'none' },
           width: { xs: 48, sm: 56 },
           height: { xs: 48, sm: 56 },
-          backgroundColor: isDarkMode 
+          backgroundColor: isDarkMode
             ? alpha(theme.palette.primary.dark, 0.9)
             : alpha(theme.palette.primary.main, 0.9),
           color: theme.palette.common.white,
@@ -538,7 +557,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           backdropFilter: 'blur(10px)',
           border: `2px solid ${alpha(theme.palette.common.white, 0.1)}`,
           '&:hover': {
-            backgroundColor: isDarkMode 
+            backgroundColor: isDarkMode
               ? theme.palette.primary.dark
               : theme.palette.primary.main,
             transform: 'scale(1.05)',
@@ -562,17 +581,17 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           display: { xs: 'none', lg: 'flex' },
           width: 40,
           height: 40,
-          backgroundColor: isDarkMode 
+          backgroundColor: isDarkMode
             ? alpha(theme.palette.background.paper, 0.9)
             : alpha(theme.palette.primary.main, 0.9),
-          color: isDarkMode 
+          color: isDarkMode
             ? theme.palette.primary.light
             : theme.palette.common.white,
           boxShadow: '0 2px 15px rgba(0,0,0,0.2)',
           backdropFilter: 'blur(10px)',
           border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
           '&:hover': {
-            backgroundColor: isDarkMode 
+            backgroundColor: isDarkMode
               ? alpha(theme.palette.background.paper, 1)
               : theme.palette.primary.main,
             transform: 'translateY(-50%) scale(1.1)',
@@ -595,7 +614,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backgroundColor: 'var(--overlay)',
             zIndex: 1250, // Between mobile toggle and sidebar
             backdropFilter: 'blur(2px)',
             animation: 'fadeIn 0.3s ease-in-out',
@@ -618,9 +637,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
           insetY: 0,
           left: 0,
           zIndex: 1260, // Higher than overlay
-          background: isDarkMode 
-            ? 'linear-gradient(180deg, #151d30 0%, #0c1424 100%)' 
-            : 'linear-gradient(180deg, #f0f5ff 0%, #edf2fc 100%)',
+          background: 'var(--surface)',
           transform: {
             xs: isOpen ? 'translateX(0)' : 'translateX(-100%)',
             lg: 'none'
@@ -630,11 +647,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             lg: isMinimized ? '70px' : '260px'
           },
           transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          boxShadow: '0 0 20px rgba(0,0,0,0.2)',
+          boxShadow: isDarkMode ? '8px 0 24px rgba(0,0,0,0.14)' : '8px 0 24px rgba(16,24,40,0.04)',
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
-          borderRight: isDarkMode 
+          borderRight: isDarkMode
             ? `1px solid ${alpha(theme.palette.divider, 0.1)}`
             : `1px solid ${alpha(theme.palette.divider, 0.2)}`,
         }}
@@ -647,13 +664,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             justifyContent: 'space-between',
             padding: 2,
             borderBottom: `1px solid ${
-              isDarkMode 
-                ? alpha(theme.palette.divider, 0.1) 
+              isDarkMode
+                ? alpha(theme.palette.divider, 0.1)
                 : alpha(theme.palette.divider, 0.2)
             }`,
-            background: isDarkMode 
-              ? 'linear-gradient(90deg, #1a2438 0%, #172033 100%)' 
-              : 'linear-gradient(90deg, #ffffff 0%, #f8f9ff 100%)',
+            background: 'var(--surface)',
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -665,10 +680,9 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderRadius: '8px',
-                background: isDarkMode 
-                  ? 'linear-gradient(135deg, #2c3e67 0%, #1e2b4e 100%)' 
-                  : 'linear-gradient(135deg, #e1e9ff 0%, #d4deff 100%)',
-                boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+                background: 'var(--primary-soft)',
+                border: '1px solid var(--border)',
+                boxShadow: 'var(--shadow-sm)',
                 color: theme.palette.primary.main,
                 fontWeight: 'bold',
                 fontSize: isMinimized ? '1rem' : '1.2rem',
@@ -676,10 +690,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
             >
               GT
             </Box>
-            
+
             {!isMinimized && (
-              <Box 
-                component="h1" 
+              <Box
+                component="h1"
                 sx={{
                   ml: 2,
                   fontSize: '1.1rem',
@@ -694,12 +708,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
               </Box>
             )}
           </Box>
-          
+
 
         </Box>
 
         {/* Menu items */}
-        <Box 
+        <Box
           component="nav"
           sx={{
             flexGrow: 1,
@@ -714,8 +728,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
               background: 'transparent',
             },
             '&::-webkit-scrollbar-thumb': {
-              background: isDarkMode 
-                ? alpha(theme.palette.primary.dark, 0.5) 
+              background: isDarkMode
+                ? alpha(theme.palette.primary.dark, 0.5)
                 : alpha(theme.palette.primary.light, 0.5),
               borderRadius: '10px',
             },
@@ -731,8 +745,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         <Box
           sx={{
             borderTop: `1px solid ${
-              isDarkMode 
-                ? alpha(theme.palette.divider, 0.1) 
+              isDarkMode
+                ? alpha(theme.palette.divider, 0.1)
                 : alpha(theme.palette.divider, 0.2)
             }`,
             p: 2,
@@ -746,8 +760,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                 onClick={onLogout}
                 sx={{
                   color: isDarkMode ? theme.palette.error.light : theme.palette.error.main,
-                  backgroundColor: isDarkMode 
-                    ? alpha(theme.palette.error.dark, 0.1) 
+                  backgroundColor: isDarkMode
+                    ? alpha(theme.palette.error.dark, 0.1)
                     : alpha(theme.palette.error.light, 0.1),
                   borderRadius: '8px',
                   py: 1,
@@ -758,17 +772,17 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                   width: isMinimized ? '40px' : '100%',
                   minWidth: isMinimized ? '40px' : 'auto',
                   '&:hover': {
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.error.dark, 0.2) 
+                    backgroundColor: isDarkMode
+                      ? alpha(theme.palette.error.dark, 0.2)
                       : alpha(theme.palette.error.light, 0.2),
                   }
                 }}
               >
                 <LogoutIcon sx={{ fontSize: isMinimized ? '1.2rem' : '1rem' }} />
                 {!isMinimized && (
-                  <Typography 
-                    sx={{ 
-                      ml: 1, 
+                  <Typography
+                    sx={{
+                      ml: 1,
                       fontSize: '0.9rem',
                       fontWeight: 'medium',
                     }}
@@ -785,4 +799,4 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
   );
 };
 
-export default Sidebar; 
+export default Sidebar;

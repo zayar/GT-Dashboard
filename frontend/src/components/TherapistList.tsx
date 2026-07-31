@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Box, 
-  Typography, 
-  Paper, 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
-  TableRow, 
+import {
+  Box,
+  Typography,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Button,
-  Avatar, 
-  IconButton,
+  Avatar,
   CircularProgress,
   InputAdornment,
   Pagination,
@@ -21,19 +20,24 @@ import {
   MenuItem,
   SelectChangeEvent,
   FormControl,
-  InputLabel,
   Tooltip
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import SearchIcon from '@mui/icons-material/Search';
-import FilterListIcon from '@mui/icons-material/FilterList';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useClinic } from '../contexts/ClinicContext';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format } from 'date-fns';
+import DirectoryPageHeader from './DirectoryPageHeader';
+import {
+  buildTherapistAppointmentsQuery,
+  buildTherapistSummaryQuery,
+  getTherapistReportPeriod,
+  TherapistFilterType,
+} from '../utils/therapistReport';
 
 interface Therapist {
   id: string;
@@ -63,9 +67,9 @@ const TherapistList: React.FC = () => {
   const [rowsPerPage] = useState(10);
   const [orderBy, setOrderBy] = useState<keyof Therapist>('bookingCount');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
-  
+
   // Date filter states
-  const [filterType, setFilterType] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('weekly');
+  const [filterType, setFilterType] = useState<TherapistFilterType>('weekly');
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [startDate, setStartDate] = useState<Date | null>(
     new Date(new Date().setDate(new Date().getDate() - 7))
@@ -78,7 +82,7 @@ const TherapistList: React.FC = () => {
   const [appointmentsError, setAppointmentsError] = useState('');
   const [appointmentPage, setAppointmentPage] = useState(1);
   const [appointmentsPerPage] = useState(10);
-  
+
   // Selected therapist for filtering
   const [selectedTherapist, setSelectedTherapist] = useState<string | null>(null);
 
@@ -89,88 +93,41 @@ const TherapistList: React.FC = () => {
   useEffect(() => {
     if (currentClinic) {
       fetchTherapists();
-      fetchAppointments();
     }
   }, [currentClinic, filterType, selectedDate, startDate, endDate]);
+
+  useEffect(() => {
+    if (currentClinic) {
+      fetchAppointments();
+    }
+  }, [currentClinic, filterType, selectedDate, startDate, endDate, selectedTherapist]);
 
   const fetchTherapists = async () => {
     try {
       setLoading(true);
-      
+      setError('');
+
       console.log('Current Clinic:', currentClinic);
       console.log('Current Clinic Code:', currentClinic?.code);
-      
-      // Create date conditions based on selected time period
-      let dateCondition: string;
-      
-      if (filterType === 'daily') {
-        // Today
-        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) = DATE('${formattedDate}')`;
-      } else if (filterType === 'weekly') {
-        // Last 7 days
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 7);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-      } else if (filterType === 'monthly') {
-        // Last 30 days
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 30);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-      } else if (filterType === 'custom') {
-        // Custom date range
-        if (startDate && endDate) {
-          const formattedStartDate = format(startDate, 'yyyy-MM-dd');
-          const formattedEndDate = format(endDate, 'yyyy-MM-dd');
-          dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-        } else {
-          // Fallback to last 7 days if custom dates are not set
-          const end = new Date();
-          const start = new Date();
-          start.setDate(start.getDate() - 7);
-          const formattedStartDate = format(start, 'yyyy-MM-dd');
-          const formattedEndDate = format(end, 'yyyy-MM-dd');
-          dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-        }
-      } else {
-        // Default fallback to weekly
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 7);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
+
+      const period = getTherapistReportPeriod({
+        filterType,
+        selectedDate,
+        customStartDate: startDate,
+        customEndDate: endDate,
+      });
+      if (!period || !currentClinic) {
+        throw new Error('Invalid therapist report period or clinic.');
       }
-      
-      const query = `
-      SELECT 
-        PractitionerName as name,
-        PractitionerImage as image,
-        COUNT(*) as bookingCount
-      FROM 
-        great_time.MainDataView
-      WHERE 
-        PractitionerName IS NOT NULL
-        AND PractitionerName != 'N/A'
-        AND TRIM(PractitionerName) != ''
-        AND ClinicCode = '${currentClinic?.code}'
-        AND ${dateCondition}
-      GROUP BY 
-        PractitionerName, PractitionerImage
-      ORDER BY 
-        bookingCount DESC
-      LIMIT 100
-      `;
+
+      const query = buildTherapistSummaryQuery({
+        clinicCode: currentClinic.code,
+        period,
+      });
 
       console.log('Executing query:', query);
 
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
         { query },
         {
           headers: {
@@ -186,13 +143,13 @@ const TherapistList: React.FC = () => {
       }
 
       const data = response.data.data;
-      
+
       // Map the response data to Therapist interface
       const formattedTherapists = data.map((therapist: any, index: number) => ({
         id: index.toString(),
         name: therapist.name || 'Unknown',
         image: therapist.image || '',
-        bookingCount: therapist.bookingCount || 0
+        bookingCount: Number(therapist.bookingCount) || 0
       }));
 
       setTherapists(formattedTherapists);
@@ -200,7 +157,7 @@ const TherapistList: React.FC = () => {
     } catch (err: any) {
       console.error('Error fetching employees:', err);
       let errorMessage = 'An error occurred while fetching employee data';
-      
+
       if (err.response) {
         if (err.response.data && err.response.data.error) {
           errorMessage = `Server error: ${err.response.data.error}`;
@@ -212,7 +169,7 @@ const TherapistList: React.FC = () => {
       } else {
         errorMessage = err.message || 'Unknown error occurred';
       }
-      
+
       setError(errorMessage);
       setLoading(false);
     }
@@ -222,79 +179,27 @@ const TherapistList: React.FC = () => {
   const fetchAppointments = async () => {
     try {
       setAppointmentsLoading(true);
-      
-      // Create date conditions based on selected time period
-      let dateCondition: string;
-      
-      if (filterType === 'daily') {
-        // Today
-        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) = DATE('${formattedDate}')`;
-      } else if (filterType === 'weekly') {
-        // Last 7 days
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 7);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-      } else if (filterType === 'monthly') {
-        // Last 30 days
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 30);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-      } else if (filterType === 'custom') {
-        // Custom date range
-        if (startDate && endDate) {
-          const formattedStartDate = format(startDate, 'yyyy-MM-dd');
-          const formattedEndDate = format(endDate, 'yyyy-MM-dd');
-          dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-        } else {
-          // Fallback to last 7 days if custom dates are not set
-          const end = new Date();
-          const start = new Date();
-          start.setDate(start.getDate() - 7);
-          const formattedStartDate = format(start, 'yyyy-MM-dd');
-          const formattedEndDate = format(end, 'yyyy-MM-dd');
-          dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-        }
-      } else {
-        // Default fallback to weekly
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 7);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
+      setAppointmentsError('');
+
+      const period = getTherapistReportPeriod({
+        filterType,
+        selectedDate,
+        customStartDate: startDate,
+        customEndDate: endDate,
+      });
+      if (!period || !currentClinic) {
+        throw new Error('Invalid therapist report period or clinic.');
       }
-      
-      const query = `
-      SELECT 
-        BookingID as bookingId,
-        PractitionerName as therapistName,
-        HelperName as helperName,
-        ServiceName as service,
-        CustomerName as customer,
-        FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', CheckInTime) as date
-      FROM 
-        great_time.MainDataView
-      WHERE 
-        PractitionerName IS NOT NULL
-        AND PractitionerName != 'N/A'
-        AND TRIM(PractitionerName) != ''
-        AND ClinicCode = '${currentClinic?.code}'
-        AND ${dateCondition}
-      ORDER BY 
-        CheckInTime DESC
-      LIMIT 100
-      `;
+
+      const query = buildTherapistAppointmentsQuery({
+        clinicCode: currentClinic.code,
+        period,
+        therapistName: selectedTherapist,
+      });
 
       console.log('Executing appointments query:', query);
 
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
         { query },
         {
           headers: {
@@ -310,9 +215,9 @@ const TherapistList: React.FC = () => {
       }
 
       const data = response.data.data;
-      
+
       // Map the response data to Appointment interface
-      const formattedAppointments = data.map((appointment: any, index: number) => ({
+      const formattedAppointments = data.map((appointment: any) => ({
         therapistName: appointment.therapistName || 'Unknown',
         helperName: appointment.helperName || 'Unknown',
         service: appointment.service || 'Unknown',
@@ -327,7 +232,7 @@ const TherapistList: React.FC = () => {
     } catch (err: any) {
       console.error('Error fetching appointments:', err);
       let errorMessage = 'An error occurred while fetching appointment data';
-      
+
       if (err.response) {
         if (err.response.data && err.response.data.error) {
           errorMessage = `Server error: ${err.response.data.error}`;
@@ -339,20 +244,22 @@ const TherapistList: React.FC = () => {
       } else {
         errorMessage = err.message || 'Unknown error occurred';
       }
-      
+
       setAppointmentsError(errorMessage);
       setAppointmentsLoading(false);
     }
   };
 
   // Handler for date filter type change
-  const handleFilterTypeChange = (event: SelectChangeEvent<'daily' | 'weekly' | 'monthly' | 'custom'>) => {
-    const newFilterType = event.target.value as 'daily' | 'weekly' | 'monthly' | 'custom';
+  const handleFilterTypeChange = (event: SelectChangeEvent<TherapistFilterType>) => {
+    const newFilterType = event.target.value as TherapistFilterType;
     setFilterType(newFilterType);
-    
+    setPage(1);
+    setAppointmentPage(1);
+
     // Reset data to ensure fetch happens with new filter
     setTherapists([]);
-    
+
     // Handle the case when switching to/from custom date range
     if (newFilterType === 'custom') {
       // Set default range to last 7 days when switching to custom
@@ -363,17 +270,21 @@ const TherapistList: React.FC = () => {
       setEndDate(end);
     }
   };
-  
+
   // Handler for single date selection
   const handleDateChange = (newDate: Date | null) => {
     if (newDate) {
       setSelectedDate(newDate);
+      setPage(1);
+      setAppointmentPage(1);
     }
   };
-  
+
   // Handler for date range change
   const handleDateRangeChange = (isStart: boolean, newDate: Date | null) => {
     if (newDate) {
+      setPage(1);
+      setAppointmentPage(1);
       if (isStart) {
         setStartDate(newDate);
       } else {
@@ -444,6 +355,7 @@ const TherapistList: React.FC = () => {
     if (selectedTherapist === therapist.name) {
       // If already selected, clear the filter
       setSelectedTherapist(null);
+      setAppointmentPage(1);
     } else {
       // Set the selected therapist
       setSelectedTherapist(therapist.name);
@@ -454,17 +366,17 @@ const TherapistList: React.FC = () => {
 
   // Filter appointments by search term and selected therapist
   const filteredAppointments = appointments.filter(appointment => {
-    const matchesSearch = 
+    const matchesSearch =
       appointment.therapistName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       appointment.helperName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       appointment.service.toLowerCase().includes(searchTerm.toLowerCase()) ||
       appointment.customer.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     // Apply therapist filter if one is selected
-    const matchesTherapist = selectedTherapist 
-      ? appointment.therapistName === selectedTherapist 
+    const matchesTherapist = selectedTherapist
+      ? appointment.therapistName === selectedTherapist
       : true;
-    
+
     return matchesSearch && matchesTherapist;
   });
 
@@ -476,11 +388,11 @@ const TherapistList: React.FC = () => {
   // Function to convert data to CSV
   const convertToCSV = <T extends Record<string, any>>(data: T[], fields?: { [key: string]: string }): string => {
     if (!data || data.length === 0) return '';
-    
+
     // Define headers - either use provided field mappings or object keys
     let headers: string[];
     let keys: string[];
-    
+
     if (fields) {
       headers = Object.values(fields);
       keys = Object.keys(fields);
@@ -488,10 +400,10 @@ const TherapistList: React.FC = () => {
       headers = Object.keys(data[0]);
       keys = headers;
     }
-    
+
     // Format the header row
     const headerRow = headers.map(header => `"${header}"`).join(',');
-    
+
     // Format data rows
     const rows = data.map(item => {
       return keys.map(key => {
@@ -500,11 +412,11 @@ const TherapistList: React.FC = () => {
         return `"${value.replace(/"/g, '""')}"`;
       }).join(',');
     });
-    
+
     // Combine header and rows
     return [headerRow, ...rows].join('\n');
   };
-  
+
   // Function to download CSV
   const downloadCSV = (data: string, filename: string) => {
     const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });
@@ -517,34 +429,34 @@ const TherapistList: React.FC = () => {
     link.click();
     document.body.removeChild(link);
   };
-  
+
   // Function to handle therapist export
   const handleExportTherapists = async () => {
     try {
       setExportingTherapists(true);
-      
+
       // Use existing therapists data if available, or fetch all data if needed
       let dataToExport = therapists;
-      
+
       // If we need to fetch a complete dataset (e.g., if the current data is filtered or incomplete)
       if (currentClinic && therapists.length === 0) {
         await fetchTherapists();
         dataToExport = therapists;
       }
-      
+
       // Define field mappings for better column names
       const fields = {
         name: 'Therapist Name',
-        bookingCount: 'Booking Count'
+        bookingCount: 'Appointment Count'
       };
-      
+
       const csvData = convertToCSV(dataToExport, fields);
-      
+
       // Generate filename with date
       const date = format(new Date(), 'yyyy-MM-dd');
       const clinicCode = currentClinic?.code || 'all';
       const filename = `therapist_list_${clinicCode}_${date}.csv`;
-      
+
       downloadCSV(csvData, filename);
     } catch (error) {
       console.error('Error exporting therapists:', error);
@@ -553,85 +465,29 @@ const TherapistList: React.FC = () => {
       setExportingTherapists(false);
     }
   };
-  
+
   // Function to handle appointment export
   const handleExportAppointments = async () => {
     try {
       setExportingAppointments(true);
-      
-      // Fetch complete appointment data for export
-      // This ensures we get ALL appointments, not just the current page
-      
-      // Create date conditions based on selected time period
-      let dateCondition: string;
-      
-      if (filterType === 'daily') {
-        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) = DATE('${formattedDate}')`;
-      } else if (filterType === 'weekly') {
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 7);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-      } else if (filterType === 'monthly') {
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 30);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-      } else if (filterType === 'custom') {
-        if (startDate && endDate) {
-          const formattedStartDate = format(startDate, 'yyyy-MM-dd');
-          const formattedEndDate = format(endDate, 'yyyy-MM-dd');
-          dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-        } else {
-          const end = new Date();
-          const start = new Date();
-          start.setDate(start.getDate() - 7);
-          const formattedStartDate = format(start, 'yyyy-MM-dd');
-          const formattedEndDate = format(end, 'yyyy-MM-dd');
-          dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
-        }
-      } else {
-        const end = new Date();
-        const start = new Date();
-        start.setDate(start.getDate() - 7);
-        const formattedStartDate = format(start, 'yyyy-MM-dd');
-        const formattedEndDate = format(end, 'yyyy-MM-dd');
-        dateCondition = `DATE(CheckInTime) BETWEEN DATE('${formattedStartDate}') AND DATE('${formattedEndDate}')`;
+
+      const period = getTherapistReportPeriod({
+        filterType,
+        selectedDate,
+        customStartDate: startDate,
+        customEndDate: endDate,
+      });
+      if (!period || !currentClinic) {
+        throw new Error('Invalid therapist report period or clinic.');
       }
-      
-      // Add therapist filter if selected
-      const therapistCondition = selectedTherapist 
-        ? `AND PractitionerName = '${selectedTherapist}'` 
-        : '';
-      
-      const query = `
-      SELECT 
-        BookingID as bookingId,
-        PractitionerName as therapistName,
-        HelperName as helperName,
-        ServiceName as service,
-        CustomerName as customer,
-        FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', CheckInTime) as date
-      FROM 
-        great_time.MainDataView
-      WHERE 
-        PractitionerName IS NOT NULL
-        AND PractitionerName != 'N/A'
-        AND TRIM(PractitionerName) != ''
-        AND ClinicCode = '${currentClinic?.code}'
-        AND ${dateCondition}
-        ${therapistCondition}
-      ORDER BY 
-        CheckInTime DESC
-      LIMIT 1000
-      `;
-      
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+
+      const query = buildTherapistAppointmentsQuery({
+        clinicCode: currentClinic.code,
+        period,
+        therapistName: selectedTherapist,
+      });
+
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
         { query },
         {
           headers: {
@@ -641,11 +497,11 @@ const TherapistList: React.FC = () => {
           timeout: 30000 // Increased timeout for larger dataset
         }
       );
-      
+
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch appointments for export');
       }
-      
+
       const exportData = response.data.data.map((appointment: any) => ({
         therapistName: appointment.therapistName || 'Unknown',
         helperName: appointment.helperName || 'Unknown',
@@ -654,7 +510,7 @@ const TherapistList: React.FC = () => {
         date: appointment.date || 'Unknown',
         bookingId: appointment.bookingId || 'Unknown'
       }));
-      
+
       // Define field mappings for better column names
       const fields = {
         therapistName: 'Therapist Name',
@@ -664,15 +520,15 @@ const TherapistList: React.FC = () => {
         date: 'Date & Time',
         bookingId: 'Booking ID'
       };
-      
+
       const csvData = convertToCSV(exportData, fields);
-      
+
       // Generate filename with date
       const date = format(new Date(), 'yyyy-MM-dd');
       const clinicCode = currentClinic?.code || 'all';
       const therapistSuffix = selectedTherapist ? `_therapist_${selectedTherapist.replace(/\s+/g, '_')}` : '';
       const filename = `appointments_${clinicCode}${therapistSuffix}_${date}.csv`;
-      
+
       downloadCSV(csvData, filename);
     } catch (error) {
       console.error('Error exporting appointments:', error);
@@ -683,47 +539,49 @@ const TherapistList: React.FC = () => {
   };
 
   return (
-    <Box 
-      className="p-6" 
-      sx={{ 
-        bgcolor: '#111923',
-        minHeight: '100vh'
+    <Box
+      sx={{
+        bgcolor: 'var(--background)',
+        minHeight: '100vh',
+        p: { xs: 2, md: 3 },
       }}
     >
-      <Box className="flex justify-between items-center mb-6">
-        <Typography variant="h4" component="h1" className="text-white font-bold">
-          Therapist List
-        </Typography>
-        <Box className="flex gap-3">
+      <DirectoryPageHeader
+        title="Therapists"
+        subtitle="Monitor therapist workload and inspect the appointments behind each total."
+        count={filteredTherapists.length}
+        countLabel={searchTerm ? 'matches' : 'therapists'}
+        actions={
           <Button
-            variant="contained"
+            variant="outlined"
             startIcon={<RefreshIcon />}
-            className="bg-[#2563eb] hover:bg-blue-700"
             onClick={() => {
               fetchTherapists();
               fetchAppointments();
             }}
+            disabled={loading || appointmentsLoading}
+            sx={{ color: 'var(--primary)', borderColor: 'var(--border)' }}
           >
             Refresh
           </Button>
-        </Box>
-      </Box>
-      
-      <Paper 
-        elevation={3} 
+        }
+      />
+
+      <Paper
+        elevation={3}
         className="mb-6 p-4"
-        sx={{ 
-          bgcolor: '#1a2235',
+        sx={{
+          bgcolor: 'var(--surface)',
           borderRadius: 2,
-          color: 'white'
+          color: 'var(--text-primary)'
         }}
       >
-        <Box 
+        <Box
           className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 flex-wrap"
         >
           <Box className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
             <TextField
-              placeholder="Search employees..."
+              placeholder="Search therapists..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               variant="outlined"
@@ -738,43 +596,43 @@ const TherapistList: React.FC = () => {
               sx={{
                 width: { xs: '100%', sm: '250px' },
                 '& .MuiOutlinedInput-root': {
-                  backgroundColor: '#111923',
-                  color: 'white',
+                  backgroundColor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   '& fieldset': {
-                    borderColor: '#2d3748',
+                    borderColor: 'var(--border)',
                   },
                   '&:hover fieldset': {
-                    borderColor: '#3b82f6',
+                    borderColor: 'var(--primary)',
                   },
                   '&.Mui-focused fieldset': {
-                    borderColor: '#3b82f6',
+                    borderColor: 'var(--primary)',
                   },
                 }
               }}
             />
-            
+
             {/* Date Filter Controls */}
-            <Box 
-              sx={{ 
-                display: 'flex', 
-                flexDirection: { xs: 'column', sm: 'row' }, 
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
                 gap: 2,
                 width: { xs: '100%', sm: 'auto' },
                 alignItems: { xs: 'flex-start', sm: 'center' }
               }}
             >
-              <FormControl 
-                size="small" 
-                sx={{ 
+              <FormControl
+                size="small"
+                sx={{
                   width: { xs: '100%', sm: '150px' },
-                  bgcolor: '#111923',
+                  bgcolor: 'var(--surface-secondary)',
                   '& .MuiOutlinedInput-root': {
-                    color: 'white',
-                    '& fieldset': { borderColor: '#2d3748' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                    color: 'var(--text-primary)',
+                    '& fieldset': { borderColor: 'var(--border)' },
+                    '&:hover fieldset': { borderColor: 'var(--primary)' },
+                    '&.Mui-focused fieldset': { borderColor: 'var(--primary)' },
                   },
-                  '& .MuiSvgIcon-root': { color: 'white' }
+                  '& .MuiSvgIcon-root': { color: 'var(--text-primary)' }
                 }}
               >
                 <Select
@@ -782,13 +640,13 @@ const TherapistList: React.FC = () => {
                   onChange={handleFilterTypeChange}
                   displayEmpty
                 >
-                  <MenuItem value="daily" sx={{ bgcolor: '#111923', color: 'white' }}>Daily</MenuItem>
-                  <MenuItem value="weekly" sx={{ bgcolor: '#111923', color: 'white' }}>Weekly</MenuItem>
-                  <MenuItem value="monthly" sx={{ bgcolor: '#111923', color: 'white' }}>Monthly</MenuItem>
-                  <MenuItem value="custom" sx={{ bgcolor: '#111923', color: 'white' }}>Custom</MenuItem>
+                  <MenuItem value="daily" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)' }}>Daily</MenuItem>
+                  <MenuItem value="weekly" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)' }}>Weekly</MenuItem>
+                  <MenuItem value="monthly" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)' }}>Monthly</MenuItem>
+                  <MenuItem value="custom" sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-primary)' }}>Custom</MenuItem>
                 </Select>
               </FormControl>
-              
+
               <LocalizationProvider dateAdapter={AdapterDateFns}>
                 {filterType !== 'custom' ? (
                   <DatePicker
@@ -800,23 +658,23 @@ const TherapistList: React.FC = () => {
                         size: 'small',
                         sx: {
                           width: { xs: '100%', sm: '200px' },
-                          bgcolor: '#111923',
+                          bgcolor: 'var(--surface-secondary)',
                           '& .MuiOutlinedInput-root': {
-                            color: 'white',
-                            '& fieldset': { borderColor: '#2d3748' },
-                            '&:hover fieldset': { borderColor: '#3b82f6' },
-                            '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                            color: 'var(--text-primary)',
+                            '& fieldset': { borderColor: 'var(--border)' },
+                            '&:hover fieldset': { borderColor: 'var(--primary)' },
+                            '&.Mui-focused fieldset': { borderColor: 'var(--primary)' },
                           },
-                          '& .MuiInputLabel-root': { color: '#9ca3af' },
-                          '& .MuiSvgIcon-root': { color: 'white' },
+                          '& .MuiInputLabel-root': { color: 'var(--text-secondary)' },
+                          '& .MuiSvgIcon-root': { color: 'var(--text-primary)' },
                         },
                       },
                     }}
                   />
                 ) : (
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
+                  <Box
+                    sx={{
+                      display: 'flex',
                       gap: 2,
                       flexDirection: { xs: 'column', sm: 'row' },
                       width: { xs: '100%', sm: 'auto' }
@@ -831,15 +689,15 @@ const TherapistList: React.FC = () => {
                           size: 'small',
                           sx: {
                             width: { xs: '100%', sm: '160px' },
-                            bgcolor: '#111923',
+                            bgcolor: 'var(--surface-secondary)',
                             '& .MuiOutlinedInput-root': {
-                              color: 'white',
-                              '& fieldset': { borderColor: '#2d3748' },
-                              '&:hover fieldset': { borderColor: '#3b82f6' },
-                              '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                              color: 'var(--text-primary)',
+                              '& fieldset': { borderColor: 'var(--border)' },
+                              '&:hover fieldset': { borderColor: 'var(--primary)' },
+                              '&.Mui-focused fieldset': { borderColor: 'var(--primary)' },
                             },
-                            '& .MuiInputLabel-root': { color: '#9ca3af' },
-                            '& .MuiSvgIcon-root': { color: 'white' },
+                            '& .MuiInputLabel-root': { color: 'var(--text-secondary)' },
+                            '& .MuiSvgIcon-root': { color: 'var(--text-primary)' },
                           },
                         },
                       }}
@@ -853,15 +711,15 @@ const TherapistList: React.FC = () => {
                           size: 'small',
                           sx: {
                             width: { xs: '100%', sm: '160px' },
-                            bgcolor: '#111923',
+                            bgcolor: 'var(--surface-secondary)',
                             '& .MuiOutlinedInput-root': {
-                              color: 'white',
-                              '& fieldset': { borderColor: '#2d3748' },
-                              '&:hover fieldset': { borderColor: '#3b82f6' },
-                              '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                              color: 'var(--text-primary)',
+                              '& fieldset': { borderColor: 'var(--border)' },
+                              '&:hover fieldset': { borderColor: 'var(--primary)' },
+                              '&.Mui-focused fieldset': { borderColor: 'var(--primary)' },
                             },
-                            '& .MuiInputLabel-root': { color: '#9ca3af' },
-                            '& .MuiSvgIcon-root': { color: 'white' },
+                            '& .MuiInputLabel-root': { color: 'var(--text-secondary)' },
+                            '& .MuiSvgIcon-root': { color: 'var(--text-primary)' },
                           },
                         },
                       }}
@@ -875,22 +733,27 @@ const TherapistList: React.FC = () => {
       </Paper>
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6" sx={{ color: 'white', fontWeight: 'bold' }}>
-          Therapist Summary
-        </Typography>
+        <Box>
+          <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
+            Therapist Summary · {filteredTherapists.length.toLocaleString()}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+            Appointment counts are service rows within the selected calendar period.
+          </Typography>
+        </Box>
         <Tooltip title="Export all therapists to CSV">
           <Button
             variant="outlined"
             size="small"
-            startIcon={exportingTherapists ? <CircularProgress size={20} sx={{ color: 'white' }} /> : <FileDownloadIcon />}
+            startIcon={exportingTherapists ? <CircularProgress size={20} sx={{ color: 'var(--text-primary)' }} /> : <FileDownloadIcon />}
             onClick={handleExportTherapists}
             disabled={exportingTherapists || loading || error !== ''}
-            sx={{ 
-              color: 'white', 
-              borderColor: '#3b82f6',
-              '&:hover': { 
+            sx={{
+              color: 'var(--text-primary)',
+              borderColor: 'var(--primary)',
+              '&:hover': {
                 borderColor: 'white',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)'
+                backgroundColor: 'var(--primary-soft)'
               }
             }}
           >
@@ -898,24 +761,24 @@ const TherapistList: React.FC = () => {
           </Button>
         </Tooltip>
       </Box>
-      
-      <Paper 
-        className="rounded-lg overflow-hidden w-full mb-6" 
-        sx={{ 
-          bgcolor: '#111923', 
+
+      <Paper
+        className="rounded-lg overflow-hidden w-full mb-6"
+        sx={{
+          bgcolor: 'var(--surface-secondary)',
           boxShadow: 'none',
-          border: '1px solid #1a2234',
+          border: '1px solid var(--surface)',
           width: '100%',
           display: 'table',
           tableLayout: 'fixed'
         }}
       >
         {loading ? (
-          <Box className="flex justify-center items-center p-12" sx={{ bgcolor: '#111923' }}>
-            <CircularProgress sx={{ color: 'white' }} />
+          <Box className="flex justify-center items-center p-12" sx={{ bgcolor: 'var(--surface-secondary)' }}>
+            <CircularProgress sx={{ color: 'var(--text-primary)' }} />
           </Box>
         ) : error ? (
-          <Box className="p-6" sx={{ bgcolor: '#111923' }}>
+          <Box className="p-6" sx={{ bgcolor: 'var(--surface-secondary)' }}>
             <Typography className="text-red-400 text-center">
               {error}
             </Typography>
@@ -925,32 +788,54 @@ const TherapistList: React.FC = () => {
             <TableContainer sx={{ maxHeight: 'calc(100vh - 500px)' }}>
               <Table stickyHeader>
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: '#111923' }}>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                  <TableRow sx={{ backgroundColor: 'var(--surface-secondary)' }}>
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
                     >
-                      Therapist Name
+                      <TableSortLabel
+                        active={orderBy === 'name'}
+                        direction={orderBy === 'name' ? order : 'asc'}
+                        onClick={() => handleRequestSort('name')}
+                        sx={{
+                          color: 'var(--text-secondary) !important',
+                          '&.Mui-active': { color: 'var(--primary) !important' },
+                          '& .MuiTableSortLabel-icon': { color: 'var(--primary) !important' },
+                        }}
+                      >
+                        Therapist Name
+                      </TableSortLabel>
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
                     >
-                      Booking Count
+                      <TableSortLabel
+                        active={orderBy === 'bookingCount'}
+                        direction={orderBy === 'bookingCount' ? order : 'asc'}
+                        onClick={() => handleRequestSort('bookingCount')}
+                        sx={{
+                          color: 'var(--text-secondary) !important',
+                          '&.Mui-active': { color: 'var(--primary) !important' },
+                          '& .MuiTableSortLabel-icon': { color: 'var(--primary) !important' },
+                        }}
+                      >
+                        Appointment Count
+                      </TableSortLabel>
                     </TableCell>
-                    <TableCell 
+                    <TableCell
                       align="right"
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
@@ -962,46 +847,57 @@ const TherapistList: React.FC = () => {
                 <TableBody>
                   {paginatedTherapists.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} align="center" sx={{ color: 'white' }}>
+                      <TableCell colSpan={4} align="center" sx={{ color: 'var(--text-primary)' }}>
                         No therapists found
                       </TableCell>
                     </TableRow>
                   ) : (
                     paginatedTherapists.map((therapist) => (
-                      <TableRow 
+                      <TableRow
                         key={therapist.id}
                         hover
-                        sx={{ 
-                          '&:hover': { backgroundColor: '#1a2440 !important' },
+                        sx={{
+                          '&:hover': { backgroundColor: 'var(--surface-secondary) !important' },
                           cursor: 'pointer',
                           // Highlight selected therapist
                           ...(selectedTherapist === therapist.name && {
-                            backgroundColor: '#1e3a8a !important',
-                            '&:hover': { backgroundColor: '#1e3a8a !important' },
+                            backgroundColor: 'var(--primary-soft) !important',
+                            '&:hover': { backgroundColor: 'var(--primary-soft) !important' },
                           })
                         }}
                         onClick={() => handleSelectTherapist(therapist)}
                       >
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
-                          {therapist.name}
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                            <Avatar
+                              src={therapist.image || undefined}
+                              alt={therapist.name}
+                              sx={{ width: 38, height: 38, bgcolor: 'var(--primary)', fontSize: '0.9rem' }}
+                            >
+                              {therapist.name.charAt(0).toUpperCase()}
+                            </Avatar>
+                            <Typography sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                              {therapist.name}
+                            </Typography>
+                          </Box>
                         </TableCell>
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           {therapist.bookingCount.toLocaleString()}
                         </TableCell>
-                        <TableCell 
-                          align="right" 
-                          sx={{ 
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          align="right"
+                          sx={{
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           <Button
@@ -1011,11 +907,11 @@ const TherapistList: React.FC = () => {
                               e.stopPropagation();
                               handleViewTherapist(therapist);
                             }}
-                            sx={{ 
-                              bgcolor: '#0f172a', 
-                              '&:hover': { 
-                                bgcolor: '#1e293b' 
-                              } 
+                            sx={{
+                              bgcolor: 'var(--background)',
+                              '&:hover': {
+                                bgcolor: 'var(--surface-secondary)'
+                              }
                             }}
                           >
                             View Details
@@ -1027,13 +923,13 @@ const TherapistList: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-            <Box 
-              sx={{ 
-                display: 'flex', 
-                justifyContent: 'center', 
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'center',
                 padding: 2,
-                borderTop: '1px solid #1e293b',
-                backgroundColor: '#131b2c'
+                borderTop: '1px solid var(--surface-secondary)',
+                backgroundColor: 'var(--surface-secondary)'
               }}
             >
               <Pagination
@@ -1043,10 +939,10 @@ const TherapistList: React.FC = () => {
                 color="primary"
                 sx={{
                   '& .MuiPaginationItem-root': {
-                    color: 'white',
+                    color: 'var(--text-primary)',
                   },
                   '& .Mui-selected': {
-                    backgroundColor: '#3b82f6 !important',
+                    backgroundColor: 'var(--primary) !important',
                   },
                 }}
               />
@@ -1054,25 +950,25 @@ const TherapistList: React.FC = () => {
           </>
         )}
       </Paper>
-      
+
       {/* Appointments Table */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 4 }}>
-        <Typography variant="h6" sx={{ color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
-          Appointment Details
+        <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
+          Appointment Details · {filteredAppointments.length.toLocaleString()}
           {selectedTherapist && (
             <>
-              <span style={{ margin: '0 10px', color: '#9ca3af' }}>|</span>
-              <span style={{ color: '#3b82f6', fontWeight: 'normal', fontSize: '1rem' }}>
+              <span style={{ margin: '0 10px', color: 'var(--text-secondary)' }}>|</span>
+              <span style={{ color: 'var(--primary)', fontWeight: 'normal', fontSize: '1rem' }}>
                 Filtered by: {selectedTherapist}
               </span>
-              <Button 
+              <Button
                 size="small"
                 variant="text"
                 onClick={() => setSelectedTherapist(null)}
-                sx={{ 
-                  ml: 2, 
-                  color: '#9ca3af',
-                  '&:hover': { color: '#ffffff' }
+                sx={{
+                  ml: 2,
+                  color: 'var(--text-secondary)',
+                  '&:hover': { color: 'var(--text-primary)' }
                 }}
               >
                 Clear
@@ -1084,15 +980,15 @@ const TherapistList: React.FC = () => {
           <Button
             variant="outlined"
             size="small"
-            startIcon={exportingAppointments ? <CircularProgress size={20} sx={{ color: 'white' }} /> : <FileDownloadIcon />}
+            startIcon={exportingAppointments ? <CircularProgress size={20} sx={{ color: 'var(--text-primary)' }} /> : <FileDownloadIcon />}
             onClick={handleExportAppointments}
             disabled={exportingAppointments || appointmentsLoading || appointmentsError !== ''}
-            sx={{ 
-              color: 'white', 
-              borderColor: '#3b82f6',
-              '&:hover': { 
+            sx={{
+              color: 'var(--text-primary)',
+              borderColor: 'var(--primary)',
+              '&:hover': {
                 borderColor: 'white',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)'
+                backgroundColor: 'var(--primary-soft)'
               }
             }}
           >
@@ -1100,24 +996,24 @@ const TherapistList: React.FC = () => {
           </Button>
         </Tooltip>
       </Box>
-      
-      <Paper 
-        className="rounded-lg overflow-hidden w-full" 
-        sx={{ 
-          bgcolor: '#111923', 
+
+      <Paper
+        className="rounded-lg overflow-hidden w-full"
+        sx={{
+          bgcolor: 'var(--surface-secondary)',
           boxShadow: 'none',
-          border: '1px solid #1a2234',
+          border: '1px solid var(--surface)',
           width: '100%',
           display: 'table',
           tableLayout: 'fixed'
         }}
       >
         {appointmentsLoading ? (
-          <Box className="flex justify-center items-center p-12" sx={{ bgcolor: '#111923' }}>
-            <CircularProgress sx={{ color: 'white' }} />
+          <Box className="flex justify-center items-center p-12" sx={{ bgcolor: 'var(--surface-secondary)' }}>
+            <CircularProgress sx={{ color: 'var(--text-primary)' }} />
           </Box>
         ) : appointmentsError ? (
-          <Box className="p-6" sx={{ bgcolor: '#111923' }}>
+          <Box className="p-6" sx={{ bgcolor: 'var(--surface-secondary)' }}>
             <Typography className="text-red-400 text-center">
               {appointmentsError}
             </Typography>
@@ -1127,51 +1023,51 @@ const TherapistList: React.FC = () => {
             <TableContainer sx={{ maxHeight: 'calc(100vh - 500px)' }}>
               <Table stickyHeader>
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: '#111923' }}>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                  <TableRow sx={{ backgroundColor: 'var(--surface-secondary)' }}>
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
                     >
                       Therapist Name
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
                     >
                       Helper Name
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
                     >
                       Service
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
                     >
                       Customer
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        backgroundColor: '#131b2c', 
-                        color: 'white',
+                    <TableCell
+                      sx={{
+                        backgroundColor: 'var(--surface-secondary)',
+                        color: 'var(--text-primary)',
                         fontSize: '0.8rem',
                         fontWeight: 'bold'
                       }}
@@ -1183,55 +1079,55 @@ const TherapistList: React.FC = () => {
                 <TableBody>
                   {paginatedAppointments.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} align="center" sx={{ color: 'white' }}>
+                      <TableCell colSpan={5} align="center" sx={{ color: 'var(--text-primary)' }}>
                         No appointments found
                       </TableCell>
                     </TableRow>
                   ) : (
-                    paginatedAppointments.map((appointment) => (
-                      <TableRow 
-                        key={appointment.bookingId}
+                    paginatedAppointments.map((appointment, index) => (
+                      <TableRow
+                        key={`${appointment.bookingId}-${appointment.service}-${appointment.date}-${index}`}
                         hover
-                        sx={{ 
-                          '&:hover': { backgroundColor: '#1a2440 !important' },
+                        sx={{
+                          '&:hover': { backgroundColor: 'var(--surface-secondary) !important' },
                         }}
                       >
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           {appointment.therapistName}
                         </TableCell>
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           {appointment.helperName}
                         </TableCell>
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           {appointment.service}
                         </TableCell>
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           {appointment.customer}
                         </TableCell>
-                        <TableCell 
-                          sx={{ 
-                            color: 'white',
-                            borderBottom: '1px solid #1e293b'
+                        <TableCell
+                          sx={{
+                            color: 'var(--text-primary)',
+                            borderBottom: '1px solid var(--surface-secondary)'
                           }}
                         >
                           {appointment.date}
@@ -1242,13 +1138,13 @@ const TherapistList: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-            <Box 
-              sx={{ 
-                display: 'flex', 
-                justifyContent: 'center', 
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'center',
                 padding: 2,
-                borderTop: '1px solid #1e293b',
-                backgroundColor: '#131b2c'
+                borderTop: '1px solid var(--surface-secondary)',
+                backgroundColor: 'var(--surface-secondary)'
               }}
             >
               <Pagination
@@ -1258,10 +1154,10 @@ const TherapistList: React.FC = () => {
                 color="primary"
                 sx={{
                   '& .MuiPaginationItem-root': {
-                    color: 'white',
+                    color: 'var(--text-primary)',
                   },
                   '& .Mui-selected': {
-                    backgroundColor: '#3b82f6 !important',
+                    backgroundColor: 'var(--primary) !important',
                   },
                 }}
               />
@@ -1273,4 +1169,4 @@ const TherapistList: React.FC = () => {
   );
 };
 
-export default TherapistList; 
+export default TherapistList;

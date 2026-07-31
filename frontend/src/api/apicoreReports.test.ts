@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCheckInOrderItemVariables,
   buildCheckInOutVariables,
   filterCheckInOutRecords,
   mapCheckInOutRecords,
@@ -40,9 +41,19 @@ describe('APICORE report date boundaries', () => {
     expect(variables.where.AND).toContainEqual({
       clinic_id: { equals: 'clinic-1' },
     });
-    expect(variables.orderBy).toEqual([{ in_time: 'desc' }, { id: 'desc' }]);
+    expect(variables.orderBy).toEqual([{ in_time: 'desc' }]);
     expect(variables.skip).toBe(500);
     expect(variables.take).toBe(500);
+  });
+
+  it('matches the reference order-item ordering', () => {
+    expect(buildCheckInOrderItemVariables(['order-1', 'order-2'])).toEqual({
+      where: {
+        order_id: { in: ['order-1', 'order-2'] },
+        service_id: { not: null },
+      },
+      orderBy: [{ created_at: 'desc' }],
+    });
   });
 });
 
@@ -54,6 +65,7 @@ describe('live check-in/out mapping', () => {
           id: 'checkin-1',
           in_time: '2026-07-24T03:30:00.000Z',
           out_time: '2026-07-24T04:30:00.000Z',
+          merchant_note: 'Follow-up note',
           status: 'CHECKOUT',
           order_id: 'order-internal-1',
           service: { id: 'service-1', name: 'Laser', price: '45000' },
@@ -65,11 +77,12 @@ describe('live check-in/out mapping', () => {
           },
           booking: {
             status: 'CHECKOUT',
-            service_helper: { name: 'Helper A' },
           },
+          helper: { name: 'Helper A' },
           orders: {
             order_id: 'INV-001',
             discount: '5000',
+            net_total: '35000',
             payment_method: 'KPAY',
             payment_status: 'PAID',
             status: 'ACTIVE',
@@ -98,9 +111,13 @@ describe('live check-in/out mapping', () => {
       CustomerPhoneNumber: '+959111111',
       PaymentMethod: 'KPAY',
       PaymentStatus: 'PAID',
+      OriginalAmount: 40000,
       Total: 40000,
+      ActualInvoice: 35000,
       Discount: 5000,
+      ItemDiscount: 0,
       SellerName: 'Seller A',
+      Note: 'Follow-up note',
     });
   });
 
@@ -126,6 +143,341 @@ describe('live check-in/out mapping', () => {
     expect(rows[0].PaymentStatus).toBe(MERCHANT_CANCEL_STATUS);
     expect(rows[1].PaymentStatus).toBe(ORDER_CANCEL_STATUS);
   });
+
+  it('uses each service check-in helper instead of repeating a shared booking helper', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'scalp-nwet',
+          in_time: '2026-07-26T10:44:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-so-166837',
+          service: { id: 'scalp-service', name: 'Scalp Shampoo & Browdry' },
+          booking: { status: 'CHECKOUT' },
+          helper: { name: 'Nwet Nwet' },
+        },
+        {
+          id: 'scalp-may',
+          in_time: '2026-07-26T10:44:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-so-166837',
+          service: { id: 'scalp-service', name: 'Scalp Shampoo & Browdry' },
+          booking: { status: 'CHECKOUT' },
+          helper: { name: 'May Phoo' },
+        },
+        {
+          id: 'haircut-no-helper',
+          in_time: '2026-07-26T10:44:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-so-166837',
+          service: { id: 'haircut-service', name: 'Hair cut (Lady)' },
+          booking: { status: 'CHECKOUT' },
+          helper: null,
+        },
+      ],
+      [],
+    );
+
+    expect(rows.map((row) => row.HelperName)).toEqual([
+      'Nwet Nwet',
+      'May Phoo',
+      null,
+    ]);
+  });
+
+  it('leaves service amount blank unless a checkout row matches an order item', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'still-checked-in',
+          in_time: '2026-07-24T03:30:00.000Z',
+          status: 'CHECKIN',
+          order_id: 'order-1',
+          service: { id: 'service-1', name: 'Laser', price: '45000' },
+        },
+        {
+          id: 'missing-item',
+          in_time: '2026-07-24T03:30:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-2',
+          service: { id: 'service-2', name: 'Facial', price: '30000' },
+        },
+      ],
+      [
+        {
+          id: 'item-1',
+          order_id: 'order-1',
+          service_id: 'service-1',
+          price: '40000',
+        },
+      ],
+    );
+
+    expect(rows.map((row) => row.Total)).toEqual([null, null]);
+  });
+
+  it('requires the zero-price order item for a purchased service', () => {
+    const [record] = mapCheckInOutRecords(
+      [
+        {
+          id: 'purchased-service',
+          in_time: '2026-07-24T03:30:00.000Z',
+          status: 'CHECKOUT',
+          isUsePurchaseService: true,
+          order_id: 'order-1',
+          service: { id: 'service-1', name: 'Laser', price: '45000' },
+        },
+      ],
+      [
+        {
+          id: 'paid-item',
+          order_id: 'order-1',
+          service_id: 'service-1',
+          price: '40000',
+        },
+      ],
+    );
+
+    expect(record.Total).toBeNull();
+  });
+
+  it('consumes duplicate service items once and keeps post-discount service amounts', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'checkin-mee',
+          in_time: '2026-07-24T03:30:00.000Z',
+          created_at: '2026-07-24T03:30:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-1',
+          service: { id: 'service-1', name: 'Lazulite Shampoo & Blowdry' },
+          practitioner: { id: 'therapist-mee', name: 'Tr.Mee' },
+        },
+        {
+          id: 'checkin-nilar',
+          in_time: '2026-07-24T03:30:00.000Z',
+          created_at: '2026-07-24T03:31:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-1',
+          service: { id: 'service-1', name: 'Lazulite Shampoo & Blowdry' },
+          practitioner: { id: 'therapist-nilar', name: 'Tr.Nilar' },
+        },
+      ],
+      [
+        {
+          id: 'newest-item',
+          order_id: 'order-1',
+          service_id: 'service-1',
+          practitioner_id: 'therapist-nilar',
+          quantity: 1,
+          price: '30000',
+          original_price: '30000',
+          total: '25000',
+          metadata: '{"discount":5000}',
+          created_at: '2026-07-24T03:31:00.000Z',
+        },
+        {
+          id: 'older-item',
+          order_id: 'order-1',
+          service_id: 'service-1',
+          practitioner_id: 'therapist-mee',
+          quantity: 1,
+          price: '30000',
+          original_price: '30000',
+          total: '30000',
+          created_at: '2026-07-24T03:30:00.000Z',
+        },
+      ],
+    );
+
+    expect(rows.map((row) => row.Total)).toEqual([30000, 25000]);
+    expect(rows.map((row) => row.ItemDiscount)).toEqual([0, 5000]);
+  });
+
+  it('reports 50% item discounts and post-discount service amounts per line', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'foot-scrub',
+          in_time: '2026-07-24T03:30:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-259083',
+          service: { id: 'foot-scrub-service', name: 'Foot Scrub' },
+        },
+        {
+          id: 'nail-color',
+          in_time: '2026-07-24T03:30:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'order-259083',
+          service: { id: 'nail-color-service', name: 'Nail Color' },
+        },
+      ],
+      [
+        {
+          id: 'foot-scrub-item',
+          order_id: 'order-259083',
+          service_id: 'foot-scrub-service',
+          quantity: 1,
+          price: '10000',
+          original_price: '10000',
+          total: '5000',
+          metadata: '{"discount":5000}',
+        },
+        {
+          id: 'nail-color-item',
+          order_id: 'order-259083',
+          service_id: 'nail-color-service',
+          quantity: 1,
+          price: '10000',
+          original_price: '10000',
+          total: '5000',
+          metadata: '{"discount":5000}',
+        },
+      ],
+    );
+
+    expect(rows.map((row) => row.ItemDiscount)).toEqual([5000, 5000]);
+    expect(rows.map((row) => row.Total)).toEqual([5000, 5000]);
+  });
+
+  it('matches the verified discount behavior for SO-858172 and SO-699421', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'checkin-so-858172',
+          in_time: '2026-07-28T03:30:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'internal-so-858172',
+          service: { id: 'service-lazulite', name: 'Lazulite Shampoo & Blowdry' },
+          orders: {
+            order_id: 'SO-858172',
+            net_total: '24000',
+          },
+        },
+        {
+          id: 'checkin-so-699421',
+          in_time: '2026-07-28T03:30:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'internal-so-699421',
+          service: { id: 'service-eyelash', name: 'Eyelash Refill' },
+          orders: {
+            order_id: 'SO-699421',
+            net_total: '45000',
+          },
+        },
+      ],
+      [
+        {
+          id: 'item-so-858172',
+          order_id: 'internal-so-858172',
+          service_id: 'service-lazulite',
+          quantity: 1,
+          price: '30000',
+          original_price: '30000',
+          total: '24000',
+          metadata: '{"discount":"6000"}',
+        },
+        {
+          id: 'item-so-699421',
+          order_id: 'internal-so-699421',
+          service_id: 'service-eyelash',
+          quantity: 1,
+          price: '45000',
+          original_price: '50000',
+          total: '45000',
+          metadata: null,
+        },
+      ],
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        OrderId: 'SO-858172',
+        OriginalAmount: 30000,
+        Total: 24000,
+        ItemDiscount: 6000,
+        ActualInvoice: 24000,
+      }),
+      expect.objectContaining({
+        OrderId: 'SO-699421',
+        OriginalAmount: 45000,
+        Total: 45000,
+        ItemDiscount: 0,
+        ActualInvoice: 45000,
+      }),
+    ]);
+  });
+
+  it('keeps the verified post-discount service amounts for SO-259093', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'checkin-nail-color',
+          in_time: '2026-07-25T08:17:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'internal-so-259093',
+          service: { id: 'service-nail-color', name: 'Nail Color' },
+          orders: { order_id: 'SO-259093', net_total: '25000' },
+        },
+        {
+          id: 'checkin-foot-scrub',
+          in_time: '2026-07-25T08:17:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'internal-so-259093',
+          service: { id: 'service-foot-scrub', name: 'Foot Scrub' },
+          orders: { order_id: 'SO-259093', net_total: '25000' },
+        },
+        {
+          id: 'checkin-lazulite',
+          in_time: '2026-07-25T08:17:00.000Z',
+          status: 'CHECKOUT',
+          order_id: 'internal-so-259093',
+          service: { id: 'service-lazulite', name: 'Lazulite Shampoo & Blowdry' },
+          orders: { order_id: 'SO-259093', net_total: '25000' },
+        },
+      ],
+      [
+        {
+          id: 'item-nail-color',
+          order_id: 'internal-so-259093',
+          service_id: 'service-nail-color',
+          quantity: 1,
+          price: '10000',
+          total: '5000',
+          metadata: '{"discount":"5000"}',
+        },
+        {
+          id: 'item-foot-scrub',
+          order_id: 'internal-so-259093',
+          service_id: 'service-foot-scrub',
+          quantity: 1,
+          price: '10000',
+          total: '5000',
+          metadata: '{"discount":"5000"}',
+        },
+        {
+          id: 'item-lazulite',
+          order_id: 'internal-so-259093',
+          service_id: 'service-lazulite',
+          quantity: 1,
+          price: '30000',
+          total: '15000',
+          metadata: '{"discount":"15000"}',
+        },
+      ],
+    );
+
+    expect(rows.map((row) => ({
+      OriginalAmount: row.OriginalAmount,
+      ServiceAmount: row.Total,
+      ItemDiscount: row.ItemDiscount,
+      ActualInvoice: row.ActualInvoice,
+    }))).toEqual([
+      { OriginalAmount: 10000, ServiceAmount: 5000, ItemDiscount: 5000, ActualInvoice: 25000 },
+      { OriginalAmount: 10000, ServiceAmount: 5000, ItemDiscount: 5000, ActualInvoice: 25000 },
+      { OriginalAmount: 30000, ServiceAmount: 15000, ItemDiscount: 15000, ActualInvoice: 25000 },
+    ]);
+  });
 });
 
 describe('check-in/out status filters', () => {
@@ -141,12 +493,16 @@ describe('check-in/out status filters', () => {
     CustomerPhoneNumber: '',
     PaymentMethod: null,
     PaymentStatus: 'PAID',
+    OriginalAmount: null,
     Total: null,
+    ActualInvoice: null,
     Discount: null,
+    ItemDiscount: null,
     SellerName: null,
     VisitStatus: 'CHECKOUT',
     OrderStatus: 'ACTIVE',
     BookingStatus: 'CHECKOUT',
+    Note: null,
   };
   const records: CheckInOutRecord[] = [
     baseRecord,

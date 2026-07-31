@@ -1,69 +1,37 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { GoogleOAuthProvider } from '@react-oauth/google'
 import './index.css'
 import App from './App.tsx'
-import { createTheme, ThemeProvider, CssBaseline } from '@mui/material'
 import { AuthProvider } from './contexts/AuthContext'
+import {
+  AppThemeProvider,
+  getInitialThemePreference,
+  resolveThemeMode,
+  THEME_STORAGE_KEY,
+} from './theme/ThemeContext'
 
-// Create a dark theme with #101729 as the primary color
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#101729',
-      light: '#2a3550',
-      dark: '#080f1d',
-      contrastText: '#ffffff',
-    },
-    secondary: {
-      main: '#3b82f6',
-      light: '#60a5fa',
-      dark: '#2563eb',
-    },
-    background: {
-      default: '#101729',
-      paper: '#151f38',
-    },
-    text: {
-      primary: '#f3f4f6',
-      secondary: '#cbd5e1',
-    },
-    divider: 'rgba(148, 163, 184, 0.12)',
-  },
-  components: {
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          backgroundImage: 'none',
-        },
-      },
-    },
-    MuiAppBar: {
-      styleOverrides: {
-        root: {
-          backgroundColor: '#101729',
-          backgroundImage: 'none',
-        },
-      },
-    },
-    MuiDrawer: {
-      styleOverrides: {
-        paper: {
-          backgroundColor: '#101729',
-          backgroundImage: 'none',
-        },
-      },
-    },
-  },
-})
+const initialPreference = getInitialThemePreference(localStorage.getItem(THEME_STORAGE_KEY))
+const initialMode = resolveThemeMode(
+  initialPreference,
+  window.matchMedia('(prefers-color-scheme: dark)').matches,
+)
+document.documentElement.dataset.theme = initialMode
+document.documentElement.style.colorScheme = initialMode
+
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+if (!googleClientId) {
+  throw new Error('Missing required environment variable: VITE_GOOGLE_CLIENT_ID')
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider theme={darkTheme}>
-      <CssBaseline />
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </ThemeProvider>
+    <AppThemeProvider>
+      <GoogleOAuthProvider clientId={googleClientId}>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </GoogleOAuthProvider>
+    </AppThemeProvider>
   </StrictMode>,
 )

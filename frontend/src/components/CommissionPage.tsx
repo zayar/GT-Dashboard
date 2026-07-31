@@ -47,7 +47,7 @@ interface QueenCommissionData {
 
 type SortOrder = 'asc' | 'desc';
 
-type SortableFields = 
+type SortableFields =
   | 'check_in_time'
   | 'practitioner_name'
   | 'service_name'
@@ -88,7 +88,7 @@ export default function QueenCommissionPage() {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           month: selectedMonth,
           practitioner: ''
         }),
@@ -136,7 +136,7 @@ export default function QueenCommissionPage() {
       result.sort((a, b) => {
         const aValue = a[sortConfig.key!];
         const bValue = b[sortConfig.key!];
-        
+
         if (aValue < bValue) {
           return sortConfig.direction === 'asc' ? -1 : 1;
         }
@@ -173,8 +173,8 @@ export default function QueenCommissionPage() {
     try {
       const [year, month] = monthStr.split('-');
       const date = new Date(parseInt(year), parseInt(month) - 1);
-      return new Intl.DateTimeFormat('en-US', { 
-        year: 'numeric', 
+      return new Intl.DateTimeFormat('en-US', {
+        year: 'numeric',
         month: 'long'
       }).format(date);
     } catch {
@@ -217,7 +217,7 @@ export default function QueenCommissionPage() {
 
   if (loading) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         position: 'fixed',
         top: '50%',
@@ -225,24 +225,24 @@ export default function QueenCommissionPage() {
         transform: 'translate(-50%, -50%)',
         height: '100vh',
         width: '100%',
-        bgcolor: '#1a1a1a'
+        bgcolor: 'var(--surface-secondary)'
       }}>
-        <CircularProgress sx={{ color: '#1a73e8', margin: 'auto' }} />
+        <CircularProgress sx={{ color: 'var(--primary)', margin: 'auto' }} />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ 
-        display: 'flex', 
+      <Box sx={{
+        display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         width: '100%',
-        bgcolor: '#1a1a1a',
-        p: 3 
+        bgcolor: 'var(--surface-secondary)',
+        p: 3
       }}>
         <Typography color="error" variant="h6" align="center">{error}</Typography>
       </Box>
@@ -250,16 +250,16 @@ export default function QueenCommissionPage() {
   }
 
   return (
-    <Box sx={{ 
-      p: { xs: 2, sm: 3, md: 4 }, 
-      bgcolor: '#ffffff',
-      minHeight: '100vh' 
+    <Box sx={{
+      p: { xs: 2, sm: 3, md: 4 },
+      bgcolor: 'var(--surface-secondary)',
+      minHeight: '100vh'
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <IconButton
           onClick={handleBack}
           sx={{
-            color: '#1a73e8',
+            color: 'var(--primary)',
             mr: 2,
             '&:hover': {
               bgcolor: 'rgba(26, 115, 232, 0.04)'
@@ -272,18 +272,18 @@ export default function QueenCommissionPage() {
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="h5" sx={{ color: '#000000', mb: 0 }}>Queen Commission</Typography>
+          <Typography variant="h5" sx={{ color: 'var(--text-primary)', mb: 0 }}>Queen Commission</Typography>
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
               sx={{
                 minWidth: 200,
-                color: '#000000',
-                '& .MuiSelect-icon': { color: '#000000' },
+                color: 'var(--text-primary)',
+                '& .MuiSelect-icon': { color: 'var(--text-primary)' },
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(0, 0, 0, 0.23)' },
                 '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(0, 0, 0, 0.87)' },
-                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#1a73e8' }
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
               }}
               size="small"
             >
@@ -299,11 +299,11 @@ export default function QueenCommissionPage() {
               onChange={(e) => setSelectedPractitioner(e.target.value)}
               sx={{
                 minWidth: 200,
-                color: '#000000',
-                '& .MuiSelect-icon': { color: '#000000' },
+                color: 'var(--text-primary)',
+                '& .MuiSelect-icon': { color: 'var(--text-primary)' },
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(0, 0, 0, 0.23)' },
                 '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(0, 0, 0, 0.87)' },
-                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#1a73e8' }
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
               }}
               size="small"
             >
@@ -318,7 +318,7 @@ export default function QueenCommissionPage() {
               <IconButton
                 onClick={() => exportToCSV(sortedAndFilteredData)}
                 sx={{
-                  color: '#1a73e8',
+                  color: 'var(--primary)',
                   '&:hover': {
                     bgcolor: 'rgba(26, 115, 232, 0.04)'
                   }
@@ -333,7 +333,7 @@ export default function QueenCommissionPage() {
           <IconButton
             onClick={handleOpenQueenCommissionSettings}
             sx={{
-              color: '#1a73e8',
+              color: 'var(--primary)',
               '&:hover': {
                 bgcolor: 'rgba(26, 115, 232, 0.04)'
               }
@@ -344,20 +344,20 @@ export default function QueenCommissionPage() {
         </Tooltip>
       </Box>
 
-      <Paper 
+      <Paper
         elevation={3}
-        sx={{ 
-          p: { xs: 2, sm: 3 }, 
-          bgcolor: '#ffffff',
-          color: '#000000',
+        sx={{
+          p: { xs: 2, sm: 3 },
+          bgcolor: 'var(--surface-secondary)',
+          color: 'var(--text-primary)',
           borderRadius: 2,
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
           width: '100%',
           boxSizing: 'border-box'
         }}
       >
-        <TableContainer sx={{ 
-          width: '100%', 
+        <TableContainer sx={{
+          width: '100%',
           overflowX: 'auto',
           '& .MuiTable-root': {
             minWidth: '100%'
@@ -366,10 +366,10 @@ export default function QueenCommissionPage() {
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000', 
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                     whiteSpace: 'nowrap'
@@ -381,21 +381,21 @@ export default function QueenCommissionPage() {
                     direction={sortConfig.key === 'check_in_time' ? sortConfig.direction : 'asc'}
                     sx={{
                       '& .MuiTableSortLabel-icon': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
                       '&.Mui-active': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
-                      color: '#000000 !important',
+                      color: 'var(--text-primary) !important',
                     }}
                   >
                     Check-in Time
                   </TableSortLabel>
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000', 
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                     whiteSpace: 'nowrap'
@@ -407,21 +407,21 @@ export default function QueenCommissionPage() {
                     direction={sortConfig.key === 'practitioner_name' ? sortConfig.direction : 'asc'}
                     sx={{
                       '& .MuiTableSortLabel-icon': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
                       '&.Mui-active': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
-                      color: '#000000 !important',
+                      color: 'var(--text-primary) !important',
                     }}
                   >
                     Practitioner Name
                   </TableSortLabel>
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000', 
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                     whiteSpace: 'nowrap'
@@ -433,21 +433,21 @@ export default function QueenCommissionPage() {
                     direction={sortConfig.key === 'service_name' ? sortConfig.direction : 'asc'}
                     sx={{
                       '& .MuiTableSortLabel-icon': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
                       '&.Mui-active': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
-                      color: '#000000 !important',
+                      color: 'var(--text-primary) !important',
                     }}
                   >
                     Service Name
                   </TableSortLabel>
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000', 
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                     whiteSpace: 'nowrap'
@@ -460,37 +460,37 @@ export default function QueenCommissionPage() {
                     direction={sortConfig.key === 'total_service_count' ? sortConfig.direction : 'asc'}
                     sx={{
                       '& .MuiTableSortLabel-icon': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
                       '&.Mui-active': {
-                        color: '#000000 !important',
+                        color: 'var(--text-primary) !important',
                       },
-                      color: '#000000 !important',
+                      color: 'var(--text-primary) !important',
                     }}
                   >
                     Total Service Count
                   </TableSortLabel>
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000', 
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                     whiteSpace: 'nowrap'
-                  }} 
+                  }}
                   align="right"
                 >
                   Commission Price
                 </TableCell>
-                <TableCell 
-                  sx={{ 
-                    bgcolor: '#f5f5f5',
-                    color: '#000000', 
+                <TableCell
+                  sx={{
+                    bgcolor: 'var(--surface-secondary)',
+                    color: 'var(--text-primary)',
                     fontWeight: 600,
                     borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                     whiteSpace: 'nowrap'
-                  }} 
+                  }}
                   align="right"
                 >
                   Total Commission
@@ -499,23 +499,23 @@ export default function QueenCommissionPage() {
             </TableHead>
             <TableBody>
               {paginatedData.map((row, index) => (
-                <TableRow 
+                <TableRow
                   key={index}
                   sx={{
                     '&:hover': { bgcolor: 'rgba(26, 115, 232, 0.04)' },
-                    bgcolor: '#ffffff'
+                    bgcolor: 'var(--surface-secondary)'
                   }}
                 >
-                  <TableCell sx={{ color: '#000000', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }}>
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }}>
                     {row.check_in_time}
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#1a73e8',
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
                       borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                       cursor: 'pointer',
                       '&:hover': {
-                        color: '#1557b0',
+                        color: 'var(--primary-hover)',
                         textDecoration: 'underline'
                       }
                     }}
@@ -523,13 +523,13 @@ export default function QueenCommissionPage() {
                   >
                     {row.practitioner_name || 'N/A'}
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#1a73e8',
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
                       borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
                       cursor: 'pointer',
                       '&:hover': {
-                        color: '#1557b0',
+                        color: 'var(--primary-hover)',
                         textDecoration: 'underline'
                       }
                     }}
@@ -537,13 +537,13 @@ export default function QueenCommissionPage() {
                   >
                     {row.service_name || 'N/A'}
                   </TableCell>
-                  <TableCell sx={{ color: '#000000', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }} align="right">
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }} align="right">
                     {row.total_service_count.toLocaleString()}
                   </TableCell>
-                  <TableCell sx={{ color: '#000000', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }} align="right">
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }} align="right">
                     {formatPrice(row.commission_price)}
                   </TableCell>
-                  <TableCell sx={{ color: '#000000', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }} align="right">
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }} align="right">
                     {formatPrice(row.total_commission)}
                   </TableCell>
                 </TableRow>
@@ -551,10 +551,10 @@ export default function QueenCommissionPage() {
             </TableBody>
           </Table>
         </TableContainer>
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'flex-end', 
-          alignItems: 'center', 
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
           mt: 2,
           gap: 2
         }}>
@@ -567,14 +567,14 @@ export default function QueenCommissionPage() {
             onChange={handleChangePage}
             sx={{
               '& .MuiPaginationItem-root': {
-                color: '#000000',
+                color: 'var(--text-primary)',
                 borderColor: 'rgba(0, 0, 0, 0.23)'
               },
               '& .MuiPaginationItem-root.Mui-selected': {
-                bgcolor: '#1a73e8',
-                color: '#ffffff',
+                bgcolor: 'var(--primary)',
+                color: 'var(--text-primary)',
                 '&:hover': {
-                  bgcolor: '#1557b0'
+                  bgcolor: 'var(--primary-hover)'
                 }
               }
             }}
@@ -583,4 +583,4 @@ export default function QueenCommissionPage() {
       </Paper>
     </Box>
   );
-} 
+}

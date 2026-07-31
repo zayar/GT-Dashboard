@@ -22,7 +22,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  ButtonGroup
+  ButtonGroup,
+  Chip
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -34,31 +35,25 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
 import { useClinic } from '../contexts/ClinicContext';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  fetchPaymentReportRecords,
+  type PaymentReportRecord,
+} from '../api/apicoreSalesReports';
 import { format } from 'date-fns';
+import {
+  filterPaymentsByMethod,
+  formatPaymentMmk,
+  normalizePaymentMethod,
+  summarizePaymentMethods,
+} from '../utils/paymentReport';
 
-interface PaymentRecord {
-  Date: string;
-  InvoiceNumber: string;
-  CustomerName: string;
-  MemberId: string;
-  SalePerson: string;
-  ServiceName: string;
-  ServicePackageName: string;
-  PaymentMethod: string;
-  PaymentStatus: string;
-  WalletTopUp: string | number;
-  InvoiceNetTotal: number;
-}
-
-interface SummaryRecord {
-  PaymentMethod: string;
-  TotalAmount: number;
-  TransactionCount: number;
-}
+type PaymentRecord = PaymentReportRecord;
 
 const BankingDetails: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
+  const { getAccessToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<PaymentRecord[]>([]);
@@ -73,7 +68,7 @@ const BankingDetails: React.FC = () => {
 
   // Get unique payment methods from the data
   const paymentMethods = useMemo(() => {
-    return Array.from(new Set(rawData.map(record => record.PaymentMethod))).filter(Boolean);
+    return Array.from(new Set(rawData.map(record => normalizePaymentMethod(record.PaymentMethod)))).filter(Boolean);
   }, [rawData]);
 
   const handlePaymentFilterClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -86,7 +81,7 @@ const BankingDetails: React.FC = () => {
 
   const isPaymentFilterOpen = Boolean(paymentFilterAnchorEl);
   const isAllSelected = useMemo(() => {
-    return paymentMethods.length > 0 && selectedPaymentMethods.length === paymentMethods.length;
+    return selectedPaymentMethods.length === 0 || selectedPaymentMethods.length === paymentMethods.length;
   }, [selectedPaymentMethods, paymentMethods]);
 
   // Helper function to check if a record is a wallet topup
@@ -97,26 +92,21 @@ const BankingDetails: React.FC = () => {
     );
   };
 
-  // Filter data based on selected payment methods, wallet filter, and search term
-  const data = useMemo(() => {
+  // Filters shared by both the summary and the detailed transaction table.
+  const baseFilteredData = useMemo(() => {
     let filteredData = rawData;
-    
-    // Apply payment method filter
-    if (selectedPaymentMethods.length > 0) {
-      filteredData = filteredData.filter(record => selectedPaymentMethods.includes(record.PaymentMethod));
-    }
-    
+
     // Apply wallet topup filter
     if (walletTopupFilter === 'hide') {
       filteredData = filteredData.filter(record => !isWalletTopup(record));
     } else if (walletTopupFilter === 'only') {
       filteredData = filteredData.filter(record => isWalletTopup(record));
     }
-    
+
     // Apply search filter across multiple fields
     if (searchTerm.trim() !== '') {
       const normalizedSearchTerm = searchTerm.toLowerCase().trim();
-      filteredData = filteredData.filter(record => 
+      filteredData = filteredData.filter(record =>
         (record.InvoiceNumber?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.CustomerName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.MemberId?.toLowerCase().includes(normalizedSearchTerm) || false) ||
@@ -125,28 +115,19 @@ const BankingDetails: React.FC = () => {
         (record.ServicePackageName?.toLowerCase().includes(normalizedSearchTerm) || false)
       );
     }
-    
+
     return filteredData;
-  }, [rawData, selectedPaymentMethods, walletTopupFilter, searchTerm]);
+  }, [rawData, walletTopupFilter, searchTerm]);
+
+  // Payment method selection drills the detailed table without hiding the other summary rows.
+  const data = useMemo(() => {
+    return filterPaymentsByMethod(baseFilteredData, selectedPaymentMethods);
+  }, [baseFilteredData, selectedPaymentMethods]);
 
   // Generate summary data from filtered data
   const summaryData = useMemo(() => {
-    const summary: Record<string, SummaryRecord> = {};
-    
-    data.forEach(record => {
-      if (!summary[record.PaymentMethod]) {
-        summary[record.PaymentMethod] = {
-          PaymentMethod: record.PaymentMethod,
-          TotalAmount: 0,
-          TransactionCount: 0
-        };
-      }
-      summary[record.PaymentMethod].TotalAmount += record.InvoiceNetTotal;
-      summary[record.PaymentMethod].TransactionCount += 1;
-    });
-    
-    return Object.values(summary).sort((a, b) => b.TotalAmount - a.TotalAmount);
-  }, [data]);
+    return summarizePaymentMethods(baseFilteredData);
+  }, [baseFilteredData]);
 
   useEffect(() => {
     if (currentClinic && ((filterType === 'day' && startDate && endDate) || (filterType === 'month' && selectedDate))) {
@@ -156,60 +137,29 @@ const BankingDetails: React.FC = () => {
 
   const fetchBankingData = async () => {
     if (!currentClinic) return;
-    
+
     // Check if we have the required dates based on filter type
     if (filterType === 'day' && (!startDate || !endDate)) return;
     if (filterType === 'month' && !selectedDate) return;
-    
+
     try {
       setLoading(true);
-      const query = `
-        SELECT 
-          FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Date,
-          InvoiceNumber,
-          CustomerName,
-          MemberId,
-          SellerName as SalePerson,
-          ServiceName,
-          ServicePackageName,
-          PaymentMethod,
-          PaymentStatus,
-          WalletTopUp,
-          CAST(NetTotal AS FLOAT64) as InvoiceNetTotal
-        FROM great_time.MainPaymentView
-        WHERE ${filterType === 'day' 
-          ? `DATE(OrderCreatedDate) >= DATE('${startDate!.toISOString().split('T')[0]}') AND DATE(OrderCreatedDate) <= DATE('${endDate!.toISOString().split('T')[0]}')`
-          : `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = FORMAT_DATE('%Y-%m', DATE('${selectedDate!.toISOString().split('T')[0]}'))`
-        }
-        AND PaymentStatus = 'PAID'
-        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ORDER BY OrderCreatedDate DESC
-      `;
+      setError(null);
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query }),
+      const records = await fetchPaymentReportRecords({
+        clinicId: currentClinic.id,
+        filterType,
+        startDate,
+        endDate,
+        selectedDate,
+        accessToken,
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch banking data');
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch banking data');
-      }
-
-      setRawData(result.data);
-      
-      // Initialize payment methods selection if empty
-      if (selectedPaymentMethods.length === 0) {
-        const methods = Array.from(new Set(result.data.map((record: PaymentRecord) => record.PaymentMethod))).filter(Boolean);
-        setSelectedPaymentMethods(methods);
-      }
+      setRawData(records);
     } catch (err) {
       console.error('Banking Data Error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -225,13 +175,24 @@ const BankingDetails: React.FC = () => {
   const handlePaymentMethodChange = (method: string) => {
     setSelectedPaymentMethods(prev => {
       if (method === 'all') {
-        return prev.length === paymentMethods.length ? [] : [...paymentMethods];
-      } else {
-        return prev.includes(method)
-          ? prev.filter(m => m !== method)
-          : [...prev, method];
+        return [];
       }
+
+      const normalizedMethod = normalizePaymentMethod(method);
+      const currentSelection = prev.length === 0 ? [...paymentMethods] : prev;
+      const nextSelection = currentSelection.includes(normalizedMethod)
+        ? currentSelection.filter(selected => selected !== normalizedMethod)
+        : [...currentSelection, normalizedMethod];
+
+      return nextSelection.length === paymentMethods.length ? [] : nextSelection;
     });
+  };
+
+  const handleSummaryMethodClick = (method: string) => {
+    const normalizedMethod = normalizePaymentMethod(method);
+    setSelectedPaymentMethods(current => (
+      current.length === 1 && current[0] === normalizedMethod ? [] : [normalizedMethod]
+    ));
   };
 
   const handleBack = () => {
@@ -292,28 +253,28 @@ const BankingDetails: React.FC = () => {
 
   const exportToCSV = () => {
     if (data.length === 0) return;
-    
+
     const headers = [
-      'Date', 
-      'Invoice Number', 
-      'Customer Name', 
-      'Member ID', 
-      'Sale Person', 
-      'Service Name', 
+      'Date',
+      'Invoice Number',
+      'Customer Name',
+      'Member ID',
+      'Sale Person',
+      'Service Name',
       'Service Package',
       'Payment Method',
       'Payment Status',
       'Wallet',
-      'Invoice Total'
+      'Paid Amount (MMK)'
     ];
-    
+
     const processedRows: string[] = [];
-    
+
     data.forEach((record) => {
-      const walletValue = record.WalletTopUp ? 
-        (String(record.WalletTopUp).includes('*Point') || isWalletTopup(record) ? 'Topup' : record.WalletTopUp) : 
+      const walletValue = record.WalletTopUp ?
+        (String(record.WalletTopUp).includes('*Point') || isWalletTopup(record) ? 'Topup' : record.WalletTopUp) :
         '';
-      
+
       processedRows.push([
         record.Date,
         `"${record.InvoiceNumber}"`,
@@ -325,16 +286,16 @@ const BankingDetails: React.FC = () => {
         `"${record.PaymentMethod}"`,
         `"${record.PaymentStatus}"`,
         `"${walletValue}"`,
-        record.InvoiceNetTotal.toString()
+        record.PaymentAmount.toString()
       ].join(','));
     });
-    
+
     const csvString = headers.join(',') + '\n' + processedRows.join('\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    
+
     // Generate filename based on filter type and date
     let dateStr = '';
     if (filterType === 'month') {
@@ -344,18 +305,19 @@ const BankingDetails: React.FC = () => {
       const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
       dateStr = start === end ? start : `${start}_to_${end}`;
     }
-    
+
     link.setAttribute('download', `banking_details_${dateStr}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const exportSummaryToCSV = () => {
     if (summaryData.length === 0) return;
-    
-    const headers = ['Payment Method', 'Transaction Count', 'Total Amount'];
+
+    const headers = ['Payment Method', 'Transaction Count', 'Total Amount (MMK)'];
     const csvRows = [
       headers.join(','),
       ...summaryData.map(row => [
@@ -369,12 +331,12 @@ const BankingDetails: React.FC = () => {
         summaryData.reduce((total, method) => total + method.TotalAmount, 0)
       ].join(',')
     ];
-    
+
     const csvString = csvRows.join('\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    
+
     let dateStr = '';
     if (filterType === 'month') {
       dateStr = selectedDate ? format(selectedDate, 'yyyy-MM') : format(new Date(), 'yyyy-MM');
@@ -383,54 +345,55 @@ const BankingDetails: React.FC = () => {
       const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
       dateStr = start === end ? start : `${start}_to_${end}`;
     }
-    
+
     link.download = `banking_summary_${dateStr}.csv`;
     link.href = url;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   if (loading) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: 'calc(100vh - 60px)',
         width: '100%',
-        bgcolor: '#101924',
+        bgcolor: 'var(--surface)',
         gap: 2
       }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
-        <Typography sx={{ color: '#d1d5db', mt: 2 }}>Loading banking data...</Typography>
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
+        <Typography sx={{ color: 'var(--text-secondary)', mt: 2 }}>Loading banking data...</Typography>
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ 
-        display: 'flex', 
+      <Box sx={{
+        display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
+        justifyContent: 'center',
+        alignItems: 'center',
         minHeight: 'calc(100vh - 60px)',
         width: '100%',
-        bgcolor: '#101924',
+        bgcolor: 'var(--surface)',
         padding: 3,
         gap: 2
       }}>
-        <Typography variant="h6" sx={{ color: '#ef4444' }}>{error}</Typography>
-        <Button 
+        <Typography variant="h6" sx={{ color: 'var(--error)' }}>{error}</Typography>
+        <Button
           variant="contained"
           onClick={fetchBankingData}
-          sx={{ 
-            mt: 2, 
-            bgcolor: '#3b82f6',
+          sx={{
+            mt: 2,
+            bgcolor: 'var(--primary)',
             '&:hover': {
-              bgcolor: '#2563eb'
+              bgcolor: 'var(--primary-hover)'
             }
           }}
         >
@@ -441,11 +404,13 @@ const BankingDetails: React.FC = () => {
   }
 
   const grandTotal = summaryData.reduce((total, method) => total + method.TotalAmount, 0);
+  const detailedTotal = data.reduce((total, record) => total + (Number(record.PaymentAmount) || 0), 0);
+  const activePaymentFilter = selectedPaymentMethods.length === 1 ? selectedPaymentMethods[0] : null;
 
   return (
-    <Box sx={{ 
-      p: { xs: 1, sm: 2 }, 
-      bgcolor: '#101924',
+    <Box sx={{
+      p: { xs: 1, sm: 2 },
+      bgcolor: 'var(--surface)',
       minHeight: 'calc(100vh - 60px)',
       width: '100%',
       maxWidth: '100%',
@@ -454,15 +419,15 @@ const BankingDetails: React.FC = () => {
       flexDirection: 'column'
     }}>
       {/* Header with back button and title */}
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
         mb: 2
       }}>
         <IconButton
           onClick={handleBack}
           sx={{
-            color: '#3b82f6',
+            color: 'var(--primary)',
             mr: 2,
             p: 1,
             '&:hover': {
@@ -472,11 +437,14 @@ const BankingDetails: React.FC = () => {
         >
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h5" sx={{ color: '#f3f4f6' }}>Banking Details</Typography>
+        <Box>
+          <Typography variant="h5" sx={{ color: 'var(--text-primary)' }}>Payment Report</Typography>
+          <Typography variant="body2" sx={{ mt: 0.2, color: 'var(--text-secondary)' }}>Realtime payments received, grouped by payment method</Typography>
+        </Box>
       </Box>
 
       {/* Filters and controls */}
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
@@ -484,8 +452,8 @@ const BankingDetails: React.FC = () => {
         mb: 2
       }}>
         {/* Date filters */}
-        <Box sx={{ 
-          display: 'flex', 
+        <Box sx={{
+          display: 'flex',
           alignItems: 'center',
           gap: 1,
           flexGrow: 0
@@ -497,18 +465,18 @@ const BankingDetails: React.FC = () => {
             sx={{
               minWidth: 100,
               maxHeight: 40,
-              color: '#d1d5db',
-              bgcolor: '#1a2234',
-              '& .MuiSelect-icon': { color: '#d1d5db' },
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4a5568' },
-              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' }
+              color: 'var(--text-secondary)',
+              bgcolor: 'var(--surface)',
+              '& .MuiSelect-icon': { color: 'var(--text-secondary)' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--text-muted)' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
             }}
           >
-            <MenuItem value="day" sx={{ bgcolor: '#1a2234', color: '#d1d5db' }}>Daily</MenuItem>
-            <MenuItem value="month" sx={{ bgcolor: '#1a2234', color: '#d1d5db' }}>Monthly</MenuItem>
+            <MenuItem value="day" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)' }}>Daily</MenuItem>
+            <MenuItem value="month" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)' }}>Monthly</MenuItem>
           </Select>
-          
+
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             {filterType === 'day' ? (
               <>
@@ -523,24 +491,24 @@ const BankingDetails: React.FC = () => {
                       sx: {
                         maxHeight: 40,
                         minWidth: 140,
-                        bgcolor: '#1a2234',
+                        bgcolor: 'var(--surface)',
                         '& .MuiOutlinedInput-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                           '& fieldset': {
-                            borderColor: '#2d3748',
+                            borderColor: 'var(--border)',
                           },
                           '&:hover fieldset': {
-                            borderColor: '#4a5568',
+                            borderColor: 'var(--text-muted)',
                           },
                           '&.Mui-focused fieldset': {
-                            borderColor: '#3b82f6',
+                            borderColor: 'var(--primary)',
                           },
                         },
                         '& .MuiInputLabel-root': {
-                          color: '#9ca3af',
+                          color: 'var(--text-secondary)',
                         },
                         '& .MuiSvgIcon-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                         },
                       },
                     }
@@ -558,30 +526,30 @@ const BankingDetails: React.FC = () => {
                       sx: {
                         maxHeight: 40,
                         minWidth: 140,
-                        bgcolor: '#1a2234',
+                        bgcolor: 'var(--surface)',
                         '& .MuiOutlinedInput-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                           '& fieldset': {
-                            borderColor: '#2d3748',
+                            borderColor: 'var(--border)',
                           },
                           '&:hover fieldset': {
-                            borderColor: '#4a5568',
+                            borderColor: 'var(--text-muted)',
                           },
                           '&.Mui-focused fieldset': {
-                            borderColor: '#3b82f6',
+                            borderColor: 'var(--primary)',
                           },
                         },
                         '& .MuiInputLabel-root': {
-                          color: '#9ca3af',
+                          color: 'var(--text-secondary)',
                         },
                         '& .MuiSvgIcon-root': {
-                          color: '#d1d5db',
+                          color: 'var(--text-secondary)',
                         },
                       },
                     }
                   }}
                 />
-                
+
                 {/* Quick date range selection buttons */}
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                   <Button
@@ -593,12 +561,12 @@ const BankingDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -614,12 +582,12 @@ const BankingDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -635,12 +603,12 @@ const BankingDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -656,12 +624,12 @@ const BankingDetails: React.FC = () => {
                       minWidth: 'auto',
                       px: 1,
                       py: 0.5,
-                      borderColor: '#2d3748',
-                      color: '#9ca3af',
-                      bgcolor: '#1a2234',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-secondary)',
+                      bgcolor: 'var(--surface)',
                       '&:hover': {
-                        borderColor: '#3b82f6',
-                        color: '#3b82f6',
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
                         bgcolor: 'rgba(59, 130, 246, 0.08)'
                       }
                     }}
@@ -680,24 +648,24 @@ const BankingDetails: React.FC = () => {
                     size: 'small',
                     sx: {
                       maxHeight: 40,
-                      bgcolor: '#1a2234',
+                      bgcolor: 'var(--surface)',
                       '& .MuiOutlinedInput-root': {
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                         '& fieldset': {
-                          borderColor: '#2d3748',
+                          borderColor: 'var(--border)',
                         },
                         '&:hover fieldset': {
-                          borderColor: '#4a5568',
+                          borderColor: 'var(--text-muted)',
                         },
                         '&.Mui-focused fieldset': {
-                          borderColor: '#3b82f6',
+                          borderColor: 'var(--primary)',
                         },
                       },
                       '& .MuiInputLabel-root': {
-                        color: '#9ca3af',
+                        color: 'var(--text-secondary)',
                       },
                       '& .MuiSvgIcon-root': {
-                        color: '#d1d5db',
+                        color: 'var(--text-secondary)',
                       },
                     },
                   }
@@ -706,10 +674,10 @@ const BankingDetails: React.FC = () => {
             )}
           </LocalizationProvider>
         </Box>
-        
+
         {/* Right side controls */}
-        <Box sx={{ 
-          display: 'flex', 
+        <Box sx={{
+          display: 'flex',
           alignItems: 'center',
           gap: 1,
           flexWrap: 'nowrap'
@@ -723,78 +691,78 @@ const BankingDetails: React.FC = () => {
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon sx={{ color: '#9ca3af' }} />
+                  <SearchIcon sx={{ color: 'var(--text-secondary)' }} />
                 </InputAdornment>
               ),
             }}
             sx={{
               maxWidth: 200,
-              bgcolor: '#1a2234',
+              bgcolor: 'var(--surface)',
               '& .MuiOutlinedInput-root': {
-                color: '#d1d5db',
+                color: 'var(--text-secondary)',
                 '& fieldset': {
-                  borderColor: '#2d3748',
+                  borderColor: 'var(--border)',
                 },
                 '&:hover fieldset': {
-                  borderColor: '#4a5568',
+                  borderColor: 'var(--text-muted)',
                 },
                 '&.Mui-focused fieldset': {
-                  borderColor: '#3b82f6',
+                  borderColor: 'var(--primary)',
                 },
               },
               '& .MuiInputLabel-root': {
-                color: '#9ca3af',
+                color: 'var(--text-secondary)',
               }
             }}
           />
-          
+
           {/* Wallet Topup Filter */}
           <ButtonGroup size="small" variant="outlined">
-            <Button 
+            <Button
               onClick={() => setWalletTopupFilter('all')}
               sx={{
                 fontSize: '0.75rem',
                 px: 1,
-                borderColor: '#2d3748',
-                color: walletTopupFilter === 'all' ? '#3b82f6' : '#9ca3af',
-                bgcolor: walletTopupFilter === 'all' ? 'rgba(59, 130, 246, 0.1)' : '#1a2234',
+                borderColor: 'var(--border)',
+                color: walletTopupFilter === 'all' ? '#3b82f6' : 'var(--text-secondary)',
+                bgcolor: walletTopupFilter === 'all' ? 'rgba(59, 130, 246, 0.1)' : 'var(--surface)',
                 '&:hover': {
-                  borderColor: '#3b82f6',
-                  color: '#3b82f6',
+                  borderColor: 'var(--primary)',
+                  color: 'var(--primary)',
                   bgcolor: 'rgba(59, 130, 246, 0.08)'
                 }
               }}
             >
               All
             </Button>
-            <Button 
+            <Button
               onClick={() => setWalletTopupFilter('hide')}
               sx={{
                 fontSize: '0.75rem',
                 px: 1,
-                borderColor: '#2d3748',
-                color: walletTopupFilter === 'hide' ? '#3b82f6' : '#9ca3af',
-                bgcolor: walletTopupFilter === 'hide' ? 'rgba(59, 130, 246, 0.1)' : '#1a2234',
+                borderColor: 'var(--border)',
+                color: walletTopupFilter === 'hide' ? '#3b82f6' : 'var(--text-secondary)',
+                bgcolor: walletTopupFilter === 'hide' ? 'rgba(59, 130, 246, 0.1)' : 'var(--surface)',
                 '&:hover': {
-                  borderColor: '#3b82f6',
-                  color: '#3b82f6',
+                  borderColor: 'var(--primary)',
+                  color: 'var(--primary)',
                   bgcolor: 'rgba(59, 130, 246, 0.08)'
                 }
               }}
             >
               Hide Topup
             </Button>
-            <Button 
+            <Button
               onClick={() => setWalletTopupFilter('only')}
               sx={{
                 fontSize: '0.75rem',
                 px: 1,
-                borderColor: '#2d3748',
-                color: walletTopupFilter === 'only' ? '#3b82f6' : '#9ca3af',
-                bgcolor: walletTopupFilter === 'only' ? 'rgba(59, 130, 246, 0.1)' : '#1a2234',
+                borderColor: 'var(--border)',
+                color: walletTopupFilter === 'only' ? '#3b82f6' : 'var(--text-secondary)',
+                bgcolor: walletTopupFilter === 'only' ? 'rgba(59, 130, 246, 0.1)' : 'var(--surface)',
                 '&:hover': {
-                  borderColor: '#3b82f6',
-                  color: '#3b82f6',
+                  borderColor: 'var(--primary)',
+                  color: 'var(--primary)',
                   bgcolor: 'rgba(59, 130, 246, 0.08)'
                 }
               }}
@@ -802,7 +770,7 @@ const BankingDetails: React.FC = () => {
               Only Topup
             </Button>
           </ButtonGroup>
-          
+
           <Button
             variant="outlined"
             size="small"
@@ -810,21 +778,25 @@ const BankingDetails: React.FC = () => {
             onClick={handlePaymentFilterClick}
             sx={{
               height: 40,
-              borderColor: '#2d3748',
-              color: '#d1d5db',
-              bgcolor: '#1a2234',
+              borderColor: 'var(--border)',
+              color: 'var(--text-secondary)',
+              bgcolor: 'var(--surface)',
               whiteSpace: 'nowrap',
               minWidth: 0,
               px: 1,
               '&:hover': {
-                borderColor: '#4a5568',
+                borderColor: 'var(--text-muted)',
                 bgcolor: 'rgba(26, 34, 52, 0.7)'
               }
             }}
           >
-            Payment {selectedPaymentMethods.length > 0 && `(${selectedPaymentMethods.length})`}
+            {selectedPaymentMethods.length === 0
+              ? 'Payment: All'
+              : selectedPaymentMethods.length === 1
+                ? `Payment: ${selectedPaymentMethods[0]}`
+                : `Payment (${selectedPaymentMethods.length})`}
           </Button>
-          
+
           {/* Export Button */}
           <Tooltip title="Export to CSV">
             <Button
@@ -834,14 +806,14 @@ const BankingDetails: React.FC = () => {
               onClick={exportToCSV}
               sx={{
                 height: 40,
-                borderColor: '#2d3748',
-                color: '#d1d5db',
-                bgcolor: '#1a2234',
+                borderColor: 'var(--border)',
+                color: 'var(--text-secondary)',
+                bgcolor: 'var(--surface)',
                 whiteSpace: 'nowrap',
                 minWidth: 0,
                 px: 1,
                 '&:hover': {
-                  borderColor: '#4a5568',
+                  borderColor: 'var(--text-muted)',
                   bgcolor: 'rgba(26, 34, 52, 0.7)'
                 }
               }}
@@ -872,8 +844,8 @@ const BankingDetails: React.FC = () => {
               width: 250,
               maxHeight: 400,
               overflow: 'auto',
-              bgcolor: '#1a2234',
-              color: '#d1d5db',
+              bgcolor: 'var(--surface)',
+              color: 'var(--text-secondary)',
               borderRadius: '8px',
               zIndex: 1400
             }
@@ -890,62 +862,67 @@ const BankingDetails: React.FC = () => {
                     indeterminate={selectedPaymentMethods.length > 0 && !isAllSelected}
                     onChange={() => handlePaymentMethodChange('all')}
                     sx={{
-                      color: '#4a5568',
-                      '&.Mui-checked': { color: '#3b82f6' },
-                      '&.MuiCheckbox-indeterminate': { color: '#3b82f6' }
+                      color: 'var(--text-muted)',
+                      '&.Mui-checked': { color: 'var(--primary)' },
+                      '&.MuiCheckbox-indeterminate': { color: 'var(--primary)' }
                     }}
                   />
                 }
                 label="Select All"
-                sx={{ color: '#d1d5db' }}
+                sx={{ color: 'var(--text-secondary)' }}
               />
-              <Box sx={{ borderTop: '1px solid #2d3748', my: 1 }} />
+              <Box sx={{ borderTop: '1px solid var(--border)', my: 1 }} />
               {paymentMethods.map((method) => (
                 <FormControlLabel
                   key={method}
                   control={
                     <Checkbox
-                      checked={selectedPaymentMethods.includes(method)}
+                      checked={selectedPaymentMethods.length === 0 || selectedPaymentMethods.includes(method)}
                       onChange={() => handlePaymentMethodChange(method)}
                       sx={{
-                        color: '#4a5568',
-                        '&.Mui-checked': { color: '#3b82f6' }
+                        color: 'var(--text-muted)',
+                        '&.Mui-checked': { color: 'var(--primary)' }
                       }}
                     />
                   }
                   label={method}
-                  sx={{ color: '#d1d5db' }}
+                  sx={{ color: 'var(--text-secondary)' }}
                 />
               ))}
             </>
           ) : (
-            <Typography variant="body2" color="#9ca3af">No payment methods available</Typography>
+            <Typography variant="body2" color="var(--text-secondary)">No payment methods available</Typography>
           )}
         </FormGroup>
       </Popover>
 
       {/* Payment methods summary table */}
-      <Paper 
+      <Paper
         elevation={0}
-        sx={{ 
-          p: { xs: 2, sm: 3 }, 
+        sx={{
+          p: { xs: 2, sm: 3 },
           mb: 3,
-          bgcolor: '#1a2234',
+          bgcolor: 'var(--surface)',
           borderRadius: '8px',
-          border: '1px solid #2d3748',
+          border: '1px solid var(--border)',
           boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
         }}
       >
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
-            Payment Methods Summary
-          </Typography>
+          <Box>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>
+              Payment Methods Summary
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 0.35, color: 'var(--text-secondary)' }}>
+              Individual payment records · Click a method to filter the details below
+            </Typography>
+          </Box>
           {summaryData.length > 0 && (
             <Tooltip title="Export Summary to CSV">
-              <IconButton 
+              <IconButton
                 onClick={exportSummaryToCSV}
                 sx={{
-                  color: '#3b82f6',
+                  color: 'var(--primary)',
                   '&:hover': {
                     bgcolor: 'rgba(59, 130, 246, 0.08)'
                   }
@@ -956,39 +933,39 @@ const BankingDetails: React.FC = () => {
             </Tooltip>
           )}
         </Box>
-        
+
         {summaryData.length > 0 ? (
           <TableContainer>
             <Table size="medium">
               <TableHead>
                 <TableRow>
-                  <TableCell 
-                    sx={{ 
-                      bgcolor: '#121826', 
-                      color: '#d1d5db', 
+                  <TableCell
+                    sx={{
+                      bgcolor: 'var(--background)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }}
                   >
                     Payment Method
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      bgcolor: '#121826', 
-                      color: '#d1d5db', 
+                  <TableCell
+                    sx={{
+                      bgcolor: 'var(--background)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       textAlign: 'right'
                     }}
                   >
                     Transactions
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      bgcolor: '#121826', 
-                      color: '#d1d5db', 
+                  <TableCell
+                    sx={{
+                      bgcolor: 'var(--background)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       textAlign: 'right'
                     }}
                   >
@@ -998,70 +975,122 @@ const BankingDetails: React.FC = () => {
               </TableHead>
               <TableBody>
                 {summaryData.map((method) => (
-                  <TableRow 
+                  <TableRow
                     key={method.PaymentMethod}
-                    sx={{ 
-                      '&:hover': { 
-                        bgcolor: 'rgba(59, 130, 246, 0.05)' 
+                    hover
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Filter detailed transactions by ${method.PaymentMethod}`}
+                    aria-pressed={selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method.PaymentMethod}
+                    onClick={() => handleSummaryMethodClick(method.PaymentMethod)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        handleSummaryMethodClick(method.PaymentMethod);
+                      }
+                    }}
+                    sx={{
+                      bgcolor: selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method.PaymentMethod
+                        ? 'color-mix(in srgb, var(--primary) 10%, var(--surface))'
+                        : undefined,
+                      outline: 'none',
+                      '&:hover': {
+                        bgcolor: 'rgba(59, 130, 246, 0.05)'
+                      },
+                      '&:focus-visible': {
+                        outline: '3px solid color-mix(in srgb, var(--primary) 28%, transparent)',
+                        outlineOffset: -3
                       },
                       cursor: 'pointer'
                     }}
                   >
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
-                      {method.PaymentMethod}
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography component="span" sx={{ fontSize: 'inherit', fontWeight: 650 }}>{method.PaymentMethod}</Typography>
+                        {selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method.PaymentMethod && (
+                          <Chip size="small" label="Selected" sx={{ height: 22, fontSize: '0.65rem', bgcolor: 'var(--primary)', color: '#fff' }} />
+                        )}
+                      </Box>
                     </TableCell>
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748', textAlign: 'right' }}>
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
                       {method.TransactionCount.toLocaleString()}
                     </TableCell>
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748', textAlign: 'right' }}>
-                      RM {method.TotalAmount.toFixed(2)}
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
+                      {formatPaymentMmk(method.TotalAmount)}
                     </TableCell>
                   </TableRow>
                 ))}
-                <TableRow sx={{ bgcolor: '#121826' }}>
-                  <TableCell sx={{ color: '#f3f4f6', fontWeight: 600, borderBottom: 'none' }}>
+                <TableRow sx={{ bgcolor: 'var(--background)' }}>
+                  <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none' }}>
                     Grand Total
                   </TableCell>
-                  <TableCell sx={{ color: '#f3f4f6', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
+                  <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
                     {summaryData.reduce((count, method) => count + method.TransactionCount, 0).toLocaleString()}
                   </TableCell>
-                  <TableCell sx={{ color: '#f3f4f6', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
-                    RM {grandTotal.toFixed(2)}
+                  <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
+                    {formatPaymentMmk(grandTotal)}
                   </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           </TableContainer>
         ) : (
-          <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center', py: 3 }}>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', textAlign: 'center', py: 3 }}>
             No payment data available for the selected filters
           </Typography>
         )}
       </Paper>
 
       {/* Detailed transactions table */}
-      <Paper 
+      <Paper
         elevation={0}
-        sx={{ 
-          bgcolor: '#1a2234',
+        sx={{
+          bgcolor: 'var(--surface)',
           borderRadius: '8px',
-          border: '1px solid #2d3748',
+          border: '1px solid var(--border)',
           overflow: 'hidden'
         }}
       >
-        <Box sx={{ p: 2, borderBottom: '1px solid #2d3748' }}>
-          <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
-            Detailed Transactions ({data.length})
-          </Typography>
+        <Box sx={{ p: 2, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>
+              Detailed Transactions ({data.length})
+            </Typography>
+            {selectedPaymentMethods.length > 0 && (
+              <Chip
+                size="small"
+                label={activePaymentFilter ? `Payment: ${activePaymentFilter}` : `${selectedPaymentMethods.length} payment methods`}
+                onDelete={() => setSelectedPaymentMethods([])}
+                sx={{ bgcolor: 'var(--primary-soft)', color: 'var(--primary)' }}
+              />
+            )}
+          </Box>
+          <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+            <Typography sx={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Detailed total</Typography>
+            <Typography sx={{ mt: 0.2, fontWeight: 750, color: 'var(--text-primary)' }}>{formatPaymentMmk(detailedTotal)}</Typography>
+          </Box>
         </Box>
         <DataTable
           data={data}
           onCustomerClick={(customerName: string) => navigate(`/customers/${encodeURIComponent(customerName)}`)}
           onServiceClick={(serviceName: string) => navigate(`/services/${encodeURIComponent(serviceName)}`)}
+          columnAliases={{
+            Date: 'Payment Date',
+            InvoiceNumber: 'Invoice Number',
+            CustomerName: 'Customer Name',
+            MemberId: 'Member ID',
+            SalePerson: 'Sale Person',
+            ServiceName: 'Service Name',
+            ServicePackageName: 'Service Package',
+            PaymentMethod: 'Payment Method',
+            PaymentStatus: 'Payment Status',
+            WalletTopUp: 'Wallet',
+            PaymentAmount: 'Paid Amount',
+          }}
         />
       </Paper>
     </Box>
   );
 };
 
-export default BankingDetails; 
+export default BankingDetails;

@@ -74,9 +74,9 @@ const Appointments: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const dateStr = selectedDate ? selectedDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-      
+
       const query = `
         SELECT
           bookingid,
@@ -97,15 +97,15 @@ const Appointments: React.FC = () => {
         AND ClinicCode = '${currentClinic?.code}'
         ORDER BY FromTime DESC
       `;
-    
+
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, { query });
-      
+
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch appointments');
       }
-      
+
       setAppointments(response.data.data);
-      
+
     } catch (err: any) {
       console.error('Error fetching appointments:', err);
       setError(err.message || 'Failed to fetch appointments');
@@ -116,16 +116,16 @@ const Appointments: React.FC = () => {
 
   const applyFilters = () => {
     let filtered = [...appointments];
-    
+
     // Apply status filter
     if (statusFilter !== 'all') {
       filtered = filtered.filter(appointment => appointment.status === statusFilter);
     }
-    
+
     // Apply search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(appointment => 
+      filtered = filtered.filter(appointment =>
         appointment.MemberName?.toLowerCase().includes(query) ||
         appointment.ServiceName?.toLowerCase().includes(query) ||
         appointment.PractitionerName?.toLowerCase().includes(query) ||
@@ -134,7 +134,7 @@ const Appointments: React.FC = () => {
         appointment.member_note?.toLowerCase().includes(query)
       );
     }
-    
+
     setFilteredAppointments(filtered);
   };
 
@@ -186,18 +186,18 @@ const Appointments: React.FC = () => {
   const downloadCSV = () => {
     // Generate headers
     const headers = [
-      'Booking ID', 
-      'From Time', 
-      'To Time', 
-      'Service', 
-      'Member', 
-      'Practitioner', 
-      'Clinic', 
-      'Helper', 
-      'Status', 
+      'Booking ID',
+      'From Time',
+      'To Time',
+      'Service',
+      'Member',
+      'Practitioner',
+      'Clinic',
+      'Helper',
+      'Status',
       'Member Note'
     ];
-    
+
     // Generate rows
     const rows = filteredAppointments.map(appointment => [
       appointment.bookingid,
@@ -211,13 +211,13 @@ const Appointments: React.FC = () => {
       appointment.status,
       appointment.member_note
     ]);
-    
+
     // Create CSV content
     const csvContent = [
       headers.join(','),
       ...rows.map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
     ].join('\n');
-    
+
     // Create and download file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -236,23 +236,23 @@ const Appointments: React.FC = () => {
 
   if (loading && appointments.length === 0) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
         width: '100%',
-        bgcolor: '#101729'
+        bgcolor: 'var(--background)'
       }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       p: { xs: 2, sm: 3, md: 4 },
-      bgcolor: '#101729',
+      bgcolor: 'var(--background)',
       minHeight: '100vh',
       width: '100%',
       maxWidth: '100%',
@@ -262,22 +262,22 @@ const Appointments: React.FC = () => {
         <IconButton
           onClick={handleBack}
           sx={{
-            color: '#f3f4f6',
+            color: 'var(--text-primary)',
             mr: 2
           }}
         >
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h4" component="h1" sx={{ color: '#f3f4f6', fontWeight: 600 }}>
+        <Typography variant="h4" component="h1" sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>
           Appointments
         </Typography>
       </Box>
 
       {/* Filters */}
-      <Paper sx={{ 
-        p: 3, 
-        mb: 3, 
-        bgcolor: '#1a2234', 
+      <Paper sx={{
+        p: 3,
+        mb: 3,
+        bgcolor: 'var(--surface)',
         borderRadius: 2,
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
       }}>
@@ -291,19 +291,19 @@ const Appointments: React.FC = () => {
                 sx={{
                   width: '100%',
                   '& .MuiOutlinedInput-root': {
-                    color: '#f3f4f6',
+                    color: 'var(--text-primary)',
                     '& fieldset': {
-                      borderColor: '#384152'
+                      borderColor: 'var(--border-strong)'
                     },
                     '&:hover fieldset': {
-                      borderColor: '#4a536b'
+                      borderColor: 'var(--border-strong)'
                     },
                     '&.Mui-focused fieldset': {
-                      borderColor: '#3b82f6'
+                      borderColor: 'var(--primary)'
                     }
                   },
                   '& .MuiInputLabel-root': {
-                    color: '#9ca3af'
+                    color: 'var(--text-secondary)'
                   }
                 }}
               />
@@ -311,7 +311,7 @@ const Appointments: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={4}>
             <FormControl fullWidth>
-              <InputLabel id="status-filter-label" sx={{ color: '#9ca3af' }}>Status</InputLabel>
+              <InputLabel id="status-filter-label" sx={{ color: 'var(--text-secondary)' }}>Status</InputLabel>
               <Select
                 labelId="status-filter-label"
                 id="status-filter"
@@ -319,18 +319,18 @@ const Appointments: React.FC = () => {
                 onChange={handleStatusFilterChange}
                 label="Status"
                 sx={{
-                  color: '#f3f4f6',
+                  color: 'var(--text-primary)',
                   '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#384152'
+                    borderColor: 'var(--border-strong)'
                   },
                   '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#4a536b'
+                    borderColor: 'var(--border-strong)'
                   },
                   '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#3b82f6'
+                    borderColor: 'var(--primary)'
                   },
                   '& .MuiSelect-icon': {
-                    color: '#f3f4f6'
+                    color: 'var(--text-primary)'
                   }
                 }}
               >
@@ -353,19 +353,19 @@ const Appointments: React.FC = () => {
               variant="outlined"
               sx={{
                 '& .MuiOutlinedInput-root': {
-                  color: '#f3f4f6',
+                  color: 'var(--text-primary)',
                   '& fieldset': {
-                    borderColor: '#384152'
+                    borderColor: 'var(--border-strong)'
                   },
                   '&:hover fieldset': {
-                    borderColor: '#4a536b'
+                    borderColor: 'var(--border-strong)'
                   },
                   '&.Mui-focused fieldset': {
-                    borderColor: '#3b82f6'
+                    borderColor: 'var(--primary)'
                   }
                 },
                 '& .MuiInputLabel-root': {
-                  color: '#9ca3af'
+                  color: 'var(--text-secondary)'
                 }
               }}
             />
@@ -373,20 +373,20 @@ const Appointments: React.FC = () => {
         </Grid>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Typography sx={{ color: '#d1d5db', mr: 1 }}>
+            <Typography sx={{ color: 'var(--text-secondary)', mr: 1 }}>
               {filteredAppointments.length} results found
             </Typography>
-            <IconButton 
+            <IconButton
               onClick={handleRefresh}
               size="small"
-              sx={{ color: '#3b82f6' }}
+              sx={{ color: 'var(--primary)' }}
             >
               <RefreshIcon />
             </IconButton>
           </Box>
           <IconButton
             onClick={downloadCSV}
-            sx={{ color: '#3b82f6' }}
+            sx={{ color: 'var(--primary)' }}
             title="Download CSV"
           >
             <FileDownloadIcon />
@@ -402,9 +402,9 @@ const Appointments: React.FC = () => {
       )}
 
       {/* Data Table */}
-      <Paper sx={{ 
-        p: 0, 
-        bgcolor: '#1a2234', 
+      <Paper sx={{
+        p: 0,
+        bgcolor: 'var(--surface)',
         borderRadius: 2,
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
         overflow: 'hidden'
@@ -416,87 +416,87 @@ const Appointments: React.FC = () => {
             height: '8px',
           },
           '&::-webkit-scrollbar-track': {
-            backgroundColor: '#111923',
+            backgroundColor: 'var(--surface-secondary)',
           },
           '&::-webkit-scrollbar-thumb': {
-            backgroundColor: '#2d3748',
+            backgroundColor: 'var(--border)',
             borderRadius: '4px',
           },
           '&::-webkit-scrollbar-thumb:hover': {
-            backgroundColor: '#4a5568',
+            backgroundColor: 'var(--text-muted)',
           },
         }}>
           <Table stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '10%'
                 }}>
                   From
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '10%'
                 }}>
                   To
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '15%'
                 }}>
                   Member Name
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '15%'
                 }}>
                   Service
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '15%'
                 }}>
                   Practitioner
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '15%'
                 }}>
                   Helper
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '15%'
                 }}>
                   Member Note
                 </TableCell>
-                <TableCell sx={{ 
-                  bgcolor: '#111923', 
-                  color: '#f3f4f6', 
+                <TableCell sx={{
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
-                  borderBottom: '1px solid #2d3748',
+                  borderBottom: '1px solid var(--border)',
                   width: '10%',
                   textAlign: 'center'
                 }}>
@@ -507,13 +507,13 @@ const Appointments: React.FC = () => {
             <TableBody>
               {paginatedAppointments.length === 0 ? (
                 <TableRow>
-                  <TableCell 
-                    colSpan={8} 
-                    sx={{ 
-                      textAlign: 'center', 
-                      color: '#d1d5db', 
+                  <TableCell
+                    colSpan={8}
+                    sx={{
+                      textAlign: 'center',
+                      color: 'var(--text-secondary)',
                       py: 4,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }}
                   >
                     No appointments found for the selected filters
@@ -521,34 +521,34 @@ const Appointments: React.FC = () => {
                 </TableRow>
               ) : (
                 paginatedAppointments.map((appointment) => (
-                  <TableRow 
+                  <TableRow
                     key={appointment.bookingid}
                     sx={{
                       '&:hover': {
-                        bgcolor: '#242f3d'
+                        bgcolor: 'var(--surface-secondary)'
                       }
                     }}
                   >
-                    <TableCell 
-                      sx={{ 
-                        color: '#f3f4f6',
-                        borderBottom: '1px solid #2d3748'
+                    <TableCell
+                      sx={{
+                        color: 'var(--text-primary)',
+                        borderBottom: '1px solid var(--border)'
                       }}
                     >
                       {appointment.FromTime}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        color: '#f3f4f6',
-                        borderBottom: '1px solid #2d3748'
+                    <TableCell
+                      sx={{
+                        color: 'var(--text-primary)',
+                        borderBottom: '1px solid var(--border)'
                       }}
                     >
                       {appointment.ToTime}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        color: '#3b82f6',
-                        borderBottom: '1px solid #2d3748',
+                    <TableCell
+                      sx={{
+                        color: 'var(--primary)',
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
                         '&:hover': {
                           textDecoration: 'underline'
@@ -561,10 +561,10 @@ const Appointments: React.FC = () => {
                     >
                       {appointment.MemberName}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        color: '#3b82f6',
-                        borderBottom: '1px solid #2d3748',
+                    <TableCell
+                      sx={{
+                        color: 'var(--primary)',
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
                         '&:hover': {
                           textDecoration: 'underline'
@@ -574,10 +574,10 @@ const Appointments: React.FC = () => {
                     >
                       {appointment.ServiceName}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        color: '#3b82f6',
-                        borderBottom: '1px solid #2d3748',
+                    <TableCell
+                      sx={{
+                        color: 'var(--primary)',
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
                         '&:hover': {
                           textDecoration: 'underline'
@@ -587,34 +587,34 @@ const Appointments: React.FC = () => {
                     >
                       {appointment.PractitionerName}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        color: '#f3f4f6',
-                        borderBottom: '1px solid #2d3748'
+                    <TableCell
+                      sx={{
+                        color: 'var(--text-primary)',
+                        borderBottom: '1px solid var(--border)'
                       }}
                     >
                       {appointment.HelperName}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        color: '#d1d5db',
-                        borderBottom: '1px solid #2d3748'
+                    <TableCell
+                      sx={{
+                        color: 'var(--text-secondary)',
+                        borderBottom: '1px solid var(--border)'
                       }}
                     >
                       {appointment.member_note}
                     </TableCell>
-                    <TableCell 
-                      sx={{ 
-                        borderBottom: '1px solid #2d3748',
+                    <TableCell
+                      sx={{
+                        borderBottom: '1px solid var(--border)',
                         textAlign: 'center'
                       }}
                     >
-                      <Chip 
+                      <Chip
                         label={appointment.status || 'Unknown'}
                         size="small"
-                        sx={{ 
+                        sx={{
                           bgcolor: getStatusColor(appointment.status),
-                          color: '#fff',
+                          color: 'var(--text-primary)',
                           fontWeight: 500,
                           fontSize: '0.75rem'
                         }}
@@ -626,14 +626,14 @@ const Appointments: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
-        
+
         {/* Pagination */}
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'flex-end', 
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'flex-end',
           p: 2,
-          bgcolor: '#1a2234',
-          borderTop: '1px solid #2d3748'
+          bgcolor: 'var(--surface)',
+          borderTop: '1px solid var(--border)'
         }}>
           <Pagination
             count={Math.ceil(filteredAppointments.length / rowsPerPage)}
@@ -642,11 +642,11 @@ const Appointments: React.FC = () => {
             color="primary"
             sx={{
               '& .MuiPaginationItem-root': {
-                color: '#d1d5db'
+                color: 'var(--text-secondary)'
               },
               '& .MuiPaginationItem-page.Mui-selected': {
-                bgcolor: '#3b82f6',
-                color: '#fff'
+                bgcolor: 'var(--primary)',
+                color: 'var(--text-primary)'
               }
             }}
           />
@@ -656,4 +656,4 @@ const Appointments: React.FC = () => {
   );
 };
 
-export default Appointments; 
+export default Appointments;

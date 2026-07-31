@@ -1,45 +1,209 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Box, 
-  Typography, 
-  Paper, 
-  Grid, 
+import {
+  Box,
+  Typography,
+  Paper,
+  Grid,
   Select,
   MenuItem,
   FormControl,
   SelectChangeEvent,
   Alert,
   AlertTitle,
-  Button,
-  Avatar
+  Avatar,
+  Skeleton,
+  useTheme
 } from '@mui/material';
 import ReactApexChart from 'react-apexcharts';
 import { ApexOptions } from 'apexcharts';
-import axios from 'axios';
-import { format, startOfMonth, addDays, subMonths } from 'date-fns';
-import { motion } from 'framer-motion';
+import { Line } from 'react-chartjs-2';
+import {
+  CategoryScale,
+  Chart as ChartJS,
+  ChartOptions as ChartJsOptions,
+  Filler,
+  Legend as ChartLegend,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Tooltip as ChartTooltip
+} from 'chart.js';
+import { addDays, format, subMonths } from 'date-fns';
 import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
 import { useNavigate } from 'react-router-dom';
 
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ChartTooltip, ChartLegend, Filler);
+
 // Define period types
 type PeriodType = 'monthly' | 'weekly' | 'annual';
 
-// Define service data
-interface ServiceData {
-  name: string;
-  data: number[];
+interface AnimatedMetricProps {
+  value: number;
+  formatter: (value: number) => string;
 }
+
+interface MetricCardProps extends AnimatedMetricProps {
+  label: string;
+  context: string;
+  change: number;
+  icon: string;
+  accent: string;
+  accentSoft: string;
+  delay: number;
+}
+
+const usePrefersReducedMotion = () => {
+  const [reduceMotion, setReduceMotion] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ));
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handleChange = () => setReduceMotion(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  return reduceMotion;
+};
+
+const AnimatedMetric: React.FC<AnimatedMetricProps> = ({ value, formatter }) => {
+  const [displayValue, setDisplayValue] = useState(value);
+  const reduceMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setDisplayValue(value);
+      return;
+    }
+
+    const duration = 750;
+    let animationFrame = 0;
+    let startTime: number | null = null;
+
+    const tick = (timestamp: number) => {
+      if (startTime === null) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      setDisplayValue(value * easedProgress);
+      if (progress < 1) animationFrame = window.requestAnimationFrame(tick);
+    };
+
+    animationFrame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [reduceMotion, value]);
+
+  return <>{formatter(displayValue)}</>;
+};
+
+const ChangePill: React.FC<{ value: number; context: string }> = ({ value, context }) => {
+  const isPositive = value >= 0;
+
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
+      <Box
+        component="span"
+        sx={{
+          px: 0.9,
+          py: 0.35,
+          borderRadius: 999,
+          color: isPositive ? 'var(--success)' : 'var(--error)',
+          bgcolor: isPositive ? 'rgba(18, 166, 117, 0.10)' : 'rgba(229, 72, 77, 0.10)',
+          fontSize: '0.75rem',
+          lineHeight: 1.4,
+          fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums'
+        }}
+      >
+        {isPositive ? '↗' : '↘'} {Math.abs(value).toFixed(1)}%
+      </Box>
+      <Typography component="span" variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+        {context}
+      </Typography>
+    </Box>
+  );
+};
+
+const MetricCard: React.FC<MetricCardProps> = ({
+  label,
+  value,
+  formatter,
+  context,
+  change,
+  icon,
+  accent,
+  accentSoft,
+  delay
+}) => {
+  return (
+    <Box className="dashboard-metric-card" sx={{ height: '100%', animationDelay: `${delay}s` }}>
+      <Paper
+        sx={{
+          p: 2.25,
+          height: '100%',
+          bgcolor: 'var(--surface)',
+          borderRadius: 2.5,
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-sm)',
+          overflow: 'hidden',
+          position: 'relative'
+        }}
+      >
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="body2" sx={{ color: 'var(--text-secondary)', fontWeight: 600, mb: 1.15 }}>
+              {label}
+            </Typography>
+            <Typography
+              sx={{
+                color: 'var(--text-primary)',
+                fontSize: { xs: '1.75rem', xl: '2rem' },
+                lineHeight: 1.1,
+                fontWeight: 750,
+                letterSpacing: '-0.035em',
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <AnimatedMetric value={value} formatter={formatter} />
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              width: 40,
+              height: 40,
+              borderRadius: 2,
+              bgcolor: accentSoft,
+              color: accent,
+              display: 'grid',
+              placeItems: 'center',
+              flexShrink: 0
+            }}
+          >
+            <Box component="span" className={icon} sx={{ fontSize: '1rem' }} />
+          </Box>
+        </Box>
+        <Box sx={{ mt: 1.6 }}>
+          <ChangePill value={change} context={context} />
+        </Box>
+      </Paper>
+    </Box>
+  );
+};
 
 // Dashboard component
 const Dashboard: React.FC = () => {
   const { currentClinic } = useClinic();
   const navigate = useNavigate();
+  const theme = useTheme();
+  const reduceMotion = usePrefersReducedMotion();
   // State for period selection and UI
   const [period, setPeriod] = useState<PeriodType>('monthly');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
   // State for statistics
   const [totalIncome, setTotalIncome] = useState<number>(0);
   const [incomeChange, setIncomeChange] = useState<number>(0);
@@ -49,11 +213,7 @@ const Dashboard: React.FC = () => {
   const [appointmentChange, setAppointmentChange] = useState<number>(0);
   const [serviceCount, setServiceCount] = useState<number>(0);
   const [serviceChange, setServiceChange] = useState<number>(0);
-  
-  // State for chart data
-  const [dateLabels, setDateLabels] = useState<string[]>([]);
-  const [servicesData, setServicesData] = useState<ServiceData[]>([]);
-  
+
   // State for payment methods chart
   const [paymentMethods, setPaymentMethods] = useState<Array<{
     method: string;
@@ -61,7 +221,7 @@ const Dashboard: React.FC = () => {
     percentage: number;
   }>>([]);
   const [loadingPaymentMethods, setLoadingPaymentMethods] = useState<boolean>(true);
-  
+
   // State for top services table
   const [topServices, setTopServices] = useState<Array<{
     serviceName: string;
@@ -70,8 +230,13 @@ const Dashboard: React.FC = () => {
     bookingChange: number;
     customerChange: number;
   }>>([]);
+  const [topServiceTrend, setTopServiceTrend] = useState<Array<{
+    serviceName: string;
+    periodKey: string;
+    bookingCount: number;
+  }>>([]);
   const [loadingTopServices, setLoadingTopServices] = useState<boolean>(true);
-  
+
   // State for top therapists
   const [topTherapists, setTopTherapists] = useState<Array<{
     name: string;
@@ -80,10 +245,10 @@ const Dashboard: React.FC = () => {
     percentage: number;
   }>>([]);
   const [loadingTherapists, setLoadingTherapists] = useState<boolean>(true);
-  
+
   // Flag to track if we're using fallback data
   const [usingFallbackData, setUsingFallbackData] = useState<boolean>(false);
-  
+
   // Handle period change
   const handlePeriodChange = (event: SelectChangeEvent<string>) => {
     setPeriod(event.target.value as PeriodType);
@@ -93,43 +258,9 @@ const Dashboard: React.FC = () => {
   const formatNumber = (value: number): string => {
     return value.toLocaleString('en-US');
   };
-  
-  // Define fallback data for when no real data is available
-  const FALLBACK_DATA = {
-    servicesData: [
-      {
-        name: 'Massage',
-        data: [18500, 22000, 19000, 25000, 28000, 24000, 32000, 35000, 30000, 38000, 42000, 40000]
-      },
-      {
-        name: 'Facial',
-        data: [12000, 15000, 14000, 17000, 18000, 16000, 19000, 21000, 18000, 23000, 26000, 24000]
-      },
-      {
-        name: 'Body Treatment',
-        data: [8000, 10000, 9500, 11000, 12000, 11500, 14000, 15000, 13000, 16000, 18000, 17000]
-      }
-    ],
-    dateLabels: [
-      'Jan 01', 'Jan 04', 'Jan 07', 'Jan 10', 'Jan 13', 'Jan 16', 
-      'Jan 19', 'Jan 22', 'Jan 25', 'Jan 28', 'Jan 31', 'Feb 03'
-    ],
-    stats: {
-      totalIncome: 765000,
-      incomeChange: 12.5,
-      customerCount: 450,
-      customerChange: 8.3,
-      appointmentRate: 73.4,
-      appointmentChange: 4.2,
-      serviceCount: 320,
-      serviceChange: 6.7
-    }
-  };
-  
+
   // Show no data state instead of fallback
   const showNoDataState = () => {
-    setDateLabels([]);
-    setServicesData([]);
     setTotalIncome(0);
     setIncomeChange(0);
     setCustomerCount(0);
@@ -155,49 +286,11 @@ const Dashboard: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // Simplified query to just check if we have any data
-        const query = `
-          -- Simple query to check if we have any data
-          SELECT 
-            ServiceName,
-            CustomerName,
-            FORMAT_DATETIME('%Y-%m-%d', OrderCreatedDate) AS Date,
-            CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
-            PaymentMethod
-          FROM \`great_time.MainPaymentView\`
-          WHERE PaymentMethod != 'PASS'
-            AND PaymentStatus = 'PAID'
-            AND CAST(NetTotal AS FLOAT64) != 0
-            AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-          LIMIT 10
-        `;
-
-        // API endpoint to execute the query
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch data (Status: ${response.status})`);
-        }
-
-        const responseData = await response.json();
-        
-        // Check if we have data in the table
-        if (!responseData.success || !responseData.data || responseData.data.length === 0) {
-          showNoDataState(); // Show no data state
-          return;
-        }
-        
-        // Now that we know we have data, run the full query
-        // Define time constraints based on the selected period
+        // Define time constraints based on the selected period. Query the actual
+        // dashboard dataset directly instead of issuing a redundant probe request.
         let timeConstraint = '';
         let prevTimeConstraint = '';
-        
+
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
           const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
@@ -211,92 +304,59 @@ const Dashboard: React.FC = () => {
           timeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear}`;
           prevTimeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear - 1}`;
         }
-        
+
         const fullQuery = `
-          WITH PaymentData AS (
-            SELECT 
+          WITH PaymentRows AS (
+            SELECT
               OrderCreatedDate,
-              ServiceName,
-              CustomerName,
-              InvoiceNumber,
-              CAST(NetTotal AS FLOAT64) as Revenue
+              OrderId,
+              CAST(NetTotal AS FLOAT64) as InvoiceRevenue,
+              COALESCE(
+                NULLIF(TRIM(InvoiceNumber), ''),
+                CONCAT('ORDER:', CAST(OrderId AS STRING))
+              ) as InvoiceKey
             FROM \`great_time.MainPaymentView\`
-            WHERE ServiceName IS NOT NULL
-              AND PaymentMethod != 'PASS'
+            WHERE PaymentMethod != 'PASS'
               AND PaymentStatus = 'PAID'
               AND CAST(NetTotal AS FLOAT64) > 0
               AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+              AND ((${timeConstraint}) OR (${prevTimeConstraint}))
           ),
-          
-          -- Find top 3 services by revenue
-          TopServices AS (
-            SELECT 
-              ServiceName,
-              SUM(Revenue) as TotalRevenue,
-              COUNT(*) as ServiceCount
-            FROM PaymentData
-            GROUP BY ServiceName
-            ORDER BY TotalRevenue DESC
-            LIMIT 3
+
+          -- Keep invoice-level revenue once. MainPaymentView can contain repeated
+          -- item/payment rows and many clinics do not populate ServiceName.
+          InvoiceData AS (
+            SELECT
+              InvoiceKey,
+              MIN(OrderCreatedDate) as OrderCreatedDate,
+              MAX(InvoiceRevenue) as Revenue
+            FROM PaymentRows
+            GROUP BY InvoiceKey
           ),
-          
-          -- Get daily revenue for the current period
-          CurrentMonthData AS (
-            SELECT 
-              ServiceName,
-              FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) as Day,
-              SUM(Revenue) as DailyRevenue
-            FROM PaymentData
-            WHERE ${timeConstraint}
-              AND ServiceName IN (SELECT ServiceName FROM TopServices)
-            GROUP BY ServiceName, Day
-            ORDER BY Day
-          ),
-          
+
           -- Current period stats
           CurrentStats AS (
             SELECT
-              COUNT(DISTINCT CustomerName) as total_customers,
-              COUNT(DISTINCT InvoiceNumber) as total_invoices,
-              COUNT(DISTINCT ServiceName) as total_services,
-              SUM(Revenue) as total_revenue
-            FROM PaymentData
+              IFNULL(SUM(Revenue), 0) as total_revenue
+            FROM InvoiceData
             WHERE ${timeConstraint}
           ),
-          
+
           -- Previous period stats for comparison
           PreviousStats AS (
             SELECT
-              COUNT(DISTINCT CustomerName) as prev_month_customers,
-              COUNT(DISTINCT InvoiceNumber) as prev_month_invoices,
-              COUNT(DISTINCT ServiceName) as prev_month_services,
-              SUM(Revenue) as prev_month_revenue
-            FROM PaymentData
+              IFNULL(SUM(Revenue), 0) as prev_month_revenue
+            FROM InvoiceData
             WHERE ${prevTimeConstraint}
           )
-          
-          -- Final result combining all data
-          SELECT 
-            ts.ServiceName,
-            ts.TotalRevenue,
-            ts.ServiceCount,
-            cd.Day,
-            cd.DailyRevenue,
-            cs.total_customers,
-            cs.total_invoices,
-            cs.total_services,
+
+          SELECT
             cs.total_revenue,
-            ps.prev_month_customers,
-            ps.prev_month_invoices,
-            ps.prev_month_services,
             ps.prev_month_revenue
-          FROM TopServices ts
-          LEFT JOIN CurrentMonthData cd ON ts.ServiceName = cd.ServiceName
-          CROSS JOIN CurrentStats cs
+          FROM CurrentStats cs
           CROSS JOIN PreviousStats ps
-          ORDER BY ts.TotalRevenue DESC, cd.Day
         `;
-        
+
         const fullResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
@@ -304,122 +364,48 @@ const Dashboard: React.FC = () => {
           },
           body: JSON.stringify({ query: fullQuery }),
         });
-        
+
         if (!fullResponse.ok) {
           throw new Error(`Failed to fetch data (Status: ${fullResponse.status})`);
         }
-        
+
         const fullResponseData = await fullResponse.json();
-        
+
         if (!fullResponseData.success) {
-          useFallbackData();
-          return;
+          throw new Error(fullResponseData.error || 'The dashboard query failed.');
         }
-        
+
         const data = fullResponseData.data || [];
-        
+
         if (data.length === 0) {
           showNoDataState(); // Show no data state instead of showing error
           return;
         }
-        
-        // Process the data for charts and statistics
-        // Extract unique dates for x-axis
-        // Safely parse and format dates without risking invalid Date objects
-        const uniqueDates = [...new Set(data
-          .filter((item: any) => item.Day)
-          .map((item: any) => {
-            try {
-              // Check if Day is already a formatted date string like "2023-04-15"
-              if (typeof item.Day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.Day)) {
-                const parts = item.Day.split('-');
-                // Create a date in a safe way
-                const date = new Date(
-                  parseInt(parts[0], 10), 
-                  parseInt(parts[1], 10) - 1, // Month is 0-indexed
-                  parseInt(parts[2], 10)
-                );
-                return format(date, 'MMM dd');
-              }
-              // Handle if it's a timestamp or other format
-              return format(new Date(item.Day), 'MMM dd');
-            } catch (e) {
-              // Use the raw date string as fallback
-              return String(item.Day).substring(0, 10);
-            }
-          })
-        )].sort();
-        
-        // Process data for each service
-        const serviceNames = [...new Set(data.map((item: any) => item.ServiceName))];
-        
-        if (serviceNames.length === 0) {
-          useFallbackData();
-          return;
-        }
 
-        const serviceDataSeries = serviceNames.map(serviceName => {
-          const serviceData = data.filter((item: any) => item.ServiceName === serviceName);
-          
-          // Create data points for each day
-          const dataPoints = uniqueDates.map(formattedDate => {
-            const dayData = serviceData.find((item: any) => {
-              if (!item.Day) return false;
-              
-              try {
-                // Try to match the date using the same formatting strategy
-                if (typeof item.Day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(item.Day)) {
-                  const parts = item.Day.split('-');
-                  const date = new Date(
-                    parseInt(parts[0], 10), 
-                    parseInt(parts[1], 10) - 1, 
-                    parseInt(parts[2], 10)
-                  );
-                  return format(date, 'MMM dd') === formattedDate;
-                }
-                return format(new Date(item.Day), 'MMM dd') === formattedDate;
-              } catch (e) {
-                return String(item.Day).substring(0, 10) === formattedDate;
-              }
-            });
-            
-            return dayData ? Number(dayData.DailyRevenue || 0) : 0;
-          });
-          
-          return {
-            name: serviceName as string,
-            data: dataPoints
-          };
-        }) as ServiceData[];
-        
-        // Calculate statistics from the data
-        // Use the first row for statistics since they are the same for all rows with CROSS JOIN
         const statsRow = data[0];
-        
         const totalIncomeValue = Number(statsRow.total_revenue) || 0;
         const prevMonthIncome = Number(statsRow.prev_month_revenue) || 0;
-        
+
         // Calculate percentage changes
         const calculatePercentageChange = (current: number, previous: number): number => {
           if (previous === 0) return current > 0 ? 100 : 0;
           return ((current - previous) / previous) * 100;
         };
-        
+
         const incomeChangePercentage = calculatePercentageChange(totalIncomeValue, prevMonthIncome);
-        
-        // Update state with the processed data for chart
-        setDateLabels(uniqueDates as string[]);
-        setServicesData(serviceDataSeries);
+
         setTotalIncome(totalIncomeValue);
         setIncomeChange(incomeChangePercentage);
-        
+
         // Fetch statistics from QueenDataView for cards
         await fetchStatsData();
-        
+
       } catch (err) {
-        useFallbackData(); // Use fallback data on error
+        setError(err instanceof Error ? err.message : 'Unable to load dashboard data.');
+        setUsingFallbackData(false);
       } finally {
         setLoading(false);
+        setLastUpdated(new Date());
       }
     };
 
@@ -429,7 +415,7 @@ const Dashboard: React.FC = () => {
         // Define time periods for current and previous periods
         let currentPeriodFilter = '';
         let previousPeriodFilter = '';
-        
+
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
           const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
@@ -443,7 +429,7 @@ const Dashboard: React.FC = () => {
           currentPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
           previousPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
         }
-        
+
         const statsQuery = `
           WITH CurrentPeriodStats AS (
             SELECT
@@ -452,6 +438,7 @@ const Dashboard: React.FC = () => {
               COUNT(DISTINCT ServiceName) as current_services
             FROM \`great_time.MainDataView\`
             WHERE ${currentPeriodFilter}
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
           ),
           PreviousPeriodStats AS (
             SELECT
@@ -460,6 +447,7 @@ const Dashboard: React.FC = () => {
               COUNT(DISTINCT ServiceName) as previous_services
             FROM \`great_time.MainDataView\`
             WHERE ${previousPeriodFilter}
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
           )
           SELECT
             cp.current_customers,
@@ -470,7 +458,7 @@ const Dashboard: React.FC = () => {
             pp.previous_services
           FROM CurrentPeriodStats cp, PreviousPeriodStats pp
         `;
-        
+
         const statsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
           headers: {
@@ -478,47 +466,47 @@ const Dashboard: React.FC = () => {
           },
           body: JSON.stringify({ query: statsQuery }),
         });
-        
+
         if (!statsResponse.ok) {
           throw new Error(`Failed to fetch stats data (Status: ${statsResponse.status})`);
         }
-        
+
         const statsResponseData = await statsResponse.json();
-        
+
         if (!statsResponseData.success || !statsResponseData.data || statsResponseData.data.length === 0) {
           return; // Continue with chart data, just don't update the stats
         }
-        
+
         const statsData = statsResponseData.data[0];
-        
+
         // Calculate percentage changes
         const calculatePercentageChange = (current: number, previous: number): number => {
           if (previous === 0) return current > 0 ? 100 : 0;
           return ((current - previous) / previous) * 100;
         };
-        
+
         const currentCustomers = Number(statsData.current_customers) || 0;
         const previousCustomers = Number(statsData.previous_customers) || 0;
         const customerChangePercentage = calculatePercentageChange(currentCustomers, previousCustomers);
-        
+
         const currentAppointments = Number(statsData.current_appointments) || 0;
         const previousAppointments = Number(statsData.previous_appointments) || 0;
-        
+
         // Calculate appointment rate (appointments per customer)
-        const appointmentRateValue = 
-          currentCustomers > 0 ? 
+        const appointmentRateValue =
+          currentCustomers > 0 ?
           (currentAppointments / currentCustomers) * 100 : 0;
-        
-        const prevAppointmentRate = 
-          previousCustomers > 0 ? 
+
+        const prevAppointmentRate =
+          previousCustomers > 0 ?
           (previousAppointments / previousCustomers) * 100 : 0;
-        
+
         const appointmentChangePercentage = calculatePercentageChange(appointmentRateValue, prevAppointmentRate);
-        
+
         const currentServices = Number(statsData.current_services) || 0;
         const previousServices = Number(statsData.previous_services) || 0;
         const serviceChangePercentage = calculatePercentageChange(currentServices, previousServices);
-        
+
         // Update state with stats data
         setCustomerCount(currentCustomers);
         setCustomerChange(customerChangePercentage);
@@ -526,15 +514,15 @@ const Dashboard: React.FC = () => {
         setAppointmentChange(appointmentChangePercentage);
         setServiceCount(currentServices);
         setServiceChange(serviceChangePercentage);
-        
+
         setUsingFallbackData(false); // Ensure we're not showing the fallback data notice
-        
+
       } catch (err) {
         // Don't use fallback data here, just log the error
         // The chart data will still be displayed
       }
     };
-    
+
     // Fetch top services data
     const fetchTopServices = async () => {
       setLoadingTopServices(true);
@@ -542,7 +530,7 @@ const Dashboard: React.FC = () => {
         // Define time constraints based on the selected period
         let timeConstraint = '';
         let prevTimeConstraint = '';
-        
+
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
           const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
@@ -556,48 +544,75 @@ const Dashboard: React.FC = () => {
           timeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
           prevTimeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
         }
-        
+
+        const trendDateFormat = period === 'annual' ? '%Y-%m' : '%Y-%m-%d';
+
         const servicesQuery = `
           WITH CurrentBookings AS (
             SELECT
-              ServiceName,
+              TRIM(ServiceName) AS ServiceName,
               COUNT(DISTINCT BookingID) AS BookingCount,
               COUNT(DISTINCT CustomerName) AS CustomerCount
             FROM \`great_time.MainDataView\`
             WHERE ${timeConstraint}
               AND ServiceName IS NOT NULL
+              AND TRIM(ServiceName) != ''
+              AND LOWER(TRIM(ServiceName)) NOT IN ('booking deposit', 'booking deposits', 'deposit')
               AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-            GROUP BY ServiceName
+            GROUP BY TRIM(ServiceName)
           ),
-          
+
+          TopCurrentServices AS (
+            SELECT *
+            FROM CurrentBookings
+            ORDER BY BookingCount DESC
+            LIMIT 5
+          ),
+
           PreviousBookings AS (
             SELECT
-              ServiceName,
+              TRIM(ServiceName) AS ServiceName,
               COUNT(DISTINCT BookingID) AS BookingCount,
               COUNT(DISTINCT CustomerName) AS CustomerCount
             FROM \`great_time.MainDataView\`
             WHERE ${prevTimeConstraint}
               AND ServiceName IS NOT NULL
+              AND TRIM(ServiceName) != ''
+              AND LOWER(TRIM(ServiceName)) NOT IN ('booking deposit', 'booking deposits', 'deposit')
               AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-            GROUP BY ServiceName
+            GROUP BY TRIM(ServiceName)
+          ),
+
+          TrendBookings AS (
+            SELECT
+              TRIM(ServiceName) AS ServiceName,
+              FORMAT_DATE('${trendDateFormat}', DATE(CheckInTime)) AS PeriodKey,
+              COUNT(DISTINCT BookingID) AS PeriodBookingCount
+            FROM \`great_time.MainDataView\`
+            WHERE ${timeConstraint}
+              AND TRIM(ServiceName) IN (SELECT ServiceName FROM TopCurrentServices)
+              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+            GROUP BY TRIM(ServiceName), PeriodKey
           )
-          
+
           SELECT
             cb.ServiceName as serviceName,
             cb.BookingCount as bookingCount,
             cb.CustomerCount as customerCount,
-            CASE 
+            CASE
               WHEN pb.BookingCount IS NULL OR pb.BookingCount = 0 THEN 100
               ELSE ROUND(((cb.BookingCount - pb.BookingCount) / pb.BookingCount) * 100, 1)
             END as bookingChange,
-            CASE 
+            CASE
               WHEN pb.CustomerCount IS NULL OR pb.CustomerCount = 0 THEN 100
               ELSE ROUND(((cb.CustomerCount - pb.CustomerCount) / pb.CustomerCount) * 100, 1)
-            END as customerChange
-          FROM CurrentBookings cb
+            END as customerChange,
+            tb.PeriodKey as periodKey,
+            tb.PeriodBookingCount as periodBookingCount
+          FROM TopCurrentServices cb
           LEFT JOIN PreviousBookings pb ON cb.ServiceName = pb.ServiceName
-          ORDER BY cb.BookingCount DESC
-          LIMIT 10
+          LEFT JOIN TrendBookings tb ON cb.ServiceName = tb.ServiceName
+          ORDER BY cb.BookingCount DESC, tb.PeriodKey
         `;
 
         // Execute the query
@@ -608,42 +623,63 @@ const Dashboard: React.FC = () => {
           },
           body: JSON.stringify({ query: servicesQuery }),
         });
-        
+
         if (!servicesResponse.ok) {
           throw new Error(`Failed to fetch top services data (Status: ${servicesResponse.status})`);
         }
-        
+
         const servicesResponseData = await servicesResponse.json();
-        
+
         if (!servicesResponseData.success || !servicesResponseData.data || servicesResponseData.data.length === 0) {
           setTopServices([]);
+          setTopServiceTrend([]);
           return;
         }
-        
-        // Format the top services data
-        const formattedTopServices = servicesResponseData.data.map((service: any) => ({
-          serviceName: service.serviceName,
-          bookingCount: Number(service.bookingCount) || 0,
-          customerCount: Number(service.customerCount) || 0,
-          bookingChange: Number(service.bookingChange) || 0,
-          customerChange: Number(service.customerChange) || 0
-        }));
-        
+
+        const serviceRows = servicesResponseData.data as Array<Record<string, unknown>>;
+        const serviceMap = new Map<string, (typeof topServices)[number]>();
+
+        serviceRows.forEach((service) => {
+          const serviceName = String(service.serviceName || '');
+          if (!serviceName || serviceMap.has(serviceName)) return;
+          serviceMap.set(serviceName, {
+            serviceName,
+            bookingCount: Number(service.bookingCount) || 0,
+            customerCount: Number(service.customerCount) || 0,
+            bookingChange: Number(service.bookingChange) || 0,
+            customerChange: Number(service.customerChange) || 0
+          });
+        });
+
+        const formattedTopServices = Array.from(serviceMap.values())
+          .sort((a, b) => b.bookingCount - a.bookingCount)
+          .slice(0, 5);
+
+        const formattedTrend = serviceRows
+          .filter((service) => service.periodKey)
+          .map((service) => ({
+            serviceName: String(service.serviceName),
+            periodKey: String(service.periodKey),
+            bookingCount: Number(service.periodBookingCount) || 0
+          }));
+
         setTopServices(formattedTopServices);
+        setTopServiceTrend(formattedTrend);
       } catch (err) {
         setTopServices([]);
+        setTopServiceTrend([]);
       } finally {
         setLoadingTopServices(false);
       }
     };
-    
+
     // Fetch payment methods data
     const fetchPaymentMethods = async () => {
       setLoadingPaymentMethods(true);
       try {
         // Define time constraints based on the selected period
         let timeConstraint = '';
-        
+
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
           timeConstraint = `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = '${currentMonth}'`;
@@ -653,18 +689,18 @@ const Dashboard: React.FC = () => {
           const currentYear = new Date().getFullYear();
           timeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear}`;
         }
-        
+
         const paymentMethodsQuery = `
           WITH PaymentMethodCounts AS (
             SELECT
-              CASE 
+              CASE
                 WHEN PaymentMethod = 'CASH' THEN 'Cash'
                 WHEN PaymentMethod = 'BANK_TRANSFER' THEN 'Bank Transfer'
                 WHEN PaymentMethod = 'CARD' THEN 'Card'
                 WHEN PaymentMethod = 'MIXED' THEN 'Mixed'
                 ELSE PaymentMethod
               END as Method,
-              COUNT(*) as Count
+              COUNT(DISTINCT InvoiceNumber) as Count
             FROM \`great_time.MainPaymentView\`
             WHERE ${timeConstraint}
               AND PaymentMethod IS NOT NULL
@@ -673,11 +709,11 @@ const Dashboard: React.FC = () => {
               AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
             GROUP BY PaymentMethod
           ),
-          
+
           TotalCount AS (
             SELECT SUM(Count) as Total FROM PaymentMethodCounts
           )
-          
+
           SELECT
             pmc.Method as method,
             pmc.Count as count,
@@ -694,25 +730,25 @@ const Dashboard: React.FC = () => {
           },
           body: JSON.stringify({ query: paymentMethodsQuery }),
         });
-        
+
         if (!methodsResponse.ok) {
           throw new Error(`Failed to fetch payment methods data (Status: ${methodsResponse.status})`);
         }
-        
+
         const methodsResponseData = await methodsResponse.json();
-        
+
         if (!methodsResponseData.success || !methodsResponseData.data || methodsResponseData.data.length === 0) {
           setPaymentMethods([]);
           return;
         }
-        
+
         // Format the payment methods data
         const formattedPaymentMethods = methodsResponseData.data.map((method: any) => ({
           method: method.method,
           count: Number(method.count) || 0,
           percentage: Number(method.percentage) || 0
         }));
-        
+
         setPaymentMethods(formattedPaymentMethods);
       } catch (err) {
         setPaymentMethods([]);
@@ -720,14 +756,14 @@ const Dashboard: React.FC = () => {
         setLoadingPaymentMethods(false);
       }
     };
-    
+
     // Fetch top therapists data
     const fetchTopTherapists = async () => {
       setLoadingTherapists(true);
       try {
         // Define time constraints based on the selected period
         let timeConstraint = '';
-        
+
         if (period === 'monthly') {
           const currentMonth = format(new Date(), 'yyyy-MM');
           timeConstraint = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
@@ -737,7 +773,7 @@ const Dashboard: React.FC = () => {
           const currentYear = new Date().getFullYear();
           timeConstraint = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
         }
-        
+
         const therapistsQuery = `
           WITH TherapistBookings AS (
             SELECT
@@ -753,11 +789,11 @@ const Dashboard: React.FC = () => {
             ORDER BY bookingCount DESC
             LIMIT 10
           ),
-          
+
           TotalBookings AS (
             SELECT SUM(bookingCount) as total FROM TherapistBookings
           )
-          
+
           SELECT
             tb.name,
             tb.image,
@@ -775,18 +811,18 @@ const Dashboard: React.FC = () => {
           },
           body: JSON.stringify({ query: therapistsQuery }),
         });
-        
+
         if (!therapistsResponse.ok) {
           throw new Error(`Failed to fetch therapists data (Status: ${therapistsResponse.status})`);
         }
-        
+
         const therapistsResponseData = await therapistsResponse.json();
-        
+
         if (!therapistsResponseData.success || !therapistsResponseData.data || therapistsResponseData.data.length === 0) {
           setTopTherapists([]);
           return;
         }
-        
+
         // Format the therapists data
         const formattedTherapists = therapistsResponseData.data.map((therapist: any) => ({
           name: therapist.name || 'Unknown',
@@ -794,7 +830,7 @@ const Dashboard: React.FC = () => {
           bookingCount: Number(therapist.bookingCount) || 0,
           percentage: Number(therapist.percentage) || 0
         }));
-        
+
         setTopTherapists(formattedTherapists);
       } catch (err) {
         setTopTherapists([]);
@@ -802,147 +838,65 @@ const Dashboard: React.FC = () => {
         setLoadingTherapists(false);
       }
     };
-    
+
     fetchChartData();
     fetchTopServices();
     fetchPaymentMethods();
     fetchTopTherapists();
   }, [period, currentClinic]);
-  
+
   // Format currency using the utility function
   const formatCurrency = (value: number): string => {
     return formatCurrencyUtil(value, currentClinic);
   };
-  
-  // Chart series data
-  const chartSeries = useMemo(() => servicesData, [servicesData]);
-  
-  // Chart options for ApexCharts
-  const chartOptions = useMemo((): ApexOptions => ({
-    chart: {
-      type: 'line',
-      height: 350,
-      fontFamily: 'SF Pro Display, sans-serif',
-      background: 'transparent',
-      toolbar: {
-        show: false
-      },
-      animations: {
-        enabled: true,
-        speed: 800,
-        animateGradually: {
-          enabled: true,
-          delay: 150
-        },
-        dynamicAnimation: {
-          enabled: true,
-          speed: 350
-        }
-      }
-    },
-    colors: ['#3B82F6', '#F59E0B', '#10B981'],
-    stroke: {
-      curve: 'smooth',
-      width: 3
-    },
-    grid: {
-      borderColor: 'rgba(71, 85, 105, 0.1)',
-      strokeDashArray: 3,
-      position: 'back',
-      xaxis: {
-        lines: {
-          show: true
-        }
-      },
-      yaxis: {
-        lines: {
-          show: true
-        }
-      },
-      padding: {
-        top: 10,
-        right: 0,
-        bottom: 0,
-        left: 10
-      }
-    },
-    dataLabels: {
-      enabled: false
-    },
-    xaxis: {
-      categories: dateLabels,
-      labels: {
-        style: {
-          colors: '#94a3b8',
-          fontFamily: 'SF Pro Display, sans-serif'
-        }
-      },
-      axisBorder: {
-        show: false
-      },
-      axisTicks: {
-        show: false
-      }
-    },
-    yaxis: {
-      labels: {
-        style: {
-          colors: '#94a3b8',
-          fontFamily: 'SF Pro Display, sans-serif'
-        },
-        formatter: (value) => `${value}`
-      }
-    },
-    legend: {
-      position: 'top',
-      horizontalAlign: 'right',
-      labels: {
-        colors: '#f3f4f6'
-      },
-      itemMargin: {
-        horizontal: 15
-      }
-    },
-    tooltip: {
-      theme: 'dark',
-      x: {
-        show: true
-      },
-      y: {
-        formatter: (value) => formatCurrency(value)
-      }
-    },
-    markers: {
-      size: 4,
-      strokeWidth: 0,
-      hover: {
-        size: 6
-      }
+
+  const periodDetails = useMemo(() => {
+    const now = new Date();
+
+    if (period === 'weekly') {
+      return {
+        label: 'Last 7 days',
+        comparison: 'vs previous 7 days'
+      };
     }
-  }), [dateLabels]);
-  
+
+    if (period === 'annual') {
+      return {
+        label: `${now.getFullYear()} year to date`,
+        comparison: `vs ${now.getFullYear() - 1}`
+      };
+    }
+
+    return {
+      label: format(now, 'MMMM yyyy'),
+      comparison: 'vs previous month'
+    };
+  }, [period]);
+
   // Payment Methods chart options
   const paymentMethodsChartOptions = useMemo((): ApexOptions => ({
     chart: {
       type: 'donut',
-      fontFamily: 'SF Pro Display, sans-serif',
+      fontFamily: 'Inter, SF Pro Display, sans-serif',
       background: 'transparent',
       animations: {
-        enabled: true,
-        speed: 500,
+        enabled: !reduceMotion,
+        speed: 650,
         animateGradually: {
           enabled: true,
-          delay: 150
+          delay: 80
         },
         dynamicAnimation: {
-          enabled: true,
-          speed: 350
+          enabled: false
         }
       }
     },
-    colors: ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899'],
+    colors: theme.palette.mode === 'dark'
+      ? ['#5CC3B2', '#F4B860', '#8FD5C9', '#C9A7EB', '#E79AAB']
+      : ['#074142', '#D89018', '#2F8F82', '#7E57A5', '#C95D78'],
     stroke: {
-      width: 0
+      width: 3,
+      colors: ['var(--surface)']
     },
     plotOptions: {
       pie: {
@@ -953,22 +907,22 @@ const Dashboard: React.FC = () => {
             name: {
               show: true,
               fontSize: '16px',
-              color: '#f3f4f6',
+              color: 'var(--text-primary)',
               offsetY: -10
             },
             value: {
               show: true,
               fontSize: '20px',
-              color: '#f3f4f6',
+              color: 'var(--text-primary)',
               fontWeight: 600,
               formatter: (val) => `${val}%`
             },
             total: {
               show: true,
-              label: 'Total',
-              fontSize: '16px',
-              color: '#94a3b8',
-              formatter: () => 'Payments'
+              label: 'Transactions',
+              fontSize: '12px',
+              color: 'var(--text-secondary)',
+              formatter: () => formatNumber(paymentMethods.reduce((sum, method) => sum + method.count, 0))
             }
           }
         }
@@ -982,16 +936,16 @@ const Dashboard: React.FC = () => {
       show: false
     },
     tooltip: {
-      theme: 'dark',
+      theme: theme.palette.mode,
       y: {
         formatter: (val) => `${val}%`
       }
     }
-  }), [paymentMethods]);
-  
+  }), [paymentMethods, theme.palette.mode, reduceMotion]);
+
   // Payment Methods chart series
-  const paymentMethodsChartSeries = useMemo(() => 
-    paymentMethods.map(method => method.percentage), 
+  const paymentMethodsChartSeries = useMemo(() =>
+    paymentMethods.map(method => method.percentage),
   [paymentMethods]);
 
   // Add these handlers for navigation
@@ -1003,549 +957,353 @@ const Dashboard: React.FC = () => {
     navigate(`/therapists/${encodeURIComponent(therapistName)}`);
   };
 
+  const serviceTrendKeys = useMemo(() => {
+    const now = new Date();
+
+    if (period === 'weekly') {
+      return Array.from({ length: 8 }, (_, index) => format(addDays(now, index - 7), 'yyyy-MM-dd'));
+    }
+
+    if (period === 'annual') {
+      return Array.from({ length: now.getMonth() + 1 }, (_, index) => (
+        `${now.getFullYear()}-${String(index + 1).padStart(2, '0')}`
+      ));
+    }
+
+    return Array.from({ length: now.getDate() }, (_, index) => (
+      format(new Date(now.getFullYear(), now.getMonth(), index + 1), 'yyyy-MM-dd')
+    ));
+  }, [period]);
+
+  const serviceTrendSeries = useMemo(() => topServices.map((service) => {
+    const points = new Map(
+      topServiceTrend
+        .filter((point) => point.serviceName === service.serviceName)
+        .map((point) => [point.periodKey, point.bookingCount])
+    );
+
+    return {
+      name: service.serviceName,
+      data: serviceTrendKeys.map((key) => points.get(key) || 0)
+    };
+  }), [serviceTrendKeys, topServiceTrend, topServices]);
+
+  const serviceTrendChartData = useMemo(() => {
+    const palette = theme.palette.mode === 'dark'
+      ? ['#5CC3B2', '#F4B860', '#8FD5C9', '#C9A7EB', '#E79AAB']
+      : ['#074142', '#D89018', '#2F8F82', '#7E57A5', '#C95D78'];
+
+    return {
+      labels: serviceTrendKeys,
+      datasets: serviceTrendSeries.map((series, index) => ({
+        label: series.name,
+        data: series.data,
+        borderColor: palette[index],
+        backgroundColor: palette[index],
+        borderWidth: index === 0 ? 3.5 : 2.75,
+        borderDash: index < 2 ? [] : index === 2 ? [7, 4] : index === 3 ? [3, 4] : [10, 4],
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBorderWidth: 2,
+        pointBorderColor: theme.palette.background.paper,
+        tension: 0.35,
+        fill: false
+      }))
+    };
+  }, [serviceTrendKeys, serviceTrendSeries, theme.palette.background.paper, theme.palette.mode]);
+
+  const serviceTrendChartOptions = useMemo((): ChartJsOptions<'line'> => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: reduceMotion ? false : {
+      duration: 950,
+      easing: 'easeOutQuart'
+    },
+    interaction: {
+      mode: 'index',
+      intersect: false
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        align: 'start',
+        labels: {
+          color: theme.palette.text.primary,
+          usePointStyle: true,
+          pointStyle: 'circle',
+          boxWidth: 8,
+          boxHeight: 8,
+          padding: 18,
+          font: { size: 12, weight: 600 }
+        }
+      },
+      tooltip: {
+        enabled: true,
+        mode: 'index',
+        intersect: false,
+        backgroundColor: theme.palette.mode === 'dark' ? '#172B2C' : '#FFFFFF',
+        titleColor: theme.palette.text.primary,
+        bodyColor: theme.palette.text.secondary,
+        borderColor: theme.palette.divider,
+        borderWidth: 1,
+        padding: 12,
+        displayColors: true,
+        callbacks: {
+          title: (items) => {
+            const key = String(items[0]?.label || '');
+            const parts = key.split('-').map(Number);
+            const date = new Date(parts[0], Math.max((parts[1] || 1) - 1, 0), parts[2] || 1);
+            return format(date, period === 'annual' ? 'MMMM yyyy' : 'EEE, dd MMM yyyy');
+          },
+          label: (context) => `${context.dataset.label}: ${Number(context.parsed.y).toLocaleString('en-US')} bookings`
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        border: { color: theme.palette.divider },
+        ticks: {
+          color: theme.palette.text.secondary,
+          autoSkip: true,
+          maxTicksLimit: period === 'annual' ? 12 : 9,
+          maxRotation: 0,
+          callback: (_value, index) => {
+            const key = serviceTrendKeys[index] || '';
+            const parts = key.split('-').map(Number);
+            const date = new Date(parts[0], Math.max((parts[1] || 1) - 1, 0), parts[2] || 1);
+            return format(date, period === 'annual' ? 'MMM' : 'MMM dd');
+          }
+        }
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: theme.palette.divider },
+        border: { display: false },
+        title: {
+          display: true,
+          text: 'Distinct bookings',
+          color: theme.palette.text.secondary,
+          font: { size: 11, weight: 600 }
+        },
+        ticks: {
+          color: theme.palette.text.secondary,
+          precision: 0
+        }
+      }
+    }
+  }), [period, reduceMotion, serviceTrendKeys, theme.palette.divider, theme.palette.mode, theme.palette.text.primary, theme.palette.text.secondary]);
+
+  const topTherapistMax = Math.max(...topTherapists.map(therapist => therapist.bookingCount), 1);
+
   return (
-    <Box sx={{ p: 3, backgroundColor: '#1a2035', minHeight: 'calc(100vh - 64px)', overflow: 'auto' }}>
-      <Typography variant="h4" gutterBottom color="white">
-        Dashboard
-      </Typography>
-      
-      {/* No Data Notice */}
-      {usingFallbackData && (
-        <Alert severity="info" sx={{ mb: 3, backgroundColor: '#2d364f', color: 'white' }}>
-          <AlertTitle>No Data Available</AlertTitle>
-          No data was found in your database for the selected period. Please check your clinic selection or date range.
-        </Alert>
-      )}
-      
+    <Box sx={{ p: { xs: 2, md: 3 }, backgroundColor: 'var(--background)', minHeight: 'calc(100vh - 64px)', overflow: 'auto' }}>
       <Box
         sx={{
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 2 
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: { xs: 'flex-start', sm: 'center' },
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: 2,
+          mb: 3
         }}
       >
-        <Typography variant="h4" component="h1" sx={{ color: 'white', fontWeight: 600 }}>
-          Analytic overview
-        </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Typography sx={{ mr: 2, color: '#94a3b8' }}>Show by:</Typography>
-          <FormControl sx={{ minWidth: 120 }}>
+        <Box>
+          <Typography variant="h4" component="h1" sx={{ color: 'var(--text-primary)', fontWeight: 750, letterSpacing: '-0.035em' }}>
+            Performance overview
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.6 }}>
+            {currentClinic?.name || 'Selected clinic'} · {periodDetails.label}
+            {lastUpdated ? ` · Updated ${format(lastUpdated, 'h:mm a')}` : ''}
+          </Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, width: { xs: '100%', sm: 'auto' } }}>
+          <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.75, color: 'var(--success)' }}>
+            <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: 'currentColor', boxShadow: '0 0 0 4px rgba(18, 166, 117, 0.10)' }} />
+            <Typography variant="caption" sx={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Live data</Typography>
+          </Box>
+          <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 150 }, flex: { xs: 1, sm: 'none' } }}>
             <Select
               value={period}
               onChange={handlePeriodChange}
-              displayEmpty
+              aria-label="Dashboard reporting period"
               sx={{
-                color: '#fff',
-                bgcolor: '#1a2235',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#2d3748'
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#3b82f6'
-                },
-                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#3b82f6'
-                },
-                '& .MuiSelect-icon': {
-                  color: '#94a3b8'
-                }
+                color: 'var(--text-primary)',
+                bgcolor: 'var(--surface)',
+                borderRadius: 2,
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
+                '& .MuiSelect-icon': { color: 'var(--text-secondary)' }
               }}
             >
-              <MenuItem value="monthly">Monthly</MenuItem>
-              <MenuItem value="weekly">Weekly</MenuItem>
-              <MenuItem value="annual">Annual</MenuItem>
+              <MenuItem value="weekly">Last 7 days</MenuItem>
+              <MenuItem value="monthly">This month</MenuItem>
+              <MenuItem value="annual">This year</MenuItem>
             </Select>
           </FormControl>
         </Box>
       </Box>
-      
-      {/* Main chart card */}
+
+      {usingFallbackData && (
+        <Alert severity="info" sx={{ mb: 3, bgcolor: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+          <AlertTitle>No activity for this period</AlertTitle>
+          No records were found for {periodDetails.label}. Try another period or confirm the selected clinic.
+        </Alert>
+      )}
+
+      <Grid container spacing={2} sx={{ mb: 2.5 }}>
+        {[
+          {
+            label: 'Total income',
+            value: totalIncome,
+            formatter: (value: number) => formatCurrency(value),
+            change: incomeChange,
+            icon: 'fas fa-coins',
+            accent: 'var(--primary)',
+            accentSoft: 'var(--primary-soft)'
+          },
+          {
+            label: 'Unique customers',
+            value: customerCount,
+            formatter: (value: number) => formatNumber(Math.round(value)),
+            change: customerChange,
+            icon: 'fas fa-users',
+            accent: 'var(--warning)',
+            accentSoft: 'rgba(245, 158, 11, 0.10)'
+          },
+          {
+            label: 'Appointments per customer',
+            value: appointmentRate / 100,
+            formatter: (value: number) => `${value.toFixed(2)}x`,
+            change: appointmentChange,
+            icon: 'fas fa-calendar-check',
+            accent: 'var(--success)',
+            accentSoft: 'rgba(18, 166, 117, 0.10)'
+          },
+          {
+            label: 'Active services',
+            value: serviceCount,
+            formatter: (value: number) => formatNumber(Math.round(value)),
+            change: serviceChange,
+            icon: 'fas fa-spa',
+            accent: 'var(--primary)',
+            accentSoft: 'var(--primary-soft)'
+          }
+        ].map((metric, index) => (
+          <Grid item xs={12} sm={6} lg={3} key={metric.label}>
+            {loading ? (
+              <Paper sx={{ p: 2.25, borderRadius: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <Skeleton width="42%" />
+                <Skeleton width="70%" height={46} />
+                <Skeleton width="55%" />
+              </Paper>
+            ) : (
+              <MetricCard {...metric} context={periodDetails.comparison} delay={index * 0.07} />
+            )}
+          </Grid>
+        ))}
+      </Grid>
+
       <Paper
         sx={{
-          p: { xs: 2, sm: 3 },
-          bgcolor: '#1a2235',
-          borderRadius: 2,
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          mb: 4
+          p: { xs: 2, sm: 2.5 },
+          bgcolor: 'var(--surface)',
+          borderRadius: 2.5,
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-sm)',
+          mb: 2.5,
+          overflow: 'hidden'
         }}
       >
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="subtitle1" sx={{ mb: 1, color: '#94a3b8' }}>
-            Total income
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'baseline' }}>
-            <Typography variant="h3" sx={{ color: '#f3f4f6', fontWeight: 700 }}>
-              {formatCurrency(totalIncome)}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, mb: 2.25 }}>
+          <Box>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+              Top 5 services
             </Typography>
-            <Typography
-              variant="body1"
-              sx={{
-                ml: 2,
-                color: incomeChange >= 0 ? '#10b981' : '#ef4444',
-                fontWeight: 500
-              }}
-            >
-              {incomeChange >= 0 ? '+' : ''}{incomeChange.toFixed(1)}%
+            <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+              Distinct booking trend for the five leading services · {periodDetails.label}
             </Typography>
           </Box>
+          <Box sx={{ display: { xs: 'none', sm: 'block' }, px: 1.1, py: 0.55, borderRadius: 1.5, bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 600 }}>
+            Hover for daily booking details
+          </Box>
         </Box>
-        
-        <Box sx={{ height: { xs: 300, sm: 350, md: 400 } }}>
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-              <Typography sx={{ color: '#94a3b8' }}>Loading Data</Typography>
-            </Box>
-          ) : error ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-              <Typography sx={{ color: '#ef4444' }}>{error}</Typography>
-            </Box>
-          ) : servicesData.length === 0 ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-              <Typography sx={{ color: '#94a3b8' }}>No data available for the selected period</Typography>
-            </Box>
-          ) : (
-            <ReactApexChart 
-              options={chartOptions}
-              series={chartSeries}
-              type="line"
-              height="100%"
-            />
-          )}
-        </Box>
+        {loadingTopServices ? (
+          <Box sx={{ height: { xs: 310, md: 370 }, display: 'grid', alignContent: 'end', gap: 2, px: 2, pb: 3 }}>
+            <Skeleton width="58%" />
+            <Skeleton variant="rounded" height={250} />
+          </Box>
+        ) : topServices.length === 0 ? (
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', py: 9, textAlign: 'center' }}>No service activity for this period</Typography>
+        ) : (
+          <Box
+            role="img"
+            aria-label={`Animated booking trend for the top five services in ${periodDetails.label}`}
+            sx={{ height: { xs: 330, md: 390 }, minWidth: 0 }}
+          >
+            <Line options={serviceTrendChartOptions} data={serviceTrendChartData} />
+          </Box>
+        )}
       </Paper>
-      
-      {/* Stats cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {/* Customers Card */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            sx={{
-              p: 3,
-              bgcolor: '#1a2235',
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
-                Customers
-              </Typography>
-              <Box 
-                sx={{ 
-                  width: 48, 
-                  height: 48, 
-                  borderRadius: '50%', 
-                  bgcolor: 'rgba(251, 191, 36, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Box 
-                  component="span" 
-                  className="fas fa-users"
-                  sx={{ 
-                    color: '#F59E0B', 
-                    fontSize: '1.25rem' 
-                  }}
-                ></Box>
-              </Box>
-            </Box>
-            
-            <Typography variant="h3" sx={{ mb: 1, color: '#f3f4f6', fontWeight: 700 }}>
-              {formatNumber(customerCount)}
-            </Typography>
-            
-            <Typography
-              variant="body2"
-              sx={{
-                color: customerChange >= 0 ? '#10b981' : '#ef4444',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              {customerChange >= 0 ? '+' : ''}{customerChange.toFixed(1)}% vs last month
-            </Typography>
-          </Paper>
-        </Grid>
-        
-        {/* Appointment Card */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            sx={{
-              p: 3,
-              bgcolor: '#1a2235',
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
-                Appointment
-              </Typography>
-              <Box 
-                sx={{ 
-                  width: 48, 
-                  height: 48, 
-                  borderRadius: '50%', 
-                  bgcolor: 'rgba(5, 150, 105, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Box 
-                  component="span" 
-                  className="fas fa-calendar-check"
-                  sx={{ 
-                    color: '#10B981', 
-                    fontSize: '1.25rem' 
-                  }}
-                ></Box>
-              </Box>
-            </Box>
-            
-            <Typography variant="h3" sx={{ mb: 1, color: '#f3f4f6', fontWeight: 700 }}>
-              {appointmentRate.toFixed(1)}%
-            </Typography>
-            
-            <Typography
-              variant="body2"
-              sx={{
-                color: appointmentChange >= 0 ? '#10b981' : '#ef4444',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              {appointmentChange >= 0 ? '+' : ''}{appointmentChange.toFixed(1)}% vs last month
-            </Typography>
-          </Paper>
-        </Grid>
-        
-        {/* Services Card */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            sx={{
-              p: 3,
-              bgcolor: '#1a2235',
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
-                Services
-              </Typography>
-              <Box 
-                sx={{ 
-                  width: 48, 
-                  height: 48, 
-                  borderRadius: '50%', 
-                  bgcolor: 'rgba(79, 70, 229, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Box 
-                  component="span" 
-                  className="fas fa-spa"
-                  sx={{ 
-                    color: '#818CF8', 
-                    fontSize: '1.25rem' 
-                  }}
-                ></Box>
-              </Box>
-            </Box>
-            
-            <Typography variant="h3" sx={{ mb: 1, color: '#f3f4f6', fontWeight: 700 }}>
-              {formatNumber(serviceCount)}
-            </Typography>
-            
-            <Typography
-              variant="body2"
-              sx={{
-                color: serviceChange >= 0 ? '#10b981' : '#ef4444',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              {serviceChange >= 0 ? '+' : ''}{serviceChange.toFixed(1)}% vs last month
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
-      
-      {/* Analytics Widgets - 3-column layout */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {/* Top Services */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            sx={{
-              p: { xs: 2, sm: 3 },
-              bgcolor: '#1a2235',
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              height: '100%',
-              overflow: 'hidden'
-            }}
-          >
-            <Box 
-              sx={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                mb: 3 
-              }}
-            >
-              <Typography variant="h5" sx={{ color: 'white', fontWeight: 600 }}>
-                Top 10 services
-              </Typography>
-            </Box>
-            
-            {loadingTopServices ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>Loading services data...</Typography>
-              </Box>
-            ) : topServices.length === 0 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>No service data available for the selected period</Typography>
-              </Box>
-            ) : (
-              <Box sx={{ overflow: 'auto', maxHeight: 400 }}>
-                <Box sx={{ 
-                  minWidth: 'auto', 
-                  '&::-webkit-scrollbar': {
-                    width: '8px',
-                    height: '8px',
-                  },
-                  '&::-webkit-scrollbar-track': {
-                    backgroundColor: '#111923',
-                  },
-                  '&::-webkit-scrollbar-thumb': {
-                    backgroundColor: '#2d3748',
-                    borderRadius: '4px',
-                  },
-                  '&::-webkit-scrollbar-thumb:hover': {
-                    backgroundColor: '#4a5568',
-                  },
-                }}>
-                  {/* Table Header */}
-                  <Box sx={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: '2fr 1fr',
-                    borderBottom: '1px solid #2d3748',
-                    py: 2,
-                    px: 3,
-                    bgcolor: '#111923',
-                  }}>
-                    <Typography sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.9rem' }}>
-                      SERVICE
-                    </Typography>
-                    <Typography sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.9rem', textAlign: 'right' }}>
-                      BOOKINGS
-                    </Typography>
-                  </Box>
-                  
-                  {/* Table Rows */}
-                  {topServices.slice(0, 8).map((service, index) => (
-                    <Box 
-                      key={service.serviceName}
-                      sx={{ 
-                        display: 'grid', 
-                        gridTemplateColumns: '2fr 1fr',
-                        borderBottom: '1px solid #2d3748',
-                        py: 2,
-                        px: 3,
-                        bgcolor: index % 2 === 0 ? '#121826' : '#111923',
-                        '&:hover': { bgcolor: '#242f3d' },
-                      }}
-                    >
-                      <Typography 
-                        sx={{ 
-                          color: '#3b82f6',
-                          fontWeight: 500, 
-                          fontSize: '0.9rem',
-                          cursor: 'pointer',
-                          '&:hover': { textDecoration: 'underline' }
-                        }}
-                        onClick={() => handleServiceClick(service.serviceName)}
-                      >
-                        {service.serviceName}
-                      </Typography>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                        <Typography sx={{ color: 'white', fontWeight: 500, fontSize: '0.9rem' }}>
-                          {formatNumber(service.bookingCount)}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ))}
-                </Box>
-              </Box>
-            )}
-          </Paper>
-        </Grid>
-          
-        {/* Payment Methods Chart */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            sx={{
-              p: { xs: 2, sm: 3 },
-              bgcolor: '#1a2235',
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              height: '100%',
-              overflow: 'hidden'
-            }}
-          >
-            <Box 
-              sx={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                mb: 3 
-              }}
-            >
-              <Typography variant="h5" sx={{ color: 'white', fontWeight: 600 }}>
-                Payment methods
-              </Typography>
-            </Box>
-            
+
+      <Grid container spacing={2.5} sx={{ mb: 3 }}>
+        <Grid item xs={12} lg={6}>
+          <Paper sx={{ p: 2.5, bgcolor: 'var(--surface)', borderRadius: 2.5, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', height: '100%' }}>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>Payment mix</Typography>
+            <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>Share of paid transactions · {periodDetails.label}</Typography>
             {loadingPaymentMethods ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>Loading payment methods data...</Typography>
-              </Box>
+              <Box sx={{ display: 'grid', placeItems: 'center', height: 300 }}><Skeleton variant="circular" width={190} height={190} /></Box>
             ) : paymentMethods.length === 0 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>No payment methods data available for the selected period</Typography>
-              </Box>
+              <Typography variant="body2" sx={{ color: 'var(--text-secondary)', py: 8, textAlign: 'center' }}>No payment activity</Typography>
             ) : (
-              <Box sx={{ height: 350, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <ReactApexChart 
-                  options={{
-                    ...paymentMethodsChartOptions,
-                    legend: { show: false } // Remove legend
-                  }}
-                  series={paymentMethodsChartSeries}
-                  type="donut"
-                  height="100%"
-                />
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '210px 1fr', lg: '210px 1fr' }, alignItems: 'center', gap: 1.5, mt: 1.5 }}>
+                <Box sx={{ height: 210 }}>
+                  <ReactApexChart options={paymentMethodsChartOptions} series={paymentMethodsChartSeries} type="donut" height="100%" />
+                </Box>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
+                  {paymentMethods.slice(0, 5).map((method, index) => {
+                    const colors = theme.palette.mode === 'dark'
+                      ? ['#5CC3B2', '#F4B860', '#8FD5C9', '#C9A7EB', '#E79AAB']
+                      : ['#074142', '#D89018', '#2F8F82', '#7E57A5', '#C95D78'];
+                    return (
+                      <Box key={method.method} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: colors[index], flexShrink: 0 }} />
+                        <Typography variant="caption" noWrap sx={{ color: 'var(--text-secondary)', flex: 1 }}>{method.method}</Typography>
+                        <Typography variant="caption" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>{method.percentage.toFixed(1)}%</Typography>
+                      </Box>
+                    );
+                  })}
+                </Box>
               </Box>
             )}
           </Paper>
         </Grid>
-          
-        {/* Top Therapists */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            sx={{
-              p: { xs: 2, sm: 3 },
-              bgcolor: '#1a2235',
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              height: '100%',
-              overflow: 'hidden'
-            }}
-          >
-            <Box 
-              sx={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                mb: 3 
-              }}
-            >
-              <Typography variant="h5" sx={{ color: 'white', fontWeight: 600 }}>
-                Top 10 therapists
-              </Typography>
-            </Box>
-            
-            {loadingTherapists ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>Loading therapists data...</Typography>
-              </Box>
-            ) : topTherapists.length === 0 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>No therapists data available for the selected period</Typography>
-              </Box>
-            ) : (
-              <Box sx={{ overflow: 'auto', maxHeight: 400 }}>
-                <Box sx={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: '40px 2fr 1fr',
-                  borderBottom: '1px solid #2d3748',
-                  py: 2,
-                  px: 3,
-                  bgcolor: '#111923',
-                }}>
-                  <Typography sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.9rem' }}>
-                    
-                  </Typography>
-                  <Typography sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.9rem' }}>
-                    THERAPIST
-                  </Typography>
-                  <Typography sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.9rem', textAlign: 'right' }}>
-                    TOTAL
-                  </Typography>
-                </Box>
-                
-                {topTherapists.slice(0, 8).map((therapist, index) => (
-                  <Box 
-                    key={index}
-                    sx={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: '40px 2fr 1fr',
-                      borderBottom: '1px solid #2d3748',
-                      py: 2,
-                      px: 3,
-                      bgcolor: index % 2 === 0 ? '#121826' : '#111923',
-                      '&:hover': { bgcolor: '#242f3d' },
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Avatar
-                        src={therapist.image || undefined}
-                        sx={{ 
-                          width: 28, 
-                          height: 28, 
-                          bgcolor: '#3B82F6',
-                          fontSize: '0.8rem'
-                        }}
-                      >
-                        {!therapist.image && therapist.name.charAt(0)}
-                      </Avatar>
-                    </Box>
-                    <Typography 
-                      sx={{ 
-                        color: '#3b82f6',
-                        fontWeight: 500, 
-                        fontSize: '0.9rem', 
-                        display: 'flex', 
-                        alignItems: 'center',
-                        cursor: 'pointer',
-                        '&:hover': { textDecoration: 'underline' }
-                      }}
-                      onClick={() => handleTherapistClick(therapist.name)}
-                    >
-                      {therapist.name}
-                    </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                      <Typography sx={{ color: 'white', fontWeight: 500, fontSize: '0.9rem' }}>
-                        {formatNumber(therapist.bookingCount)}
-                      </Typography>
+
+        <Grid item xs={12} lg={6}>
+          <Paper sx={{ p: 2.5, bgcolor: 'var(--surface)', borderRadius: 2.5, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', height: '100%' }}>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>Top therapists</Typography>
+            <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>Bookings · {periodDetails.label}</Typography>
+            <Box sx={{ mt: 2.2, display: 'grid', gap: 1.45 }}>
+              {loadingTherapists ? Array.from({ length: 6 }).map((_, index) => (
+                <Box key={index} sx={{ display: 'flex', gap: 1.2, alignItems: 'center' }}><Skeleton variant="circular" width={32} height={32} /><Box sx={{ flex: 1 }}><Skeleton width="65%" /><Skeleton variant="rounded" height={5} /></Box></Box>
+              )) : topTherapists.length === 0 ? (
+                <Typography variant="body2" sx={{ color: 'var(--text-secondary)', py: 4, textAlign: 'center' }}>No therapist activity</Typography>
+              ) : topTherapists.slice(0, 6).map((therapist, index) => (
+                <Box key={therapist.name} onClick={() => handleTherapistClick(therapist.name)} sx={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr) auto', gap: 1.1, alignItems: 'center', cursor: 'pointer' }}>
+                  <Avatar src={therapist.image || undefined} sx={{ width: 32, height: 32, bgcolor: 'var(--primary)', fontSize: '0.75rem' }}>{!therapist.image && therapist.name.charAt(0)}</Avatar>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" noWrap sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>{therapist.name}</Typography>
+                    <Box sx={{ mt: 0.55, height: 5, bgcolor: 'var(--surface-secondary)', borderRadius: 999, overflow: 'hidden' }}>
+                      <Box className="dashboard-ranking-bar" sx={{ width: `${(therapist.bookingCount / topTherapistMax) * 100}%`, height: '100%', borderRadius: 999, bgcolor: index === 0 ? 'var(--primary)' : 'var(--primary-muted)', animationDelay: `${index * 0.06}s` }} />
                     </Box>
                   </Box>
-                ))}
-              </Box>
-            )}
+                  <Typography variant="body2" sx={{ color: 'var(--text-primary)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{formatNumber(therapist.bookingCount)}</Typography>
+                </Box>
+              ))}
+            </Box>
           </Paper>
         </Grid>
       </Grid>
@@ -1553,4 +1311,4 @@ const Dashboard: React.FC = () => {
   );
 };
 
-export default Dashboard; 
+export default Dashboard;

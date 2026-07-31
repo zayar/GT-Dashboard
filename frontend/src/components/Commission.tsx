@@ -87,19 +87,19 @@ const Commission = () => {
   };
 
   return (
-    <Box sx={{ p: 3, bgcolor: '#111923', minHeight: '100vh' }}>
+    <Box sx={{ p: 3, bgcolor: 'var(--surface-secondary)', minHeight: '100vh' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="h5" sx={{ color: 'white' }}>Commission</Typography>
+          <Typography variant="h5" sx={{ color: 'var(--text-primary)' }}>Commission</Typography>
           <Select
             value={selectedMonth}
             onChange={handleMonthChange}
             sx={{
               minWidth: 200,
-              bgcolor: '#1a2234',
-              color: 'white',
-              '& .MuiSelect-icon': { color: 'white' },
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' }
+              bgcolor: 'var(--surface)',
+              color: 'var(--text-primary)',
+              '& .MuiSelect-icon': { color: 'var(--text-primary)' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' }
             }}
             size="small"
           >
@@ -111,7 +111,7 @@ const Commission = () => {
             <IconButton
               onClick={exportToCSV}
               sx={{
-                color: '#3b82f6',
+                color: 'var(--primary)',
                 '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.1)' }
               }}
             >
@@ -121,30 +121,30 @@ const Commission = () => {
         </Box>
       </Box>
 
-      <Paper sx={{ bgcolor: '#1a2234', color: 'white' }}>
+      <Paper sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>
         <TableContainer>
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }}>Check-in Time</TableCell>
-                <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }}>Practitioner Name</TableCell>
-                <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }}>Service Name</TableCell>
-                <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }} align="right">Total Service Count</TableCell>
-                <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }} align="right">Commission Price</TableCell>
-                <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }} align="right">Total Commission</TableCell>
+                <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Check-in Time</TableCell>
+                <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Practitioner Name</TableCell>
+                <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Service Name</TableCell>
+                <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }} align="right">Total Service Count</TableCell>
+                <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }} align="right">Commission Price</TableCell>
+                <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }} align="right">Total Commission</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {mockData.map((row, index) => (
-                <TableRow 
+                <TableRow
                   key={index}
-                  sx={{ '&:hover': { bgcolor: '#242f3d' } }}
+                  sx={{ '&:hover': { bgcolor: 'var(--surface-secondary)' } }}
                 >
-                  <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }}>{row.check_in_time}</TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#3b82f6',
-                      borderBottom: '1px solid #2d3748',
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>{row.check_in_time}</TableCell>
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
+                      borderBottom: '1px solid var(--border)',
                       cursor: 'pointer',
                       '&:hover': { textDecoration: 'underline' }
                     }}
@@ -152,10 +152,10 @@ const Commission = () => {
                   >
                     {row.practitioner_name}
                   </TableCell>
-                  <TableCell 
-                    sx={{ 
-                      color: '#3b82f6',
-                      borderBottom: '1px solid #2d3748',
+                  <TableCell
+                    sx={{
+                      color: 'var(--primary)',
+                      borderBottom: '1px solid var(--border)',
                       cursor: 'pointer',
                       '&:hover': { textDecoration: 'underline' }
                     }}
@@ -163,13 +163,13 @@ const Commission = () => {
                   >
                     {row.service_name}
                   </TableCell>
-                  <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }} align="right">
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }} align="right">
                     {row.total_service_count.toLocaleString()}
                   </TableCell>
-                  <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }} align="right">
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }} align="right">
                     {formatPrice(row.commission_price)}
                   </TableCell>
-                  <TableCell sx={{ color: 'white', borderBottom: '1px solid #2d3748' }} align="right">
+                  <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }} align="right">
                     {formatPrice(row.total_commission)}
                   </TableCell>
                 </TableRow>
@@ -182,4 +182,4 @@ const Commission = () => {
   );
 };
 
-export default Commission; 
+export default Commission;

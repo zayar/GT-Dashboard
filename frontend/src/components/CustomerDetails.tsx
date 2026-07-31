@@ -1,43 +1,15 @@
-import React, { useMemo, useCallback, useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useMemo, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
-import RecommendIcon from '@mui/icons-material/Recommend';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Button, Chip, FormControl, InputLabel } from '@mui/material';
+import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Button, Chip, FormControl, InputLabel, Tooltip } from '@mui/material';
 import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
 import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency } from '../utils/currency';
+import { calculateAge, formatDateOfBirth } from '../utils/customerDemographics';
 import { calculateCustomerPaymentSummary, markFirstInvoiceRows } from '../utils/paymentSummary';
-
-// Types for customer profile and data
-interface CustomerProfile {
-  name: string;
-  email: string;
-  phone: string;
-  joinDate: string;
-  membershipStatus: string;
-  membershipTier: string;
-  lifetimeValue: number;
-  avatar?: string;
-}
-
-// Payment Summary interface
-interface PaymentSummary {
-  totalSpent: number;
-  invoiceCount: number;
-  paymentMethods: {
-    method: string;
-    count: number;
-    total: number;
-  }[];
-}
-
-interface CustomerData {
-  // ... existing code ...
-}
+import Customer360Panel from './customer360/Customer360Panel';
 
 // Add interface for Wallet Transaction
 interface WalletTransaction {
@@ -57,32 +29,44 @@ interface WalletTransaction {
 
 interface CustomerDetailsProps {}
 
+interface CustomerNavigationState {
+  returnTo?: string;
+  returnLabel?: string;
+}
+
+type ServiceUsageView = 'lifetime' | 'year';
+
+interface LifetimeServiceUsageData {
+  services: string[];
+  years: number[];
+  data: { [service: string]: { [year: string]: number } };
+  totals: { [service: string]: number };
+  lastUsed: { [service: string]: string };
+}
+
 const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { phoneNumber } = useParams<{ phoneNumber: string }>();
   const { currentClinic } = useClinic();
   const [loading, setLoading] = React.useState(true);
   const [customerData, setCustomerData] = React.useState<any>(null);
   const [error, setError] = React.useState('');
-  const [aiSummary, setAiSummary] = React.useState('');
   const [page, setPage] = React.useState(0);
   const [rowsPerPage, setRowsPerPage] = React.useState(25);
   const [serviceFilter, setServiceFilter] = React.useState<'all' | 'remaining' | 'completed'>('all');
   const [selectedService, setSelectedService] = React.useState<string | null>(null);
-  const [recommendedServices, setRecommendedServices] = useState<any[]>([]);
-  
+
   // Retry mechanism states
   const [retryCount, setRetryCount] = React.useState<number>(0);
   const [retryTimeout, setRetryTimeout] = React.useState<NodeJS.Timeout | null>(null);
   const [isInRetryMode, setIsInRetryMode] = React.useState<boolean>(false);
   const [retryMessage, setRetryMessage] = React.useState<string>('');
-  
+
   // Add new state for payment history
   const [paymentHistory, setPaymentHistory] = React.useState<any[]>([]);
   const [paymentLoading, setPaymentLoading] = React.useState(true);
   const [paymentError, setPaymentError] = React.useState('');
-  const [paymentPage, setPaymentPage] = React.useState(0);
-  const [paymentRowsPerPage, setPaymentRowsPerPage] = React.useState(5);
   const [paymentFetched, setPaymentFetched] = React.useState(false);
 
   // Add state for Sales by Sales Person report
@@ -111,37 +95,58 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     months: [],
     data: {},
   });
+  const [serviceUsageLoading, setServiceUsageLoading] = React.useState(true);
+  const [serviceUsageError, setServiceUsageError] = React.useState('');
+  const [serviceUsageRefreshKey, setServiceUsageRefreshKey] = React.useState(0);
+  const serviceUsageRequestIdRef = React.useRef(0);
+  const [serviceUsageView, setServiceUsageView] = React.useState<ServiceUsageView>('lifetime');
+  const [lifetimeServiceUsage, setLifetimeServiceUsage] = React.useState<LifetimeServiceUsageData>({
+    services: [],
+    years: [],
+    data: {},
+    totals: {},
+    lastUsed: {},
+  });
+  const [lifetimeUsageLoading, setLifetimeUsageLoading] = React.useState(true);
+  const [lifetimeUsageError, setLifetimeUsageError] = React.useState('');
 
   // Add state for wallet transactions
   const [walletTransactions, setWalletTransactions] = React.useState<WalletTransaction[]>([]);
   const [walletLoading, setWalletLoading] = React.useState(true);
   const [walletError, setWalletError] = React.useState('');
   const [walletPage, setWalletPage] = React.useState(0);
-  const [walletRowsPerPage, setWalletRowsPerPage] = React.useState(5);
+  const walletRowsPerPage = 5;
 
 
-  // Generate array of years for the dropdown (from 5 years ago to current year)
+  // Include recent years and every year where this customer has recorded activity.
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
-    return Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
-  }, []);
+    const recentYears = Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
+    return Array.from(new Set([...recentYears, ...lifetimeServiceUsage.years])).sort((a, b) => a - b);
+  }, [lifetimeServiceUsage.years]);
+
+  const applyAnalysisYear = useCallback((year: number, forceServiceRefresh = false) => {
+    const yearChanged = year !== selectedYear;
+    if (yearChanged) {
+      setSelectedYear(year);
+      setPage(0);
+      setPaymentFetched(false);
+      setServiceUsageData({ services: [], months: [], data: {} });
+    } else if (forceServiceRefresh) {
+      setServiceUsageData({ services: [], months: [], data: {} });
+      setServiceUsageRefreshKey(current => current + 1);
+    }
+  }, [selectedYear]);
 
   // Handle year selection change
   const handleYearChange = (event: SelectChangeEvent<number>) => {
-    setSelectedYear(Number(event.target.value));
-    // Reset page states
-    setPage(0);
-    setPaymentPage(0);
-    
-    // Reset data that depends on year filter
-    setPaymentFetched(false);
-    
-    // Reset service usage data to empty - will be refetched with new year
-    setServiceUsageData({
-      services: [],
-      months: [],
-      data: {},
-    });
+    applyAnalysisYear(Number(event.target.value), true);
+    setServiceUsageView('year');
+  };
+
+  const handleUsageYearClick = (year: number) => {
+    applyAnalysisYear(year, true);
+    setServiceUsageView('year');
   };
 
   const sortedBookings = useMemo(() => {
@@ -162,7 +167,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           return new Date(0); // Default to epoch if parsing fails
         }
       };
-      
+
       const dateA = extractDate(a.date);
       const dateB = extractDate(b.date);
       return dateB.getTime() - dateA.getTime(); // Sort in descending order (newest first)
@@ -194,83 +199,17 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     setPage(0);
   };
 
-  // Add a function to handle invoice click
-  const handleInvoiceClick = (invoiceNumber: string) => {
-    navigate(`/payment-details?invoice=${encodeURIComponent(invoiceNumber)}`);
-  };
-
-  // Add this function to generate service recommendations
-  const generateServiceRecommendations = useCallback(async (customerPhoneNumber: string) => {
-    if (!customerPhoneNumber) return;
-
-    try {
-      const decodedPhoneNumber = decodeURIComponent(customerPhoneNumber);
-      const escapedPhoneNumber = decodedPhoneNumber.replace(/'/g, "''");
-      
-      // Query to find service recommendations
-      const recommendationsQuery = `
-     WITH CustomerServices AS (
-    SELECT DISTINCT ServiceName
-    FROM great_time.MainDataView
-    WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-),
-
-      BoughtTogether AS (
-        SELECT 
-          a.ServiceName AS ServiceA,
-          b.ServiceName AS ServiceB,
-          COUNT(*) as frequency
-        FROM great_time.MainDataView a
-        JOIN great_time.MainDataView b 
-          ON a.BookingID = b.BookingID 
-          AND a.ServiceName <> b.ServiceName
-        WHERE a.ServiceName IN (SELECT ServiceName FROM CustomerServices)
-        GROUP BY ServiceA, ServiceB
-        ORDER BY frequency DESC
-      ),
-      RecommendedServices AS (
-        SELECT 
-          ServiceB,
-          MAX(frequency) as max_frequency,
-          COUNT(*) as co_occurrence_count
-        FROM BoughtTogether
-        WHERE ServiceB NOT IN (SELECT ServiceName FROM CustomerServices)
-        GROUP BY ServiceB
-        ORDER BY max_frequency DESC, co_occurrence_count DESC
-        LIMIT 5
-      )
-      SELECT 
-        ServiceB as service_name,
-        AVG(Price) as average_price,
-        MAX(ServiceDescription) as description
-      FROM RecommendedServices
-      JOIN great_time.MainnDataView ON ServiceB = ServiceName
-      GROUP BY service_name
-      LIMIT 5
-      `;
-      
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
-        { query: recommendationsQuery },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-          },
-          timeout: 10000
-        }
-      );
-      
-      if (response.data.success && response.data.data) {
-        setRecommendedServices(response.data.data);
-      }
-    } catch (error) {
-      console.error('Error generating service recommendations:', error);
-    }
-  }, []);
+  const navigationState = location.state as CustomerNavigationState | null;
+  const returnTo = navigationState?.returnTo?.startsWith('/') ? navigationState.returnTo : null;
+  const returnLabel = navigationState?.returnLabel || 'Customers';
 
   const handleBack = React.useCallback(() => {
+    if (returnTo) {
+      navigate(returnTo, { replace: true });
+      return;
+    }
     navigate(-1);
-  }, [navigate]);
+  }, [navigate, returnTo]);
 
   // Cancel any pending retry on unmount
   React.useEffect(() => {
@@ -287,16 +226,20 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       console.log('Cannot fetch year-dependent data: missing phone number or clinic');
       return;
     }
-    
+
+    const requestId = ++serviceUsageRequestIdRef.current;
     try {
       console.log('Fetching year-dependent data for year:', selectedYear);
-      
+      setServiceUsageLoading(true);
+      setServiceUsageError('');
+
       const decodedPhoneNumber = decodeURIComponent(phoneNumber);
       const sanitizeForSQL = (input: string): string => {
         return input.replace(/'/g, "''");
       };
       const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
-      
+      const escapedClinicCode = sanitizeForSQL(currentClinic.code);
+
       // SQL query to get service usage data filtered by year
       const query = `
       WITH AllServiceUsage AS (
@@ -304,9 +247,10 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           ServiceName,
           CheckInTime
         FROM great_time.MainDataView
-        WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
+        WHERE RIGHT(REGEXP_REPLACE(CustomerPhoneNumber, r'[^0-9]', ''), 9) = RIGHT(REGEXP_REPLACE('${escapedPhoneNumber}', r'[^0-9]', ''), 9)
+          AND ServiceName IS NOT NULL
           AND CheckInTime IS NOT NULL
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+          AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
           AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear} -- Filter by selected year
       )
       SELECT
@@ -317,11 +261,11 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       GROUP BY ServiceName, month
       ORDER BY month DESC, ServiceName
       `;
-      
+
       console.log('Executing service usage query:', query);
-      
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
-        { 
+
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
+        {
           query: query
         },
         {
@@ -332,38 +276,45 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           timeout: 15000
         }
       );
-      
+
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch service usage data');
       }
-      
+
+      if (requestId !== serviceUsageRequestIdRef.current) return;
+
       const serviceUsageRawData = response.data.data || [];
       console.log('Service usage data fetched successfully:', serviceUsageRawData.length, 'records');
-      
+
       // Process the data to create a heat map of service usage by month
       const processedData: { [key: string]: { [key: string]: number } } = {};
-      const months: Set<string> = new Set();
       const services: Set<string> = new Set();
-      
+
       serviceUsageRawData.forEach((item: any) => {
         const service = item.ServiceName || 'Unknown Service';
         const month = item.month || 'Unknown Month';
         const count = parseInt(item.usage_count) || 0;
-        
+
         if (!processedData[service]) {
           processedData[service] = {};
         }
-        
+
         processedData[service][month] = count;
-        months.add(month);
         services.add(service);
       });
-      
-      // Sort months chronologically
-      const sortedMonths = Array.from(months).sort();
-      
+
+      // Always show the complete calendar year so inactivity is visible.
+      const sortedMonths = Array.from(
+        { length: 12 },
+        (_, monthIndex) => `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`
+      );
+
       // Create complete dataset with zero values for missing entries
-      const serviceNames = Array.from(services);
+      const serviceNames = Array.from(services).sort((a, b) => {
+        const totalA = Object.values(processedData[a] || {}).reduce((sum, value) => sum + value, 0);
+        const totalB = Object.values(processedData[b] || {}).reduce((sum, value) => sum + value, 0);
+        return totalB - totalA || a.localeCompare(b);
+      });
       serviceNames.forEach(service => {
         sortedMonths.forEach(month => {
           if (!processedData[service][month]) {
@@ -371,25 +322,113 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           }
         });
       });
-      
+
       // Update service usage data in state
       setServiceUsageData({
         services: serviceNames,
         months: sortedMonths,
         data: processedData,
       });
-      
+
     } catch (error) {
+      if (requestId !== serviceUsageRequestIdRef.current) return;
       console.error('Error fetching year-dependent data:', error);
+      setServiceUsageError('Unable to load service usage for this year.');
+    } finally {
+      if (requestId === serviceUsageRequestIdRef.current) {
+        setServiceUsageLoading(false);
+      }
     }
   }, [phoneNumber, currentClinic, selectedYear]);
+
+  const fetchLifetimeServiceUsage = useCallback(async () => {
+    if (!phoneNumber || !currentClinic) return;
+
+    setLifetimeUsageLoading(true);
+    setLifetimeUsageError('');
+    try {
+      const decodedPhoneNumber = decodeURIComponent(phoneNumber);
+      const sanitizeForSQL = (input: string): string => input.replace(/'/g, "''");
+      const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
+      const escapedClinicCode = sanitizeForSQL(currentClinic.code);
+      const query = `
+        SELECT
+          TRIM(ServiceName) AS ServiceName,
+          EXTRACT(YEAR FROM CheckInTime) AS usage_year,
+          COUNT(*) AS usage_count,
+          FORMAT_TIMESTAMP('%Y-%m-%d', MAX(CheckInTime), 'Asia/Yangon') AS last_used
+        FROM great_time.MainDataView
+        WHERE RIGHT(REGEXP_REPLACE(CustomerPhoneNumber, r'[^0-9]', ''), 9) = RIGHT(REGEXP_REPLACE('${escapedPhoneNumber}', r'[^0-9]', ''), 9)
+          AND ServiceName IS NOT NULL
+          AND TRIM(ServiceName) != ''
+          AND CheckInTime IS NOT NULL
+          AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
+        GROUP BY 1, 2
+        ORDER BY usage_year, ServiceName
+      `;
+
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/query`,
+        { query },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
+          },
+          timeout: 15000
+        }
+      );
+
+      if (!response.data.success) {
+        throw new Error(response.data.error || 'Failed to fetch lifetime service usage');
+      }
+
+      const usageByService: { [service: string]: { [year: string]: number } } = {};
+      const totals: { [service: string]: number } = {};
+      const lastUsed: { [service: string]: string } = {};
+      const years = new Set<number>();
+
+      (response.data.data || []).forEach((item: any) => {
+        const service = String(item.ServiceName || 'Unknown Service');
+        const year = Number(item.usage_year);
+        const count = Number(item.usage_count) || 0;
+        const lastUsedDate = String(item.last_used || '');
+        if (!Number.isFinite(year)) return;
+
+        years.add(year);
+        usageByService[service] ||= {};
+        usageByService[service][String(year)] = count;
+        totals[service] = (totals[service] || 0) + count;
+        if (lastUsedDate && (!lastUsed[service] || lastUsedDate > lastUsed[service])) {
+          lastUsed[service] = lastUsedDate;
+        }
+      });
+
+      const services = Object.keys(usageByService).sort(
+        (a, b) => (totals[b] || 0) - (totals[a] || 0) || a.localeCompare(b)
+      );
+      setLifetimeServiceUsage({
+        services,
+        years: Array.from(years).sort((a, b) => a - b),
+        data: usageByService,
+        totals,
+        lastUsed,
+      });
+    } catch (fetchError) {
+      console.error('Error fetching lifetime service usage:', fetchError);
+      setLifetimeServiceUsage({ services: [], years: [], data: {}, totals: {}, lastUsed: {} });
+      setLifetimeUsageError('Unable to load lifetime service usage.');
+    } finally {
+      setLifetimeUsageLoading(false);
+    }
+  }, [currentClinic, phoneNumber]);
 
   // Fetch customer data when params change - this data doesn't depend on the year
   useEffect(() => {
     // Reset payment fetched state when phone number changes
     setPaymentFetched(false);
     preventFetch.current = false;
-    
+
     if (phoneNumber && currentClinic) {
       fetchCustomerData().catch(err => {
         setError(`Failed to fetch customer data: ${err.message}`);
@@ -398,6 +437,12 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     }
   }, [phoneNumber, currentClinic]); // Removed selectedYear dependency
 
+  useEffect(() => {
+    fetchLifetimeServiceUsage().catch(fetchError => {
+      console.error('Failed to fetch lifetime service usage:', fetchError);
+    });
+  }, [fetchLifetimeServiceUsage]);
+
   // Add dependency on selectedYear only for year-dependent data
   useEffect(() => {
     if (phoneNumber && currentClinic && !loading) {
@@ -405,21 +450,18 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       fetchYearDependentData().catch(err => {
         console.error('Failed to fetch year-dependent data:', err);
       });
-      
-      // Reset payment history so it can be refetched with the new year
-      setPaymentFetched(false);
     }
-  }, [selectedYear, fetchYearDependentData, phoneNumber, currentClinic, loading]);
-  
+  }, [selectedYear, serviceUsageRefreshKey, fetchYearDependentData, phoneNumber, currentClinic, loading]);
+
   // Effect for fetching payment history - this should still respect the year filter
   useEffect(() => {
     if (phoneNumber && !paymentFetched && !preventFetch.current && currentClinic) {
       try {
         // If we already have customer data, use the phone number from there for better reliability
         const phoneToUse = customerData && customerData.phone ? customerData.phone : phoneNumber;
-        
+
         console.log('Initiating payment history fetch with phone:', phoneToUse);
-        
+
         // Ensure we're using a properly decoded phone number
         let decodedPhone;
         try {
@@ -428,13 +470,13 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
           console.error('Error decoding phone for payment history:', e);
           decodedPhone = phoneToUse;
         }
-        
+
         fetchCustomerPaymentHistory(decodedPhone).catch(err => {
           console.error('Payment history fetch failed:', err);
           setPaymentFetched(true);
           setPaymentLoading(false);
           setPaymentError('Unable to load payment history');
-          
+
           // Initialize empty payment history as fallback
           setPaymentHistory([]);
           setPaymentSummary({
@@ -447,7 +489,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
         console.error('Error preparing payment history fetch:', error);
         setPaymentFetched(true);
         setPaymentLoading(false);
-        
+
         // Initialize empty payment history as fallback
         setPaymentHistory([]);
         setPaymentSummary({
@@ -459,118 +501,32 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     }
   }, [phoneNumber, paymentFetched, customerData, selectedYear, currentClinic]); // Keep selectedYear dependency for payment history
 
-  // Add this useMemo for payment chart data
-  const paymentChartData = useMemo(() => {
-    // Default empty chart data structure
-    const emptyChartData = {
-      labels: [],
-      datasets: [{
-        label: 'Amount Spent',
-        data: [],
-        backgroundColor: '#3b82f6',
-        borderColor: '#3b82f6',
-        borderWidth: 1,
-      }]
-    };
-
-    // Guard against undefined or empty payment history
-    if (!paymentHistory || !Array.isArray(paymentHistory) || paymentHistory.length === 0) {
-      return emptyChartData;
-    }
-
-    try {
-      // Group payments by month
-      const paymentsByMonth: Record<string, number> = {};
-      
-      paymentHistory.forEach(payment => {
-        // Skip if payment is missing or Date property is undefined
-        if (!payment || !payment.Date) return;
-        
-        try {
-          // Extract YYYY-MM from the date
-          const dateParts = payment.Date.toString().split('-');
-          if (!dateParts || dateParts.length < 2) return;
-          
-          const monthKey = `${dateParts[0]}-${dateParts[1]}`;
-          
-          if (!paymentsByMonth[monthKey]) {
-            paymentsByMonth[monthKey] = 0;
-          }
-          
-          // Safely add the amount, defaulting to 0 if undefined/NaN
-          const amount = payment.amount ? Number(payment.amount) : 0;
-          paymentsByMonth[monthKey] += isNaN(amount) ? 0 : amount;
-        } catch (err) {
-          console.error('Error processing payment for chart:', err);
-        }
-      });
-
-      // Handle case when all payments were skipped
-      if (Object.keys(paymentsByMonth).length === 0) {
-        return emptyChartData;
-      }
-      
-      // Convert to sorted array (oldest to newest)
-      const monthKeys = Object.keys(paymentsByMonth).sort();
-      
-      // Create pretty month labels (e.g., "Jan 2023")
-      const monthLabels = monthKeys.map(key => {
-        try {
-          const [year, month] = key.split('-');
-          
-          // Validate numbers before creating Date
-          const yearNum = parseInt(year);
-          const monthNum = parseInt(month) - 1; // months are 0-indexed in JS Date
-          
-          if (isNaN(yearNum) || isNaN(monthNum) || monthNum < 0 || monthNum > 11) {
-            return key; // Fallback to original key if invalid
-          }
-          
-          const date = new Date(yearNum, monthNum, 1);
-          return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-        } catch (err) {
-          console.error('Error formatting date label:', err);
-          return key; // Fallback to original key if error
-        }
-      });
-      
-      return {
-        labels: monthLabels,
-        datasets: [{
-          label: 'Amount Spent',
-          data: monthKeys.map(key => paymentsByMonth[key]),
-          backgroundColor: '#3b82f6',
-          borderColor: '#3b82f6',
-          borderWidth: 1,
-        }]
-      };
-    } catch (error) {
-      console.error('Error generating payment chart data:', error);
-      return emptyChartData;
-    }
-  }, [paymentHistory]);
-
   const paymentHistoryRows = useMemo(() => {
     return markFirstInvoiceRows(paymentHistory);
   }, [paymentHistory]);
 
   // Add this function to calculate heatmap color based on value
   const getHeatmapColor = (value: number, maxValue: number) => {
-    if (value === 0) return 'transparent';
-    // Calculate opacity based on value (0.2 to 0.9 range)
-    const opacity = 0.2 + (value / (maxValue || 1)) * 0.7; // Prevent division by zero
-    return `rgba(26, 115, 232, ${opacity})`; // Using the blue color theme (#1a73e8)
+    if (value === 0) return 'var(--surface-secondary)';
+    const opacity = 0.12 + (value / (maxValue || 1)) * 0.76;
+    return `rgba(7, 65, 66, ${opacity})`;
+  };
+
+  const formatHeatmapMonth = (month: string) => {
+    const monthNumber = Number(month.split('-')[1]);
+    if (!monthNumber || monthNumber < 1 || monthNumber > 12) return month;
+    return new Date(selectedYear, monthNumber - 1, 1).toLocaleDateString('en-US', { month: 'short' });
   };
 
   // Add this function to get the maximum value for proper color scaling
   const getMaxValue = (data: { [key: string]: { [key: string]: number } }): number => {
     if (!data || Object.keys(data).length === 0) return 1; // Default to 1 if no data
-    
+
     try {
-      const allValues = Object.values(data).flatMap(monthData => 
+      const allValues = Object.values(data).flatMap(monthData =>
         Object.values(monthData).filter(value => typeof value === 'number' && !isNaN(value))
       );
-      
+
       return allValues.length > 0 ? Math.max(...allValues) : 1;
     } catch (error) {
       console.error('Error calculating max value:', error);
@@ -599,15 +555,15 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       console.log("No customerData in filteredBookings");
       return [];
     }
-    
+
     // Add debug logging to see what customer data contains
     console.log("Customer data in filteredBookings:", {
-      hasBookings: !!customerData.bookings, 
+      hasBookings: !!customerData.bookings,
       bookingsLength: customerData.bookings?.length,
       hasRecentBookings: !!customerData.recentBookings,
       recentBookingsLength: customerData.recentBookings?.length
     });
-    
+
     if (!selectedService) {
       console.log("No selectedService, returning all sortedBookings:", sortedBookings);
       return sortedBookings;
@@ -617,6 +573,63 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     return filtered;
   }, [customerData, sortedBookings, selectedService]);
 
+  const serviceUsageMetrics = useMemo(() => {
+    const serviceTotals = serviceUsageData.services.map((service) => ({
+      service,
+      total: serviceUsageData.months.reduce(
+        (sum, month) => sum + (serviceUsageData.data[service]?.[month] || 0),
+        0
+      ),
+    }));
+    const monthlyTotals = serviceUsageData.months.map((month) =>
+      serviceUsageData.services.reduce(
+        (sum, service) => sum + (serviceUsageData.data[service]?.[month] || 0),
+        0
+      )
+    );
+
+    return {
+      totalUses: serviceTotals.reduce((sum, item) => sum + item.total, 0),
+      activeMonths: monthlyTotals.filter((total) => total > 0).length,
+      topService: serviceTotals.find((item) => item.total > 0) || null,
+      serviceTotals: Object.fromEntries(serviceTotals.map((item) => [item.service, item.total])),
+    };
+  }, [serviceUsageData]);
+
+  const lifetimeUsageMetrics = useMemo(() => {
+    const totalUses = Object.values(lifetimeServiceUsage.totals).reduce((sum, count) => sum + count, 0);
+    const topService = lifetimeServiceUsage.services[0] || null;
+    return {
+      totalUses,
+      activeYears: lifetimeServiceUsage.years.length,
+      topService,
+    };
+  }, [lifetimeServiceUsage]);
+
+  const formatLastUsedDate = (value: string) => {
+    if (!value) return 'Unknown';
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const activitySummary = useMemo(() => {
+    const rawLastVisit = customerData?.last_appointment;
+    const parsedLastVisit = rawLastVisit ? Date.parse(rawLastVisit) : NaN;
+    if (!Number.isFinite(parsedLastVisit)) {
+      return { label: 'Unknown', detail: 'No valid visit date', tone: 'var(--text-secondary)' };
+    }
+
+    const daysSince = Math.max(0, Math.floor((Date.now() - parsedLastVisit) / 86_400_000));
+    if (daysSince <= 30) return { label: 'Active', detail: `${daysSince} days since visit`, tone: 'var(--success)' };
+    if (daysSince <= 90) return { label: 'Needs attention', detail: `${daysSince} days since visit`, tone: 'var(--warning)' };
+    return { label: 'Lapsed', detail: `${daysSince} days since visit`, tone: 'var(--error)' };
+  }, [customerData?.last_appointment]);
+
+  const averageInvoiceValue = paymentSummary.invoiceCount > 0
+    ? paymentSummary.totalSpent / paymentSummary.invoiceCount
+    : 0;
+
   // Add a function to fetch customer payment history
   const fetchCustomerPaymentHistory = async (customerPhoneNumber: string) => {
     if (!customerPhoneNumber || !currentClinic) {
@@ -624,21 +637,21 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       setPaymentLoading(false);
       return;
     }
-    
+
     try {
       setPaymentLoading(true);
-      
+
       const decodedPhoneNumber = decodeURIComponent(customerPhoneNumber);
       const sanitizeForSQL = (input: string): string => {
         return input.replace(/'/g, "''");
       };
       const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
-      
+
       // Payment History query with year filtering
       const query = `
 -- Get payment data
 WITH CustomerPayments AS (
-  SELECT 
+  SELECT
     OrderCreatedDate,
     InvoiceNumber,
     PaymentMethod,
@@ -681,12 +694,12 @@ ORDER BY OrderCreatedDate DESC;
 -- WHERE PaymentStatus = 'PAID'
 -- GROUP BY PaymentMethod;
       `;
-      
+
       try {
         console.log('Fetching payment history for customer:', escapedPhoneNumber, 'for year:', selectedYear);
         const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
-          { 
-            query: query 
+          {
+            query: query
           },
           {
             headers: {
@@ -696,22 +709,22 @@ ORDER BY OrderCreatedDate DESC;
             timeout: 15000 // Increase timeout to 15 seconds
           }
         );
-        
+
         if (!response.data.success) {
           throw new Error('Failed to fetch payment history: ' + (response.data.error || 'Unknown error'));
         }
-        
+
         const paymentData = response.data.data || [];
         console.log('Payment history fetched successfully, records:', paymentData.length);
-        
+
         // Filter out records with 0 MMK value
-        const filteredPaymentData = paymentData.filter((payment: any) => 
+        const filteredPaymentData = paymentData.filter((payment: any) =>
           payment.amount && payment.amount > 0
         );
-        
+
         console.log(`Filtered out ${paymentData.length - filteredPaymentData.length} zero-value records`);
         setPaymentHistory(filteredPaymentData);
-        
+
         // Calculate payment summary manually since we simplified the query
         if (filteredPaymentData.length > 0) {
           setPaymentSummary(calculateCustomerPaymentSummary(filteredPaymentData));
@@ -723,7 +736,7 @@ ORDER BY OrderCreatedDate DESC;
             paymentMethods: [],
           });
         }
-        
+
         setPaymentFetched(true); // Mark payment data as fetched
         setPaymentLoading(false);
       } catch (axiosError: any) {
@@ -737,11 +750,11 @@ ORDER BY OrderCreatedDate DESC;
           setPaymentFetched(true); // Mark as fetched to prevent retries
         } else {
           // Log the error details to help with debugging
-          console.error('Payment history API error:', 
-            axiosError.response ? `Status: ${axiosError.response.status}` : 'No response', 
+          console.error('Payment history API error:',
+            axiosError.response ? `Status: ${axiosError.response.status}` : 'No response',
             axiosError.response ? axiosError.response.data : 'No data'
           );
-          
+
           // Set a user-friendly error message
           let errorMessage = 'Failed to load payment history';
           if (axiosError.response && axiosError.response.data && axiosError.response.data.error) {
@@ -749,7 +762,7 @@ ORDER BY OrderCreatedDate DESC;
           } else if (axiosError.message) {
             errorMessage = `Error: ${axiosError.message}`;
           }
-          
+
           setPaymentError(errorMessage);
           setPaymentLoading(false);
           setPaymentFetched(true); // Mark as fetched to prevent retries
@@ -765,13 +778,13 @@ ORDER BY OrderCreatedDate DESC;
 
   const fetchWalletTransactions = useCallback(async (customerName: string) => {
     console.log('Starting fetchWalletTransactions for:', customerName);
-    
+
     if (!currentClinic || !phoneNumber) {
       setWalletError('No clinic selected or phone number missing.');
       setWalletLoading(false);
       return;
     }
-    
+
     setWalletLoading(true);
     setWalletError('');
 
@@ -786,7 +799,7 @@ ORDER BY OrderCreatedDate DESC;
       // Query wallet transactions from customer's perspective only (deduplicated)
       const query = `
         WITH CustomerTransactions AS (
-          SELECT 
+          SELECT
             transactionNumber,
             type,
             status,
@@ -798,28 +811,28 @@ ORDER BY OrderCreatedDate DESC;
             senderPhone,
             recipientName,
             recipientPhone,
-            CASE 
+            CASE
               WHEN REPLACE(COALESCE(senderPhone, ''), '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '') THEN 'SENDER'
               ELSE 'RECIPIENT'
             END as customerRole,
             ROW_NUMBER() OVER (
-              PARTITION BY transactionNumber 
-              ORDER BY 
-                CASE 
+              PARTITION BY transactionNumber
+              ORDER BY
+                CASE
                   WHEN REPLACE(COALESCE(senderPhone, ''), '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '') THEN 1
                   ELSE 2
                 END
             ) as rn
-          FROM 
+          FROM
             \`piti-pass.passdb_prod.wallettransaction\`
-          WHERE 
+          WHERE
             ClinicCode = '${currentClinic.pass_id}'
             AND (
               REPLACE(COALESCE(senderPhone, ''), '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
               OR REPLACE(COALESCE(recipientPhone, ''), '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
             )
         )
-        SELECT 
+        SELECT
           transactionNumber,
           type,
           status,
@@ -834,7 +847,7 @@ ORDER BY OrderCreatedDate DESC;
           customerRole
         FROM CustomerTransactions
         WHERE rn = 1
-        ORDER BY 
+        ORDER BY
           createddate_myanmar DESC
         LIMIT 50
       `;
@@ -848,7 +861,7 @@ ORDER BY OrderCreatedDate DESC;
       });
 
       const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/query2?${searchQuery}`, 
+        `${import.meta.env.VITE_API_URL}/query2?${searchQuery}`,
         { query },
         {
           headers: {
@@ -888,17 +901,17 @@ ORDER BY OrderCreatedDate DESC;
         setLoading(true);
         setError('');
       }
-      
+
       const decodedPhoneNumber = decodeURIComponent(phoneNumber);
-      
+
       // Escape single quotes to prevent SQL injection and handle special characters
       const sanitizeForSQL = (input: string): string => {
         return input.replace(/'/g, "''");
       };
-      
+
       const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
       console.log('Fetching data for phone number:', decodedPhoneNumber);
-      
+
       // First, fetch customer profile with phone number filter - simplified query
         const profileQuery = `
 WITH AllAppointments AS (
@@ -913,7 +926,11 @@ WITH AllAppointments AS (
 SELECT
   CustomerName AS name,
   CustomerPhoneNumber AS phone,
-  DateOfBirth,
+  ARRAY_AGG(
+    NULLIF(CAST(DateOfBirth AS STRING), '') IGNORE NULLS
+    ORDER BY CheckInTime DESC
+    LIMIT 1
+  )[SAFE_OFFSET(0)] AS dateOfBirth,
   CAST(SUM(CAST(Price AS FLOAT64)) AS INT64) AS total_purchase_amount,
   COUNT(DISTINCT ServiceName) AS total_services,
   FORMAT_TIMESTAMP('%d %b, %Y %I:%M %p', MAX(CheckInTime)) AS last_appointment,
@@ -921,13 +938,13 @@ SELECT
 FROM great_time.MainDataView
 WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
   AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
+GROUP BY CustomerName, CustomerPhoneNumber;`;
 
       console.log('Executing profile query:', profileQuery);
 
       try {
-        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
-          { 
+        const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
+          {
             query: profileQuery
           },
           {
@@ -942,7 +959,7 @@ GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
         if (!profileResponse.data.success) {
           throw new Error(profileResponse.data.error || 'Failed to fetch customer profile');
         }
-        
+
         if (!profileResponse.data.data || profileResponse.data.data.length === 0) {
           // Try searching by name if possible
           setError('Customer profile not found. The phone number may be incorrect.');
@@ -952,7 +969,7 @@ GROUP BY CustomerName, CustomerPhoneNumber, DateOfBirth;`;
 
         const profile = profileResponse.data.data[0];
         console.log('Profile data fetched successfully:', profile);
-        
+
         // Then fetch other data with phone number filter - simplified query
         // Notice we're not filtering by year for purchased services and all bookings
         const dataQuery = `
@@ -972,7 +989,7 @@ WITH MonthlySales AS (
 
 -- Purchased services - not filtered by year
 PurchasedServices AS (
-  SELECT DISTINCT 
+  SELECT DISTINCT
     ServiceName AS service,
     PackageCount AS packageCount,
     RemainingPackageCount AS remainingPackageCount,
@@ -1006,17 +1023,17 @@ SELECT
   IFNULL(
     (SELECT TO_JSON_STRING(ARRAY_AGG(
       STRUCT(month, amount)
-    )) FROM MonthlySales), 
+    )) FROM MonthlySales),
     '[]'
   ) as monthlySales,
-  
+
   IFNULL(
     (SELECT TO_JSON_STRING(ARRAY_AGG(
       STRUCT(service, packageCount, remainingPackageCount, PaymentAmount as paymentAmount, last_used as lastUsed)
     )) FROM PurchasedServices),
     '[]'
   ) as purchasedServices,
-  
+
   IFNULL(
     (SELECT TO_JSON_STRING(ARRAY_AGG(
       STRUCT(BookingID as bookingId, service, therapist, date, price, status, source)
@@ -1027,8 +1044,8 @@ SELECT
 
         console.log('Executing data query:', dataQuery);
 
-        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
-          { 
+        const dataResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
+          {
             query: dataQuery
           },
           {
@@ -1045,31 +1062,31 @@ SELECT
         }
 
         console.log('Data query response:', dataResponse.data);
-        
+
         const responseData = dataResponse.data.data[0];
         console.log('Customer detailed data fetched successfully');
-        
+
         // Parse JSON strings from BigQuery results
         let monthlySales = [];
         let purchasedServices = [];
         let recentBookings = [];
-        
+
         try {
           monthlySales = responseData.monthlySales ? JSON.parse(responseData.monthlySales) : [];
         } catch (e) {
           console.error('Error parsing monthlySales:', e);
         }
-        
+
         try {
           purchasedServices = responseData.purchasedServices ? JSON.parse(responseData.purchasedServices) : [];
         } catch (e) {
           console.error('Error parsing purchasedServices:', e);
         }
-        
+
         try {
           recentBookings = responseData.recentBookings ? JSON.parse(responseData.recentBookings) : [];
           console.log("Parsed recentBookings data:", recentBookings);
-          
+
           // Transform bookingId property to match expected structure in UI
           recentBookings = recentBookings.map((booking: any) => ({
             ...booking,
@@ -1083,56 +1100,56 @@ SELECT
           console.error('Error parsing recentBookings:', e);
           recentBookings = []; // Ensure it's an empty array on error
         }
-        
+
         // Set customer profile with parsed JSON data
+        const formattedDateOfBirth = formatDateOfBirth(profile.dateOfBirth);
         setCustomerData({
           ...profile,
+          dateOfBirth: formattedDateOfBirth,
+          age: calculateAge(profile.dateOfBirth),
           monthlySales,
           purchasedServices,
           recentBookings,
           bookings: recentBookings // Add a duplicate field for backward compatibility
         });
-        
-        // Also fetch the year-dependent data
-        fetchYearDependentData();
-        
+
         setLoading(false);
         setRetryCount(0);
         setIsInRetryMode(false);
-        
+
         // New call to fetch wallet transactions
         if (profile.name) {
           fetchWalletTransactions(profile.name);
         }
-        
+
       } catch (axiosError: any) {
         console.error('Error fetching customer data:', axiosError);
-        
+
         // Check if this is a rate limit error (status 429)
         if (axiosError.response && axiosError.response.status === 429) {
           // Implement retry logic with exponential backoff
           const nextRetry = Math.min(2 ** retryCount * 2000, 30000); // Max 30 second delay
           const nextRetryCount = retryCount + 1;
-          
+
           setRetryCount(nextRetryCount);
           setIsInRetryMode(true);
           setRetryMessage(`Rate limit exceeded. Retrying in ${nextRetry/1000} seconds (attempt ${nextRetryCount})...`);
-          
+
           // Set a timeout to retry the request
           const timeout = setTimeout(() => {
             fetchCustomerData();
           }, nextRetry);
-          
+
           setRetryTimeout(timeout);
       } else {
           // For non-rate limit errors, just show error message
           setError(`Failed to fetch customer data: ${axiosError.message || 'Unknown error'}`);
           setLoading(false);
         }
-        
+
         throw axiosError;
       }
-      
+
     } catch (error: any) {
       console.error('Error in customer data fetch:', error);
       if (!isInRetryMode) {
@@ -1144,8 +1161,8 @@ SELECT
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#101924' }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'var(--surface)' }}>
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
       </Box>
     );
   }
@@ -1153,29 +1170,29 @@ SELECT
   // Show retry message if in retry mode
   if (isInRetryMode) {
     return (
-      <Box sx={{ 
-        p: 4, 
-        maxWidth: '800px', 
-        margin: '0 auto', 
+      <Box sx={{
+        p: 4,
+        maxWidth: '800px',
+        margin: '0 auto',
         textAlign: 'center',
-        bgcolor: '#101924',
+        bgcolor: 'var(--surface)',
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center'
       }}>
-        <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: '8px', mb: 3, width: '100%' }}>
-          <Typography variant="h5" sx={{ mb: 2, color: '#3b82f6' }}>
+        <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: '8px', mb: 3, width: '100%' }}>
+          <Typography variant="h5" sx={{ mb: 2, color: 'var(--primary)' }}>
             Rate Limit Exceeded
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
-            <CircularProgress size={40} sx={{ color: '#3b82f6' }} />
+            <CircularProgress size={40} sx={{ color: 'var(--primary)' }} />
           </Box>
-          <Typography variant="body1" sx={{ color: '#f3f4f6', mb: 3 }}>
+          <Typography variant="body1" sx={{ color: 'var(--text-primary)', mb: 3 }}>
             {retryMessage}
           </Typography>
-          <Typography variant="body2" sx={{ color: '#94a3b8', mb: 4 }}>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 4 }}>
             The server is limiting requests. We're automatically retrying for you.
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
@@ -1192,9 +1209,9 @@ SELECT
                 setError('Retry cancelled. Please try again manually.');
                 setLoading(false);
               }}
-              sx={{ 
-                bgcolor: '#3b82f6', 
-                '&:hover': { bgcolor: '#2563eb' } 
+              sx={{
+                bgcolor: 'var(--primary)',
+                '&:hover': { bgcolor: 'var(--primary-hover)' }
               }}
             >
               Cancel Retry
@@ -1207,57 +1224,57 @@ SELECT
 
   if (error) {
     return (
-      <Box sx={{ 
-        p: 4, 
-        maxWidth: '800px', 
-        margin: '0 auto', 
+      <Box sx={{
+        p: 4,
+        maxWidth: '800px',
+        margin: '0 auto',
         textAlign: 'center',
-        bgcolor: '#101924',
+        bgcolor: 'var(--surface)',
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center'
       }}>
-        <Typography variant="h5" sx={{ mb: 2, color: '#f3f4f6' }}>
+        <Typography variant="h5" sx={{ mb: 2, color: 'var(--text-primary)' }}>
           Customer Information
         </Typography>
-        <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: '8px', mb: 3, width: '100%' }}>
-          <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 2 }}>
+        <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: '8px', mb: 3, width: '100%' }}>
+          <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 2 }}>
             {phoneNumber && (
               <span>Customer with phone {decodeURIComponent(phoneNumber)}</span>
             )}
           </Typography>
-          
+
           {customerData ? (
             <Box sx={{ textAlign: 'left', mb: 3 }}>
-              <Typography variant="body1" sx={{ color: '#f3f4f6', mb: 1 }}>
+              <Typography variant="body1" sx={{ color: 'var(--text-primary)', mb: 1 }}>
                 We found some basic information for this customer:
               </Typography>
-              <Typography variant="body2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 'bold' }}>
+              <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 1, fontWeight: 'bold' }}>
                 Name: {customerData.name}
               </Typography>
               {customerData.phone && customerData.phone !== 'Not available' && (
-                <Typography variant="body2" sx={{ color: '#94a3b8', mb: 1 }}>
+                <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 1 }}>
                   Phone: {customerData.phone}
                 </Typography>
               )}
               {customerData.email && customerData.email !== 'Not available' && (
-                <Typography variant="body2" sx={{ color: '#94a3b8', mb: 1 }}>
+                <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 1 }}>
                   Email: {customerData.email}
                 </Typography>
               )}
             </Box>
           ) : (
-            <Typography variant="body1" sx={{ color: '#f3f4f6', mb: 3 }}>
+            <Typography variant="body1" sx={{ color: 'var(--text-primary)', mb: 3 }}>
               We couldn't find detailed information for this customer.
             </Typography>
           )}
-          
-          <Typography variant="body2" sx={{ color: '#94a3b8', mb: 4 }}>
+
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 4 }}>
             {error}
           </Typography>
-          <Typography variant="body2" sx={{ color: '#94a3b8', mb: 4 }}>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 4 }}>
             This could be due to special characters in the phone number (+ symbol) or a temporary connection issue with the database.
             You can try the options below:
           </Typography>
@@ -1271,10 +1288,10 @@ SELECT
                 setPaymentFetched(false);
                 fetchCustomerData();
               }}
-              sx={{ 
-                bgcolor: '#3b82f6', 
-                color: 'white',
-                '&:hover': { bgcolor: '#2563eb' } 
+              sx={{
+                bgcolor: 'var(--primary)',
+                color: 'var(--text-primary)',
+                '&:hover': { bgcolor: 'var(--primary-hover)' }
               }}
             >
               Retry
@@ -1283,10 +1300,10 @@ SELECT
               variant="outlined"
               color="primary"
               onClick={() => navigate(-1)}
-              sx={{ 
-                borderColor: '#3b82f6',
-                color: '#3b82f6',
-                '&:hover': { borderColor: '#2563eb', bgcolor: 'rgba(37, 99, 235, 0.08)' } 
+              sx={{
+                borderColor: 'var(--primary)',
+                color: 'var(--primary)',
+                '&:hover': { borderColor: 'var(--primary-hover)', bgcolor: 'rgba(37, 99, 235, 0.08)' }
               }}
             >
               Back to Customers
@@ -1299,73 +1316,112 @@ SELECT
 
   if (!customerData) {
     return (
-      <Box sx={{ p: 3, bgcolor: '#101924', color: '#d1d5db', height: '100vh' }}>
-        <IconButton
+      <Box sx={{ p: 3, bgcolor: 'var(--surface)', color: 'var(--text-secondary)', height: '100vh' }}>
+        <Button
           onClick={handleBack}
+          startIcon={<ArrowBackIcon />}
+          variant="outlined"
           sx={{
-            color: '#3b82f6',
+            color: 'var(--primary)',
             mr: 2,
+            borderColor: 'var(--border)',
             '&:hover': {
-              bgcolor: 'rgba(59, 130, 246, 0.08)'
+              bgcolor: 'var(--surface-secondary)',
+              borderColor: 'var(--primary)'
             }
           }}
         >
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography color="#d1d5db">No customer data found</Typography>
+          Back to {returnLabel}
+        </Button>
+        <Typography color="var(--text-secondary)">No customer data found</Typography>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       p: { xs: 2, sm: 3, md: 3 },
-      bgcolor: '#101924',
+      bgcolor: 'var(--background)',
       height: '100vh',
       width: '100%',
       display: 'flex',
       flexDirection: 'column',
       overflowY: 'hidden',
-      color: '#e2e8f0',
+      color: 'var(--text-primary)',
       position: 'relative'
     }}>
       {/* Header with navigation and title */}
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 2,
+        flexWrap: 'wrap',
         mb: 2
       }}>
-        <IconButton
-          onClick={handleBack}
-          sx={{
-            color: '#6b7280',
-            '&:hover': {
-              bgcolor: 'rgba(107, 114, 128, 0.08)',
-              color: '#f3f4f6'
-            }
-          }}
-        >
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h6" sx={{ ml: 1, color: '#f3f4f6', fontWeight: 500 }}>
-          Customer Details
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <Button
+            onClick={handleBack}
+            startIcon={<ArrowBackIcon />}
+            variant="outlined"
+            aria-label={`Back to ${returnLabel}`}
+            sx={{
+              color: 'var(--text-secondary)',
+              borderColor: 'var(--border)',
+              bgcolor: 'var(--surface)',
+              '&:hover': {
+                bgcolor: 'var(--surface-secondary)',
+                color: 'var(--text-primary)',
+                borderColor: 'var(--primary)'
+              }
+            }}
+          >
+            Back to {returnLabel}
+          </Button>
+          <Box>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+              Customer Details
+            </Typography>
+            <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+              Analysis year updates monthly service detail and payment history
+            </Typography>
+          </Box>
+        </Box>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel sx={{ color: 'var(--text-secondary)' }}>Analysis year</InputLabel>
+          <Select
+            value={selectedYear}
+            label="Analysis year"
+            onChange={handleYearChange}
+            sx={{
+              bgcolor: 'var(--surface)',
+              color: 'var(--text-primary)',
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' },
+              '& .MuiSelect-icon': { color: 'var(--text-secondary)' },
+            }}
+          >
+            {yearOptions.map((year) => (
+              <MenuItem key={year} value={year}>{year}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Box>
 
       {/* Main content with proper scrolling */}
-      <Box sx={{ 
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'auto',
-        height: 'calc(100vh - 60px)', // Adjust for header
+      <Box sx={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
         '&::-webkit-scrollbar': {
           width: '8px',
         },
         '&::-webkit-scrollbar-track': {
-          background: '#1a2234',
+          background: 'var(--surface)',
         },
         '&::-webkit-scrollbar-thumb': {
-          background: '#2d3748',
+          background: 'var(--border)',
           borderRadius: '4px',
         },
         '&::-webkit-scrollbar-thumb:hover': {
@@ -1373,49 +1429,48 @@ SELECT
         }
       }}>
         {/* Customer header */}
-        <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', mb: 3, borderRadius: '8px' }}>
+        <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'var(--surface)', color: 'var(--text-primary)', mb: 2, borderRadius: 2.5, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
         <Grid container spacing={3} alignItems="center">
           <Grid item>
-              <Avatar sx={{ width: 80, height: 80, bgcolor: '#3b82f6' }}>
+              <Avatar sx={{ width: 80, height: 80, bgcolor: 'var(--primary)' }}>
               {customerData.name?.charAt(0)?.toUpperCase()}
             </Avatar>
           </Grid>
           <Grid item xs>
-              <Typography variant="h4" sx={{ mb: 1, color: '#f3f4f6' }}>
-              {customerData.name}
-              {customerData.age !== null && customerData.age !== undefined && (
-                <Typography 
-                  component="span" 
-                  sx={{ 
-                    ml: 2, 
-                      color: '#d1d5db', 
-                    fontSize: '1.2rem',
-                    verticalAlign: 'middle'
-                  }}
-                >
-                  {customerData.age} years old
-                </Typography>
-              )}
+              <Typography variant="h4" sx={{ mb: 1, color: 'var(--text-primary)' }}>
+                {customerData.name}
             </Typography>
             <Grid container spacing={4}>
               <Grid item>
-                  <Typography variant="body2" color="#9ca3af">Phone</Typography>
-                  <Typography color="#f3f4f6">{customerData.phone}</Typography>
+                  <Typography variant="body2" color="var(--text-secondary)">Phone</Typography>
+                  <Typography color="var(--text-primary)">{customerData.phone}</Typography>
+              </Grid>
+              <Grid item>
+                <Typography variant="body2" color="var(--text-secondary)">Date of Birth</Typography>
+                <Typography color="var(--text-primary)">{customerData.dateOfBirth || 'Not available'}</Typography>
+              </Grid>
+              <Grid item>
+                <Typography variant="body2" color="var(--text-secondary)">Age</Typography>
+                <Typography color="var(--text-primary)">
+                  {customerData.age !== null && customerData.age !== undefined
+                    ? `${customerData.age} years`
+                    : 'Not available'}
+                </Typography>
               </Grid>
               {customerData.next_birthday !== null && customerData.next_birthday !== undefined && (
                 <Grid item>
-                    <Typography variant="body2" color="#9ca3af">
+                    <Typography variant="body2" color="var(--text-secondary)">
                     Next Birthday
-                    <CardGiftcardIcon 
-                      sx={{ 
-                        ml: 1, 
-                        verticalAlign: 'middle', 
+                    <CardGiftcardIcon
+                      sx={{
+                        ml: 1,
+                        verticalAlign: 'middle',
                           color: '#f87171',
                         fontSize: '1.2rem'
-                      }} 
+                      }}
                     />
                   </Typography>
-                    <Typography color="#f3f4f6">
+                    <Typography color="var(--text-primary)">
                     {customerData.next_birthday}
                   </Typography>
                 </Grid>
@@ -1425,23 +1480,83 @@ SELECT
         </Grid>
       </Paper>
 
-        {/* Insights section */}
-      {aiSummary && (
-          <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', mb: 3, borderRadius: '8px' }}>
-            <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: '#f3f4f6' }}>
-              <AutoAwesomeIcon sx={{ color: '#3b82f6' }} />
-              Customer Insights
-          </Typography>
-            <Typography sx={{ color: '#d1d5db', lineHeight: 1.6 }}>{aiSummary}</Typography>
-        </Paper>
-      )}
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 1.5,
+            mb: 3,
+          }}
+        >
+          {[
+            {
+              label: `Spend in ${selectedYear}`,
+              value: paymentLoading ? 'Loading…' : paymentError ? 'Unavailable' : formatCurrency(paymentSummary.totalSpent, currentClinic),
+              helper: `${paymentSummary.invoiceCount.toLocaleString()} paid invoice${paymentSummary.invoiceCount === 1 ? '' : 's'}`,
+              accent: 'var(--primary)',
+            },
+            {
+              label: 'Average invoice',
+              value: paymentLoading ? 'Loading…' : paymentError ? 'Unavailable' : formatCurrency(averageInvoiceValue, currentClinic),
+              helper: `Paid invoices in ${selectedYear}`,
+              accent: 'var(--primary)',
+            },
+            {
+              label: `Service uses in ${selectedYear}`,
+              value: serviceUsageLoading ? 'Loading…' : serviceUsageMetrics.totalUses.toLocaleString(),
+              helper: `${serviceUsageMetrics.activeMonths} active month${serviceUsageMetrics.activeMonths === 1 ? '' : 's'}`,
+              accent: 'var(--success)',
+            },
+            {
+              label: 'Lifetime visits',
+              value: Number(customerData.total_appointments || 0).toLocaleString(),
+              helper: 'Distinct bookings on record',
+              accent: 'var(--primary)',
+            },
+            {
+              label: 'Unique services',
+              value: Number(customerData.total_services || 0).toLocaleString(),
+              helper: 'Lifetime service variety',
+              accent: 'var(--warning)',
+            },
+            {
+              label: 'Engagement',
+              value: activitySummary.label,
+              helper: activitySummary.detail,
+              accent: activitySummary.tone,
+            },
+          ].map((metric) => (
+            <Paper
+              key={metric.label}
+              elevation={0}
+              sx={{
+                p: 2,
+                bgcolor: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderTop: `3px solid ${metric.accent}`,
+                borderRadius: 2,
+                minWidth: 0,
+              }}
+            >
+              <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.76rem', fontWeight: 650 }}>
+                {metric.label}
+              </Typography>
+              <Typography sx={{ mt: 0.55, color: 'var(--text-primary)', fontSize: '1.25rem', lineHeight: 1.25, fontWeight: 750, overflowWrap: 'anywhere' }}>
+                {metric.value}
+              </Typography>
+              <Typography sx={{ mt: 0.55, color: 'var(--text-secondary)', fontSize: '0.72rem' }}>
+                {metric.helper}
+              </Typography>
+            </Paper>
+          ))}
+        </Box>
 
         {/* Two column layout for services and bookings */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', height: '100%', borderRadius: '8px' }}>
+          <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'var(--surface)', color: 'var(--text-primary)', height: '100%', borderRadius: '8px' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6' }}>Purchased Services</Typography>
+              <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>Purchased Services</Typography>
               {selectedService && (
                 <Button
                   variant="outlined"
@@ -1451,10 +1566,10 @@ SELECT
                     setPage(0);
                   }}
                   sx={{
-                    color: '#3b82f6',
-                    borderColor: '#3b82f6',
+                    color: 'var(--primary)',
+                    borderColor: 'var(--primary)',
                     '&:hover': {
-                      borderColor: '#2563eb',
+                      borderColor: 'var(--primary-hover)',
                       bgcolor: 'rgba(59, 130, 246, 0.08)'
                     }
                   }}
@@ -1464,59 +1579,59 @@ SELECT
               )}
             </Box>
             <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel sx={{ color: '#94a3b8' }}>Filter</InputLabel>
+              <InputLabel sx={{ color: 'var(--text-secondary)' }}>Filter</InputLabel>
               <Select
                 value={serviceFilter}
                 onChange={handleServiceFilterChange}
                 sx={{
-                  color: '#f3f4f6',
-                  bgcolor: '#101924',
-                  '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4a5568' },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' }
+                  color: 'var(--text-primary)',
+                  bgcolor: 'var(--surface)',
+                  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--text-muted)' },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
                 }}
               >
-                <MenuItem value="all" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>All</MenuItem>
-                <MenuItem value="remaining" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>Remaining</MenuItem>
-                <MenuItem value="completed" sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>Completed</MenuItem>
+                <MenuItem value="all" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>All</MenuItem>
+                <MenuItem value="remaining" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>Remaining</MenuItem>
+                <MenuItem value="completed" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>Completed</MenuItem>
               </Select>
             </FormControl>
-            <TableContainer sx={{ 
-              maxHeight: '400px', 
+            <TableContainer sx={{
+              maxHeight: '400px',
               overflowY: 'auto',
               '&::-webkit-scrollbar': {
                 width: '8px',
                 height: '8px',
               },
               '&::-webkit-scrollbar-track': {
-                backgroundColor: '#111923',
+                backgroundColor: 'var(--surface-secondary)',
               },
               '&::-webkit-scrollbar-thumb': {
-                backgroundColor: '#2d3748',
+                backgroundColor: 'var(--border)',
                 borderRadius: '4px',
               },
               '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: '#3b82f6',
+                backgroundColor: 'var(--primary)',
               }
             }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Service Name</TableCell>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Package Count</TableCell>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Remaining</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Service Name</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Package Count</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Remaining</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredPurchasedServices.map((service: any, index: number) => (
-                      <TableRow key={index} sx={{ '&:hover': { bgcolor: '#1a2234' } }}>
-                      <TableCell 
-                        sx={{ 
-                            color: selectedService === service.service ? '#3b82f6' : '#f3f4f6',
+                      <TableRow key={index} sx={{ '&:hover': { bgcolor: 'var(--surface)' } }}>
+                      <TableCell
+                        sx={{
+                            color: selectedService === service.service ? '#3b82f6' : 'var(--text-primary)',
                           cursor: 'pointer',
-                            borderBottom: '1px solid #2d3748',
+                            borderBottom: '1px solid var(--border)',
                           '&:hover': {
-                              color: '#3b82f6',
+                              color: 'var(--primary)',
                             textDecoration: 'underline'
                           },
                           fontWeight: selectedService === service.service ? 600 : 400,
@@ -1526,8 +1641,8 @@ SELECT
                       >
                         {service.service}
                       </TableCell>
-                        <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{service.packageCount}</TableCell>
-                        <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{service.remainingPackageCount}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{service.packageCount}</TableCell>
+                        <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{service.remainingPackageCount}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1537,47 +1652,47 @@ SELECT
         </Grid>
 
         <Grid item xs={12} md={6}>
-            <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', height: '100%', borderRadius: '8px' }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'var(--surface)', color: 'var(--text-primary)', height: '100%', borderRadius: '8px' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ color: '#f3f4f6' }}>
+                <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>
                   All Bookings
                   {selectedService && (
-                    <Typography component="span" sx={{ color: '#3b82f6', fontSize: '0.9em', ml: 1 }}>
+                    <Typography component="span" sx={{ color: 'var(--primary)', fontSize: '0.9em', ml: 1 }}>
                       (Filtered by: {selectedService})
                     </Typography>
                   )}
                 </Typography>
                 {selectedService && (
-                  <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+                  <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>
                     {filteredBookings.length} booking{filteredBookings.length !== 1 ? 's' : ''}
                   </Typography>
                 )}
               </Box>
-              <TableContainer sx={{ 
-                maxHeight: '400px', 
+              <TableContainer sx={{
+                maxHeight: '400px',
                 overflowY: 'auto',
                 '&::-webkit-scrollbar': {
                   width: '8px',
                   height: '8px',
                 },
                 '&::-webkit-scrollbar-track': {
-                  backgroundColor: '#111923',
+                  backgroundColor: 'var(--surface-secondary)',
                 },
                 '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: '#2d3748',
+                  backgroundColor: 'var(--border)',
                   borderRadius: '4px',
                 },
                 '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: '#3b82f6',
+                  backgroundColor: 'var(--primary)',
                 }
               }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Check-in Time</TableCell>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Service</TableCell>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Therapist</TableCell>
-                      <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748' }}>Status</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Check-in Time</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Service</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Therapist</TableCell>
+                      <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>Status</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1586,11 +1701,11 @@ SELECT
                     .map((booking: any, index: number) => {
                       console.log("Rendering booking at index", index, ":", booking);
                       return (
-                        <TableRow key={index} sx={{ '&:hover': { bgcolor: '#1a2234' } }}>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{booking.date}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{booking.service}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{booking.therapist}</TableCell>
-                          <TableCell sx={{ borderBottom: '1px solid #2d3748' }}>
+                        <TableRow key={index} sx={{ '&:hover': { bgcolor: 'var(--surface)' } }}>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{booking.date}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{booking.service}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{booking.therapist}</TableCell>
+                          <TableCell sx={{ borderBottom: '1px solid var(--border)' }}>
                         <Box
                           sx={{
                             display: 'inline-block',
@@ -1598,7 +1713,7 @@ SELECT
                             py: 0.5,
                             borderRadius: 1,
                                 bgcolor: booking.status === 'CANCEL' ? '#ef4444' : '#10b981',
-                            color: '#fff',
+                            color: 'var(--text-primary)',
                             fontSize: '0.75rem'
                           }}
                         >
@@ -1616,17 +1731,17 @@ SELECT
                 value={rowsPerPage}
                 onChange={handleChangeRowsPerPage}
                 sx={{
-                    color: '#f3f4f6',
-                    bgcolor: '#101924',
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2d3748' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4a5568' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' }
+                    color: 'var(--text-primary)',
+                    bgcolor: 'var(--surface)',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border)' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--text-muted)' },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--primary)' }
                 }}
                 size="small"
               >
-                  <MenuItem value={5} sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>5 per page</MenuItem>
-                  <MenuItem value={10} sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>10 per page</MenuItem>
-                  <MenuItem value={25} sx={{ bgcolor: '#1a2234', color: '#f3f4f6' }}>25 per page</MenuItem>
+                  <MenuItem value={5} sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>5 per page</MenuItem>
+                  <MenuItem value={10} sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>10 per page</MenuItem>
+                  <MenuItem value={25} sx={{ bgcolor: 'var(--surface)', color: 'var(--text-primary)' }}>25 per page</MenuItem>
               </Select>
               <Pagination
                 count={Math.ceil(filteredBookings.length / rowsPerPage)}
@@ -1634,13 +1749,13 @@ SELECT
                 onChange={(event, newPage) => handleChangePage(event, newPage - 1)}
                 sx={{
                   '& .MuiPaginationItem-root': {
-                      color: '#d1d5db',
+                      color: 'var(--text-secondary)',
                   },
                   '& .MuiPaginationItem-root.Mui-selected': {
-                      bgcolor: '#3b82f6',
-                    color: '#ffffff',
+                      bgcolor: 'var(--primary)',
+                    color: 'var(--text-primary)',
                     '&:hover': {
-                        bgcolor: '#2563eb'
+                        bgcolor: 'var(--primary-hover)'
                     }
                   }
                 }}
@@ -1651,141 +1766,304 @@ SELECT
       </Grid>
 
         {/* Service usage heatmap */}
-        <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', mb: 3, borderRadius: '8px' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" sx={{ color: '#f3f4f6' }}>Service Usage Over Time</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <Typography variant="body2" sx={{ mr: 1, color: '#94a3b8' }}>
-                Year:
+        <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'var(--surface)', color: 'var(--text-primary)', mb: 3, borderRadius: 2.5, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 2 }}>
+            <Box>
+              <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 700 }}>Service Usage Pattern</Typography>
+              <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.8rem', mt: 0.4 }}>
+                {serviceUsageView === 'lifetime'
+                  ? 'Lifetime service frequency by year. Select a year cell to open its January–December detail.'
+                  : `Monthly service frequency from January through December ${selectedYear}. Select a service name to open its details.`}
               </Typography>
-              <Select
-                value={selectedYear}
-                onChange={handleYearChange}
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'var(--surface)' }}>
+                <Button
+                  size="small"
+                  variant={serviceUsageView === 'lifetime' ? 'contained' : 'text'}
+                  onClick={() => setServiceUsageView('lifetime')}
+                  sx={{ borderRadius: 0, boxShadow: 'none', bgcolor: serviceUsageView === 'lifetime' ? 'var(--primary)' : 'transparent', color: serviceUsageView === 'lifetime' ? 'var(--text-on-primary)' : 'var(--text-secondary)', '&:hover': { bgcolor: serviceUsageView === 'lifetime' ? 'var(--primary-hover)' : 'var(--surface-secondary)' } }}
+                >
+                  Lifetime overview
+                </Button>
+                <Button
+                  size="small"
+                  variant={serviceUsageView === 'year' ? 'contained' : 'text'}
+                  onClick={() => setServiceUsageView('year')}
+                  sx={{ borderRadius: 0, boxShadow: 'none', bgcolor: serviceUsageView === 'year' ? 'var(--primary)' : 'transparent', color: serviceUsageView === 'year' ? 'var(--text-on-primary)' : 'var(--text-secondary)', '&:hover': { bgcolor: serviceUsageView === 'year' ? 'var(--primary-hover)' : 'var(--surface-secondary)' } }}
+                >
+                  Monthly detail · {selectedYear}
+                </Button>
+              </Box>
+              <Chip
                 size="small"
-                sx={{
-                  height: '32px',
-                  minWidth: '100px',
-                  bgcolor: '#1e293b',
-                  color: '#f1f5f9',
-                  '& .MuiSelect-icon': {
-                    color: '#94a3b8'
-                  },
-                  '&:hover': {
-                    bgcolor: '#1e293b'
-                  },
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#2d3748'
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#3b82f6'
-                  }
-                }}
-              >
-                {yearOptions.map((year) => (
-                  <MenuItem key={year} value={year}>
-                    {year}
-                  </MenuItem>
-                ))}
-              </Select>
+                label={`${serviceUsageView === 'lifetime' ? lifetimeUsageMetrics.totalUses : serviceUsageMetrics.totalUses} service uses`}
+                sx={{ bgcolor: 'var(--primary-soft)', color: 'var(--primary)', fontWeight: 650 }}
+              />
+              <Chip
+                size="small"
+                label={serviceUsageView === 'lifetime' ? `${lifetimeUsageMetrics.activeYears} active years` : `${serviceUsageMetrics.activeMonths}/12 active months`}
+                sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)' }}
+              />
+              {serviceUsageView === 'lifetime' && lifetimeUsageMetrics.topService && (
+                <Chip size="small" label={`Top: ${lifetimeUsageMetrics.topService}`} sx={{ bgcolor: 'var(--success-soft)', color: 'var(--success)', maxWidth: 260 }} />
+              )}
+              {serviceUsageView === 'year' && serviceUsageMetrics.topService && (
+                <Tooltip title={`${serviceUsageMetrics.topService.total} uses in ${selectedYear}`}>
+                  <Chip size="small" label={`Top: ${serviceUsageMetrics.topService.service}`} sx={{ bgcolor: 'var(--success-soft)', color: 'var(--success)', maxWidth: 260 }} />
+                </Tooltip>
+              )}
             </Box>
           </Box>
-          <TableContainer sx={{ 
-            maxHeight: '400px', 
-            overflowY: 'auto',
+          {lifetimeUsageError && serviceUsageView === 'lifetime' && (
+            <Box sx={{ p: 2, mb: 1.5, bgcolor: 'var(--error-soft)', border: '1px solid var(--error)', borderRadius: 1.5 }}>
+              <Typography sx={{ color: 'var(--error)', fontSize: '0.85rem' }}>{lifetimeUsageError}</Typography>
+            </Box>
+          )}
+          {serviceUsageView === 'lifetime' && (
+            <TableContainer sx={{
+              maxHeight: '420px',
+              overflow: 'auto',
+              border: '1px solid var(--border)',
+              borderRadius: 1.5,
+              '&::-webkit-scrollbar': { width: '8px', height: '8px' },
+              '&::-webkit-scrollbar-track': { backgroundColor: 'var(--surface-secondary)' },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: 'var(--border)', borderRadius: '4px' },
+              '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'var(--primary)' }
+            }}>
+              <Table size="small" stickyHeader sx={{ minWidth: Math.max(760, 430 + lifetimeServiceUsage.years.length * 88) }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 700, position: 'sticky', left: 0, zIndex: 3, minWidth: 250, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                      Service
+                    </TableCell>
+                    {lifetimeServiceUsage.years.map(year => (
+                      <TableCell key={year} align="center" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 700, minWidth: 88, borderBottom: '1px solid var(--border)' }}>
+                        {year}
+                      </TableCell>
+                    ))}
+                    <TableCell align="center" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 700, minWidth: 105, borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                      Lifetime Total
+                    </TableCell>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 700, minWidth: 130, borderBottom: '1px solid var(--border)' }}>
+                      Last Used
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {lifetimeUsageLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={Math.max(3, lifetimeServiceUsage.years.length + 3)} align="center" sx={{ py: 6, color: 'var(--text-secondary)' }}>
+                        <CircularProgress size={24} sx={{ color: 'var(--primary)', mr: 1.5 }} />
+                        Loading lifetime service usage…
+                      </TableCell>
+                    </TableRow>
+                  ) : lifetimeServiceUsage.services.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={Math.max(3, lifetimeServiceUsage.years.length + 3)} align="center" sx={{ py: 6, color: 'var(--text-secondary)' }}>
+                        No service activity recorded for this customer.
+                      </TableCell>
+                    </TableRow>
+                  ) : lifetimeServiceUsage.services.map(service => {
+                    const maxValue = getMaxValue(lifetimeServiceUsage.data);
+                    return (
+                      <TableRow key={service} sx={{ '&:hover': { bgcolor: 'var(--surface-secondary)' } }}>
+                        <TableCell
+                          sx={{ color: 'var(--text-primary)', position: 'sticky', left: 0, bgcolor: 'var(--surface)', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', cursor: 'pointer', px: 2, py: 1.5, fontWeight: 650, '&:hover': { color: 'var(--primary)', textDecoration: 'underline' } }}
+                          onClick={() => navigate(`/services/${encodeURIComponent(service)}`)}
+                        >
+                          {service}
+                        </TableCell>
+                        {lifetimeServiceUsage.years.map(year => {
+                          const count = lifetimeServiceUsage.data[service]?.[String(year)] || 0;
+                          return (
+                            <Tooltip key={`${service}-${year}`} title={count > 0 ? `${service} · ${year}: ${count} use${count === 1 ? '' : 's'}. Open monthly detail.` : `${service} · ${year}: no usage`} arrow>
+                              <TableCell
+                                align="center"
+                                role={count > 0 ? 'button' : undefined}
+                                tabIndex={count > 0 ? 0 : undefined}
+                                onClick={count > 0 ? () => handleUsageYearClick(year) : undefined}
+                                onKeyDown={count > 0 ? event => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    handleUsageYearClick(year);
+                                  }
+                                } : undefined}
+                                sx={{
+                                  color: count / maxValue > 0.55 ? '#ffffff' : 'var(--text-primary)',
+                                  bgcolor: getHeatmapColor(count, maxValue),
+                                  borderBottom: '1px solid var(--border)',
+                                  p: 1.25,
+                                  fontWeight: count > 0 ? 750 : 400,
+                                  cursor: count > 0 ? 'pointer' : 'default',
+                                  transition: 'transform 140ms ease, box-shadow 140ms ease',
+                                  '&:hover': count > 0 ? { position: 'relative', zIndex: 2, transform: 'scale(1.04)', boxShadow: 'inset 0 0 0 2px var(--primary)' } : undefined,
+                                  '&:focus-visible': { outline: '2px solid var(--primary)', outlineOffset: '-2px' }
+                                }}
+                              >
+                                {count || '–'}
+                              </TableCell>
+                            </Tooltip>
+                          );
+                        })}
+                        <TableCell align="center" sx={{ color: 'var(--text-primary)', bgcolor: 'var(--surface-secondary)', fontWeight: 750, borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                          {lifetimeServiceUsage.totals[service] || 0}
+                        </TableCell>
+                        <TableCell sx={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                          {formatLastUsedDate(lifetimeServiceUsage.lastUsed[service])}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+          <Box sx={{ display: serviceUsageView === 'year' ? 'flex' : 'none', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1.5 }}>
+            <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 650, mr: 0.5 }}>Uses</Typography>
+            {[
+              { label: '0', color: 'var(--surface-secondary)' },
+              { label: '1', color: 'rgba(7, 65, 66, 0.2)' },
+              { label: '2–3', color: 'rgba(7, 65, 66, 0.4)' },
+              { label: '4–6', color: 'rgba(7, 65, 66, 0.65)' },
+              { label: '7+', color: 'rgba(7, 65, 66, 0.88)' },
+            ].map((item) => (
+              <Box key={item.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Box sx={{ width: 18, height: 18, borderRadius: 0.75, bgcolor: item.color, border: '1px solid var(--border)' }} />
+                <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>{item.label}</Typography>
+              </Box>
+            ))}
+          </Box>
+          {serviceUsageView === 'year' && serviceUsageError && (
+            <Box sx={{ p: 2, mb: 1.5, bgcolor: 'var(--error-soft)', border: '1px solid var(--error)', borderRadius: 1.5 }}>
+              <Typography sx={{ color: 'var(--error)', fontSize: '0.85rem' }}>{serviceUsageError}</Typography>
+            </Box>
+          )}
+          <TableContainer sx={{
+            display: serviceUsageView === 'year' ? 'block' : 'none',
+            maxHeight: '400px',
+            overflow: 'auto',
             '&::-webkit-scrollbar': {
               width: '8px',
               height: '8px',
             },
             '&::-webkit-scrollbar-track': {
-              backgroundColor: '#111923',
+              backgroundColor: 'var(--surface-secondary)',
             },
             '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#2d3748',
+              backgroundColor: 'var(--border)',
               borderRadius: '4px',
             },
             '&::-webkit-scrollbar-thumb:hover': {
-              backgroundColor: '#3b82f6',
+              backgroundColor: 'var(--primary)',
             }
           }}>
-            <Table size="small" stickyHeader>
+            <Table size="small" stickyHeader sx={{ minWidth: 1220 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell 
-                    sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db',
+                  <TableCell
+                    sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
                       position: 'sticky',
                       left: 0,
                       zIndex: 3,
-                      borderRight: '1px solid #2d3748',
-                      borderBottom: '1px solid #2d3748'
+                      minWidth: 230,
+                      borderRight: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border)'
                     }}
                   >
                     Service
                   </TableCell>
-                  {serviceUsageData.months.map((month: unknown) => (
-                    <TableCell 
-                      key={month as string} 
-                      sx={{ 
-                        bgcolor: '#101924', 
-                        color: '#d1d5db',
+                  {serviceUsageData.months.map((month: string) => (
+                    <TableCell
+                      key={month}
+                      align="center"
+                      sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
                         fontWeight: 600,
-                        borderBottom: '1px solid #2d3748'
+                        minWidth: 74,
+                        borderBottom: '1px solid var(--border)'
                       }}
                     >
-                      {month as string}
+                      {formatHeatmapMonth(month)}
                     </TableCell>
                   ))}
+                  <TableCell align="center" sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 700, minWidth: 80, borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                    Total
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {serviceUsageData.services.map((service: unknown) => {
+                {serviceUsageLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={14} align="center" sx={{ py: 6, color: 'var(--text-secondary)' }}>
+                      <CircularProgress size={24} sx={{ color: 'var(--primary)', mr: 1.5 }} />
+                      Loading service usage…
+                    </TableCell>
+                  </TableRow>
+                ) : serviceUsageData.services.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={14} align="center" sx={{ py: 6, color: 'var(--text-secondary)' }}>
+                      No service activity recorded in {selectedYear}.
+                    </TableCell>
+                  </TableRow>
+                ) : serviceUsageData.services.map((service: string) => {
                   const maxValue = getMaxValue(serviceUsageData.data);
                   return (
-                    <TableRow key={service as string} sx={{ '&:hover': { bgcolor: '#1a2234' } }}>
-                      <TableCell 
-                        sx={{ 
-                          color: '#f3f4f6',
+                    <TableRow key={service} sx={{ '&:hover': { bgcolor: 'var(--surface-secondary)' } }}>
+                      <TableCell
+                        sx={{
+                          color: 'var(--text-primary)',
                           position: 'sticky',
                           left: 0,
-                          bgcolor: '#1a2234',
-                          borderRight: '1px solid #2d3748',
-                          borderBottom: '1px solid #2d3748',
+                          bgcolor: 'var(--surface)',
+                          borderRight: '1px solid var(--border)',
+                          borderBottom: '1px solid var(--border)',
                           cursor: 'pointer',
                           padding: '12px 16px',
                           height: '48px',
                           '&:hover': {
-                            color: '#3b82f6',
+                            color: 'var(--primary)',
                             textDecoration: 'underline'
                           }
                         }}
-                        onClick={() => navigate(`/services/${encodeURIComponent(service as string)}`)}
+                        onClick={() => navigate(`/services/${encodeURIComponent(service)}`)}
                       >
-                        {service as string}
+                        {service}
                       </TableCell>
-                      {serviceUsageData.months.map((month: unknown) => {
-                        const count = serviceUsageData.data[service as string][month as string] || 0;
+                      {serviceUsageData.months.map((month: string) => {
+                        const count = serviceUsageData.data[service]?.[month] || 0;
                         return (
-                          <TableCell 
-                            key={`${service as string}-${month as string}`} 
-                            align="center"
-                            sx={{ 
-                              color: '#f3f4f6',
-                              bgcolor: getHeatmapColor(count, maxValue),
-                              borderBottom: '1px solid #2d3748',
-                              padding: '12px 16px',
-                              height: '48px',
-                              transition: 'background-color 0.3s ease',
-                              '&:hover': {
-                                bgcolor: count > 0 ? `rgba(59, 130, 246, ${Math.min((count / maxValue) * 0.9 + 0.2, 1)})` : 'transparent'
-                              }
-                            }}
-                          >
-                            {count}
-                          </TableCell>
+                          <Tooltip key={`${service}-${month}`} title={`${service} · ${formatHeatmapMonth(month)} ${selectedYear}: ${count} use${count === 1 ? '' : 's'}`} arrow>
+                            <TableCell
+                              align="center"
+                              sx={{
+                                color: count / maxValue > 0.55 ? '#ffffff' : 'var(--text-primary)',
+                                bgcolor: getHeatmapColor(count, maxValue),
+                                borderBottom: '1px solid var(--border)',
+                                p: 1.25,
+                                height: '44px',
+                                fontWeight: count > 0 ? 700 : 400,
+                                transition: 'transform 140ms ease, box-shadow 140ms ease',
+                                '&:hover': {
+                                  position: 'relative',
+                                  zIndex: 2,
+                                  transform: 'scale(1.04)',
+                                  boxShadow: 'inset 0 0 0 2px var(--primary)'
+                                }
+                              }}
+                            >
+                              {count || '–'}
+                            </TableCell>
+                          </Tooltip>
                         );
                       })}
+                      <TableCell align="center" sx={{ color: 'var(--text-primary)', bgcolor: 'var(--surface-secondary)', fontWeight: 750, borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                        {serviceUsageMetrics.serviceTotals[service] || 0}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -1794,128 +2072,44 @@ SELECT
           </TableContainer>
         </Paper>
 
-        {/* Recommended services section */}
-      {recommendedServices.length > 0 && (
-          <Paper sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#1a2234', color: '#f3f4f6', mb: 3, borderRadius: '8px' }}>
-            <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: '#f3f4f6' }}>
-              <RecommendIcon sx={{ color: '#3b82f6' }} />
-              Recommended Services
-          </Typography>
-            <TableContainer sx={{ 
-              maxHeight: '300px', 
-              overflowY: 'auto',
-              '&::-webkit-scrollbar': {
-                width: '8px',
-                height: '8px',
-              },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: '#111923',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: '#2d3748',
-                borderRadius: '4px',
-              },
-              '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: '#3b82f6',
-              }
-            }}>
-              <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
-                      fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
-                  }}>Service Name</TableCell>
-                  <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
-                      fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
-                  }}>Popularity</TableCell>
-                  <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
-                      fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
-                  }}>Total Customers</TableCell>
-                  <TableCell sx={{ 
-                      bgcolor: '#101924', 
-                      color: '#d1d5db', 
-                      fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
-                  }}>Average Price</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {recommendedServices.map((service, index) => (
-                    <TableRow key={index} sx={{ '&:hover': { bgcolor: '#1a2234' } }}>
-                    <TableCell 
-                      sx={{ 
-                          color: '#3b82f6',
-                        cursor: 'pointer',
-                        fontWeight: 500,
-                          borderBottom: '1px solid #2d3748',
-                        '&:hover': {
-                            color: '#60a5fa',
-                          textDecoration: 'underline'
-                        }
-                      }}
-                        onClick={() => navigate(`/services/${encodeURIComponent(service.service_name)}`)}
-                    >
-                      {service.service_name}
-                    </TableCell>
-                      <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
-                      {service.bought_together_count} times bought together
-                    </TableCell>
-                      <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
-                      {service.total_customers} customers
-                    </TableCell>
-                      <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
-                      {formatCurrency(service.avg_price, currentClinic)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      )}
-
         {/* Payment History Section */}
         <Box sx={{ mt: 6, mb: 4 }}>
-          <Typography variant="h5" fontWeight="bold" mb={3} color="#e2e8f0">
-            Payment History
-          </Typography>
-          
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h5" fontWeight="bold" color="var(--text-primary)">
+              Payment History · {selectedYear}
+            </Typography>
+            <Typography sx={{ mt: 0.5, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+              Paid invoice value and payment mix for the selected analysis year.
+            </Typography>
+          </Box>
+
           {paymentLoading && (
             <Box display="flex" justifyContent="center" alignItems="center" p={3}>
-              <CircularProgress size={30} sx={{ color: '#3b82f6' }} />
-              <Typography ml={2} color="#d1d5db">Loading payment history...</Typography>
+              <CircularProgress size={30} sx={{ color: 'var(--primary)' }} />
+              <Typography ml={2} color="var(--text-secondary)">Loading payment history...</Typography>
             </Box>
           )}
-          
+
           {paymentError && (
-            <Box 
-              sx={{ 
-                p: 2, 
-                bgcolor: '#1a1e2b', 
+            <Box
+              sx={{
+                p: 2,
+                bgcolor: 'var(--surface-secondary)',
                 borderRadius: 2,
                 border: '1px solid #7f1d1d',
-                mb: 2 
+                mb: 2
               }}
             >
               <Typography color="#ef4444">
                 {paymentError}
               </Typography>
-              <Button 
-                variant="outlined" 
-                size="small" 
-                sx={{ 
+              <Button
+                variant="outlined"
+                size="small"
+                sx={{
                   mt: 1,
-                  color: '#3b82f6',
-                  borderColor: '#3b82f6',
+                  color: 'var(--primary)',
+                  borderColor: 'var(--primary)',
                   '&:hover': {
                     borderColor: '#60a5fa',
                     bgcolor: 'rgba(59, 130, 246, 0.1)'
@@ -1930,52 +2124,52 @@ SELECT
               </Button>
             </Box>
           )}
-          
+
           {!paymentLoading && !paymentError && paymentHistory.length === 0 && (
-            <Box 
-              sx={{ 
-                p: 3, 
-                bgcolor: '#1a2235', 
+            <Box
+              sx={{
+                p: 3,
+                bgcolor: 'var(--surface)',
                 borderRadius: 2,
                 textAlign: 'center',
                 mb: 2,
-                border: '1px solid #2d3748'
+                border: '1px solid var(--border)'
               }}
             >
-              <Typography variant="body1" color="#d1d5db">
+              <Typography variant="body1" color="var(--text-secondary)">
                 No payment history available for this customer.
               </Typography>
             </Box>
           )}
-          
+
           {!paymentLoading && !paymentError && paymentHistory.length > 0 && (
             <>
               {/* Payment Summary */}
               {paymentSummary && (
                 <Grid container spacing={2} sx={{ mb: 3 }}>
                   <Grid item xs={12} sm={4}>
-                    <Paper elevation={0} sx={{ p: 2, bgcolor: '#1a2235', height: '100%', border: '1px solid #2d3748' }}>
-                      <Typography variant="subtitle2" color="#94a3b8">
+                    <Paper elevation={0} sx={{ p: 2, bgcolor: 'var(--surface)', height: '100%', border: '1px solid var(--border)' }}>
+                      <Typography variant="subtitle2" color="var(--text-secondary)">
                         Total Spent
                       </Typography>
-                      <Typography variant="h6" fontWeight="bold" color="#e2e8f0">
+                      <Typography variant="h6" fontWeight="bold" color="var(--text-primary)">
                         {formatCurrency(paymentSummary.totalSpent, currentClinic)}
                       </Typography>
                     </Paper>
                   </Grid>
                   <Grid item xs={12} sm={4}>
-                    <Paper elevation={0} sx={{ p: 2, bgcolor: '#1a2235', height: '100%', border: '1px solid #2d3748' }}>
-                      <Typography variant="subtitle2" color="#94a3b8">
+                    <Paper elevation={0} sx={{ p: 2, bgcolor: 'var(--surface)', height: '100%', border: '1px solid var(--border)' }}>
+                      <Typography variant="subtitle2" color="var(--text-secondary)">
                         Invoices
                       </Typography>
-                      <Typography variant="h6" fontWeight="bold" color="#e2e8f0">
+                      <Typography variant="h6" fontWeight="bold" color="var(--text-primary)">
                         {paymentSummary.invoiceCount}
                       </Typography>
                     </Paper>
                   </Grid>
                   <Grid item xs={12} sm={4}>
-                    <Paper elevation={0} sx={{ p: 2, bgcolor: '#1a2235', height: '100%', border: '1px solid #2d3748' }}>
-                      <Typography variant="subtitle2" color="#94a3b8">
+                    <Paper elevation={0} sx={{ p: 2, bgcolor: 'var(--surface)', height: '100%', border: '1px solid var(--border)' }}>
+                      <Typography variant="subtitle2" color="var(--text-secondary)">
                         Payment Methods
                       </Typography>
                       <Box>
@@ -1984,13 +2178,13 @@ SELECT
                             key={pm.method}
                             label={`${pm.method} (${pm.count})`}
                             size="small"
-                            sx={{ 
-                              mr: 0.5, 
+                            sx={{
+                              mr: 0.5,
                               mb: 0.5,
-                              bgcolor: '#2d3748',
-                              color: '#d1d5db',
+                              bgcolor: 'var(--border)',
+                              color: 'var(--text-secondary)',
                               '& .MuiChip-label': {
-                                color: '#d1d5db'
+                                color: 'var(--text-secondary)'
               }
             }}
           />
@@ -2000,71 +2194,71 @@ SELECT
                   </Grid>
                 </Grid>
               )}
-              
+
               {/* Payment Table */}
               <Box sx={{ overflowX: 'auto' }}>
-                <TableContainer component={Paper} elevation={0} sx={{ 
-                  bgcolor: '#1a2235',
-                  border: '1px solid #2d3748',
+                <TableContainer component={Paper} elevation={0} sx={{
+                  bgcolor: 'var(--surface)',
+                  border: '1px solid var(--border)',
                   '&::-webkit-scrollbar': {
                     width: '8px',
                     height: '8px',
                   },
                   '&::-webkit-scrollbar-track': {
-                    backgroundColor: '#111923',
+                    backgroundColor: 'var(--surface-secondary)',
                   },
                   '&::-webkit-scrollbar-thumb': {
-                    backgroundColor: '#2d3748',
+                    backgroundColor: 'var(--border)',
                     borderRadius: '4px',
                   },
                   '&::-webkit-scrollbar-thumb:hover': {
-                    backgroundColor: '#4a5568',
+                    backgroundColor: 'var(--text-muted)',
                   },
                 }}>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>Date</TableCell>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>Invoice</TableCell>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>Service</TableCell>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>Package</TableCell>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>Payment Method</TableCell>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>Sales Person</TableCell>
-                        <TableCell sx={{ 
-                          bgcolor: '#101924', 
-                          color: '#d1d5db', 
+                        <TableCell sx={{
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }} align="right">Amount</TableCell>
                       </TableRow>
                     </TableHead>
@@ -2072,25 +2266,25 @@ SELECT
                       {paymentHistoryRows.map((payment, index) => (
                         <TableRow key={`${payment.invoiceNumber}-${index}`} sx={{
                           '&:hover': {
-                            bgcolor: '#242f3d',
+                            bgcolor: 'var(--surface-secondary)',
                           },
-                          bgcolor: '#111923',
+                          bgcolor: 'var(--surface-secondary)',
                           '&:nth-of-type(odd)': {
-                            bgcolor: '#121826',
+                            bgcolor: 'var(--background)',
                           },
-                          borderBottom: '1px solid #2d3748'
+                          borderBottom: '1px solid var(--border)'
                         }}>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.date}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.invoiceNumber}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.ServiceName}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.ServicePackageName || '-'}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.method}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>{payment.SellerName || '-'}</TableCell>
-                          <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }} align="right">
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.date}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.invoiceNumber}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.ServiceName}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.ServicePackageName || '-'}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.method}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.SellerName || '-'}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
                             {payment.displayAmount !== null ? (
                               formatCurrency(Number(payment.displayAmount), currentClinic)
                             ) : (
-                              <span style={{ color: '#9ca3af' }}>-</span>
+                              <span style={{ color: 'var(--text-secondary)' }}>-</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -2102,6 +2296,12 @@ SELECT
             </>
           )}
         </Box>
+
+        <Customer360Panel
+          phoneNumber={customerData.phone || decodeURIComponent(phoneNumber || '')}
+          clinicCode={currentClinic?.code || ''}
+          customerName={customerData.name}
+        />
 
         {/* Wallet Transaction History Table */}
         <Grid item xs={12}>
@@ -2148,7 +2348,7 @@ SELECT
                           <TableCell>{tx.transactionNumber}</TableCell>
                           <TableCell>{tx.type}</TableCell>
                           <TableCell>
-                            <Chip 
+                            <Chip
                               label={tx.status}
                               color={tx.status === 'IN' ? 'success' : 'error'}
                               size="small"

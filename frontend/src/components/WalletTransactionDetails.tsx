@@ -1,1016 +1,426 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import {
+  Alert,
+  Box,
+  Breadcrumbs,
+  Button,
+  Chip,
+  CircularProgress,
+  FormControl,
+  IconButton,
+  InputAdornment,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
+  SelectChangeEvent,
+  Stack,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Typography,
-  CircularProgress,
-  Box,
-  Alert,
+  TableSortLabel,
   TextField,
-  InputAdornment,
-  IconButton,
-  useTheme,
+  Typography,
   alpha,
-  Button,
-  Chip,
-  Breadcrumbs,
-  Link as MuiLink,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  SelectChangeEvent,
+  useTheme,
 } from '@mui/material';
-import SearchIcon from '@mui/icons-material/Search';
-import ClearIcon from '@mui/icons-material/Clear';
-import ReplayIcon from '@mui/icons-material/Replay';
-import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
+import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
+import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
+import ClearRoundedIcon from '@mui/icons-material/ClearRounded';
+import FileDownloadRoundedIcon from '@mui/icons-material/FileDownloadRounded';
+import FilterAltOffRoundedIcon from '@mui/icons-material/FilterAltOffRounded';
+import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded';
+import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded';
+import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
+import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import axios from 'axios';
-import { format, isWithinInterval, parseISO } from 'date-fns';
-import { useClinic } from '../contexts/ClinicContext';
-import { useParams, Link as RouterLink } from 'react-router-dom';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { format } from 'date-fns';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { Link as RouterLink, useParams } from 'react-router-dom';
+import { useClinic } from '../contexts/ClinicContext';
+import {
+  buildWalletAccountTransactionsQuery,
+  formatMmk,
+  formatMyanmarWalletDateTime,
+  formatSignedMmk,
+  getMyanmarWalletDateKey,
+  MYANMAR_TIME_ZONE_LABEL,
+  parseWalletNumber,
+  summarizeWalletTransactions,
+} from '../utils/walletTransactionReport';
 
-// Define Transaction interface with all required properties
 interface Transaction {
   transactionNumber: string;
-  createddate_myanmar: string;
   type: string;
   status: string;
-  balance: string;
+  amount: string | number | null;
   comment: string | null;
-  accountbalance: string;
+  walletBalanceAfter: string | number | null;
+  mainAccountID: string | null;
+  walletAccount: string;
   senderName: string | null;
   senderPhone: string | null;
   recipientName: string | null;
   recipientPhone: string | null;
-  [key: string]: string | null; // Index signature for dynamic access
+  createddate_myanmar: string;
+  ClinicCode: string;
+  ClinicName: string;
 }
 
-// Mock data for when backend is unavailable
-const MOCK_TRANSACTIONS: Transaction[] = [
-  {
-    ClinicName: 'Fancy House',
-    transactionNumber: '21174358591610531',
-    type: 'Transfer',
-    status: 'IN',
-    balance: '1000.00',
-    comment: 'Buy points',
-    accountbalance: '191548500.00',
-    MainAccountName: 'Johnathan Lim',
-    senderName: 'U Than Zaw',
-    senderPhone: '+959501288',
-    recipientName: 'Johnathan Lim',
-    recipientPhone: '+95997760677',
-    createddate_myanmar: '2025-04-02 15:55:16'
-  },
-  {
-    ClinicName: 'Fancy House',
-    transactionNumber: '21174358591610532',
-    type: 'Transfer',
-    status: 'OUT',
-    balance: '5000.00',
-    comment: 'Service payment',
-    accountbalance: '190548500.00',
-    MainAccountName: 'Johnathan Lim',
-    senderName: 'Johnathan Lim',
-    senderPhone: '+95997760677',
-    recipientName: 'U Than Zaw',
-    recipientPhone: '+959501288',
-    createddate_myanmar: '2025-04-03 10:21:43'
-  }
-];
+type SortKey = 'createddate_myanmar' | 'transactionNumber' | 'type' | 'status' | 'amount' | 'walletBalanceAfter';
+type SortDirection = 'asc' | 'desc';
 
-// Helper function to parse transaction date
-const parseTransactionDate = (dateString: string): Date | null => {
-  try {
-    // Try Myanmar date format: DD/MM/YYYY
-    const parts = dateString.split('/');
-    if (parts.length === 3) {
-      const [day, month, year] = parts;
-      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-    }
-    
-    // Fallback to ISO parsing
-    return parseISO(dateString);
-  } catch (error) {
-    console.error('Error parsing date:', dateString, error);
-    return null;
-  }
+const csvCell = (value: unknown): string => {
+  const text = String(value ?? '').replace(/"/g, '""');
+  return /[",\n\r]/.test(text) ? `"${text}"` : text;
 };
 
-// Helper function to compare values for sorting
-const compareValues = (
-  key: keyof Transaction, 
-  a: Transaction, 
-  b: Transaction, 
-  direction: 'asc' | 'desc'
-): number => {
-  // Handle date sorting specially
-  if (key === 'createddate_myanmar') {
-    const dateA = parseTransactionDate(a[key] as string);
-    const dateB = parseTransactionDate(b[key] as string);
-    
-    if (!dateA && !dateB) return 0;
-    if (!dateA) return direction === 'asc' ? 1 : -1;
-    if (!dateB) return direction === 'asc' ? -1 : 1;
-    
-    return direction === 'asc' 
-      ? dateA.getTime() - dateB.getTime() 
-      : dateB.getTime() - dateA.getTime();
-  }
-  
-  // Handle numeric fields (balance, accountbalance)
-  if (key === 'balance' || key === 'accountbalance') {
-    const numA = parseFloat(a[key] as string || '0');
-    const numB = parseFloat(b[key] as string || '0');
-    return direction === 'asc' ? numA - numB : numB - numA;
-  }
-  
-  // Default string comparison
-  const valA = (a[key] || '').toString().toLowerCase();
-  const valB = (b[key] || '').toString().toLowerCase();
-  
-  if (valA < valB) return direction === 'asc' ? -1 : 1;
-  if (valA > valB) return direction === 'asc' ? 1 : -1;
-  return 0;
-};
+const personCell = (name: string | null, phone: string | null) => (
+  <Box sx={{ minWidth: 125 }}>
+    <Typography sx={{ fontSize: '0.78rem', fontWeight: 650, color: 'text.primary' }}>{name || 'Not recorded'}</Typography>
+    <Typography sx={{ mt: 0.15, fontSize: '0.67rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>{phone || '—'}</Typography>
+  </Box>
+);
 
-// Properly define the component as a React functional component
 const WalletTransactionDetails: React.FC = () => {
-  // Get the wallet owner name from URL params
   const { ownerName } = useParams<{ ownerName: string }>();
   const decodedOwnerName = ownerName ? decodeURIComponent(ownerName) : '';
-  
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isMockData, setIsMockData] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [retryCount, setRetryCount] = useState(0);
-  
-  // Date filtering
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
-  
-  // Sorting state
-  const [sortConfig, setSortConfig] = useState<{
-    key: keyof Transaction;
-    direction: 'asc' | 'desc';
-  }>({
-    key: 'createddate_myanmar',
-    direction: 'desc', // Default: newest first
-  });
-  
-  // Get current clinic from context
   const { currentClinic } = useClinic();
-  
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
-  
-  // Add status filter state
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  
+
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
+    key: 'createddate_myanmar',
+    direction: 'desc',
+  });
+
   const fetchTransactions = useCallback(async () => {
-    if (!decodedOwnerName) {
-      setError('No wallet owner specified');
-      setLoading(false);
-      return;
-    }
-    
     setLoading(true);
     setError(null);
-    
-    if (!currentClinic) {
-      setError('No clinic selected. Please select a clinic first.');
-      setLoading(false);
-      return;
-    }
 
-    // Enhanced debug logging for clinic data
-    console.log('=== WALLET TRANSACTION DETAILS: CLINIC DATA DEBUG ===');
-    console.log('Current Clinic Full Data:', currentClinic);
-    console.log('Type of currentClinic:', typeof currentClinic);
-    console.log('Properties available:', Object.keys(currentClinic));
-    console.log('pass_id value:', currentClinic.pass_id);
-    console.log('pass_id type:', typeof currentClinic.pass_id);
-    console.log('clinic code:', currentClinic.code);
-    console.log('=== END CLINIC DEBUG ===');
-    
     try {
-      // Build SQL query to fetch transactions for the specific wallet owner
-      const query = `
-        SELECT 
-          ClinicName,
-          ClinicCode,
-          transactionNumber,
-          type,
-          status,
-          balance,
-          comment,
-          cash,
-          detailBalance,
-          accountbalance,
-          mainAccountID,
-          MainAccountName,
-          sender_id,
-          senderName,
-          senderPhone,
-          recipient_id,
-          recipientName,
-          recipientPhone,
-          createddate_myanmar
-        FROM 
-          \`piti-pass.passdb_prod.wallettransaction\`
-        WHERE 
-           MainAccountName = '${decodedOwnerName}' AND ClinicCode = '${currentClinic.pass_id}'
-        ORDER BY 
-          createddate_myanmar DESC
-        LIMIT 200
-      `;
-      
-      console.log('=== WALLET TRANSACTION DETAILS QUERY DEBUG ===');
-      console.log('Wallet transactions query for owner:', decodedOwnerName);
-      console.log('Using ClinicCode:', currentClinic.code);
-      console.log('Full SQL Query:', query);
-      console.log('=== END QUERY DEBUG ===');
+      if (!decodedOwnerName) throw new Error('No wallet account was selected.');
+      if (!currentClinic?.pass_id) throw new Error('The selected clinic is not connected to a wallet account.');
 
-      const searchQuery = new URLSearchParams({
-        projectId: "piti-pass",
-        location: "us-central1",
-      })
+      const query = buildWalletAccountTransactionsQuery({
+        clinicCode: currentClinic.pass_id,
+        ownerName: decodedOwnerName,
+      });
+      const searchQuery = new URLSearchParams({ projectId: 'piti-pass', location: 'us-central1' });
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/query2?${searchQuery}`,
+        { query },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+          },
+          timeout: 30000,
+        },
+      );
 
-      try {
-        const response = await axios.post(`${import.meta.env.VITE_API_URL}/query2?${searchQuery}`, 
-          { query },
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-            },
-            timeout: 30000 // 30 seconds timeout
-          }
-        );
-        
-        if (response.data && response.data.success && response.data.data) {
-          console.log(`Fetched ${response.data.data.length} transactions for wallet owner: ${decodedOwnerName}`);
-          
-          setTransactions(response.data.data);
-          setIsMockData(false);
-        } else {
-          console.warn('Invalid data format from backend:', response.data);
-          throw new Error('Backend returned invalid data format');
-        }
-      } catch (axiosError: any) {
-        console.error('Query execution error:', axiosError.response?.data || axiosError);
-        
-        // Log more detailed error information if available
-        if (axiosError.response?.data?.error) {
-          console.error('SQL Error details:', axiosError.response.data.error);
-        }
-        
-        throw axiosError;
+      if (!response.data?.success || !Array.isArray(response.data.data)) {
+        throw new Error('The wallet service returned an unexpected response.');
       }
-    } catch (err: any) {
-      console.error('Error loading wallet transactions:', err);
-      if (err.name === 'AbortError' || err.code === 'ECONNABORTED' || 
-          err.code === 'ETIMEDOUT' || (err.response && err.response.status >= 500)) {
-        setError('Connection to server timed out. Using sample transaction data.');
-      } else if (err.response && err.response.status === 401) {
-        setError('Authentication failed. Please log in again.');
-      } else if (err.response && err.response.status === 403) {
-        setError('You do not have permission to access this data.');
-      } else {
-        // Include more error details to help debugging
-        const errorDetails = err.response?.data?.error || err.message || 'Unknown error';
-        setError(`Error loading wallet transactions: ${errorDetails}. Using sample data instead.`);
-      }
-      
-      // Use mock data with the current wallet owner name
-      const mocksWithName = MOCK_TRANSACTIONS.map(transaction => ({
-        ...transaction,
-        MainAccountName: decodedOwnerName
-      }));
-      setTransactions(mocksWithName);
-      setIsMockData(true);
+      setTransactions(response.data.data);
+    } catch (requestError: any) {
+      console.error('Error loading wallet account transactions:', requestError);
+      const status = requestError.response?.status;
+      const detail = requestError.response?.data?.error || requestError.message || 'Unknown error';
+      if (status === 401) setError('Authentication failed. Please log in again.');
+      else if (status === 403) setError('You do not have permission to access this wallet account.');
+      else if (requestError.code === 'ECONNABORTED' || status >= 500) setError('The wallet service could not be reached. No financial data is being shown.');
+      else setError(`Unable to load this wallet account: ${detail}`);
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
-  }, [decodedOwnerName, currentClinic]);
-  
+  }, [currentClinic?.pass_id, decodedOwnerName]);
+
   useEffect(() => {
-    fetchTransactions();
-  }, [retryCount, fetchTransactions]);
-  
-  // Request sort function
-  const requestSort = (key: keyof Transaction) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    
-    setSortConfig({ key, direction });
+    void fetchTransactions();
+  }, [fetchTransactions]);
+
+  const filteredTransactions = useMemo(() => {
+    const startKey = startDate ? format(startDate, 'yyyy-MM-dd') : null;
+    const endKey = endDate ? format(endDate, 'yyyy-MM-dd') : null;
+    const term = searchTerm.trim().toLowerCase();
+
+    return transactions
+      .filter((transaction) => {
+        if (statusFilter !== 'all' && transaction.status !== statusFilter) return false;
+        const dateKey = getMyanmarWalletDateKey(transaction.createddate_myanmar);
+        if (startKey && (!dateKey || dateKey < startKey)) return false;
+        if (endKey && (!dateKey || dateKey > endKey)) return false;
+        if (!term) return true;
+        return [
+          transaction.transactionNumber,
+          transaction.type,
+          transaction.status,
+          transaction.comment,
+          transaction.senderName,
+          transaction.senderPhone,
+          transaction.recipientName,
+          transaction.recipientPhone,
+        ].some((value) => String(value ?? '').toLowerCase().includes(term));
+      })
+      .sort((left, right) => {
+        const { key, direction } = sortConfig;
+        let comparison = 0;
+        if (key === 'amount' || key === 'walletBalanceAfter') {
+          comparison = (parseWalletNumber(left[key]) ?? Number.NEGATIVE_INFINITY)
+            - (parseWalletNumber(right[key]) ?? Number.NEGATIVE_INFINITY);
+        } else {
+          comparison = String(left[key] ?? '').localeCompare(String(right[key] ?? ''), undefined, { numeric: true });
+        }
+        return direction === 'asc' ? comparison : -comparison;
+      });
+  }, [endDate, searchTerm, sortConfig, startDate, statusFilter, transactions]);
+
+  const summary = useMemo(() => summarizeWalletTransactions(filteredTransactions), [filteredTransactions]);
+  const currentBalance = parseWalletNumber(transactions[0]?.walletBalanceAfter);
+  const hasFilters = Boolean(searchTerm || statusFilter !== 'all' || startDate || endDate);
+
+  const requestSort = (key: SortKey) => {
+    setSortConfig((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }));
   };
-  
-  // Export to CSV function
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setStartDate(null);
+    setEndDate(null);
+  };
+
   const exportToCSV = () => {
-    // CSV Headers
     const headers = [
-      'Date',
+      `Date (${MYANMAR_TIME_ZONE_LABEL})`,
       'Transaction Number',
       'Type',
-      'Status',
-      'Amount',
+      'Direction',
+      'Amount (MMK)',
+      'Balance After (MMK)',
       'Comment',
-      'Balance',
       'Sender Name',
       'Sender Phone',
       'Recipient Name',
-      'Recipient Phone'
+      'Recipient Phone',
     ];
-    
-    // Format data for CSV - using filteredTransactions to respect all applied filters
-    const data = filteredTransactions.map(transaction => [
+    const rows = filteredTransactions.map((transaction) => [
       transaction.createddate_myanmar,
       transaction.transactionNumber,
       transaction.type,
       transaction.status,
-      transaction.balance,
-      transaction.comment || '',
-      transaction.accountbalance,
-      transaction.senderName || 'N/A',
-      transaction.senderPhone || 'N/A',
-      transaction.recipientName || 'N/A',
-      transaction.recipientPhone || 'N/A'
+      transaction.amount,
+      transaction.walletBalanceAfter,
+      transaction.comment,
+      transaction.senderName,
+      transaction.senderPhone,
+      transaction.recipientName,
+      transaction.recipientPhone,
     ]);
-    
-    // Include status filter in the filename if active
-    const statusTag = statusFilter !== 'all' ? `_${statusFilter}` : '';
-    
-    // Combine headers and data
-    const csvContent = [
-      headers.join(','),
-      ...data.map(row => row.map(cell => {
-        // Escape commas and quotes in cell content
-        const cellContent = String(cell || '').replace(/"/g, '""');
-        return cellContent.includes(',') ? `"${cellContent}"` : cellContent;
-      }).join(','))
-    ].join('\n');
-    
-    // Create and download file with status info in filename if filtered
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([[headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${decodedOwnerName}_transactions${statusTag}_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${decodedOwnerName.replace(/[^a-z0-9_-]+/gi, '_')}_wallet_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   };
-  
-  // Add handler for status filter change
-  const handleStatusFilterChange = (event: SelectChangeEvent) => {
-    setStatusFilter(event.target.value);
-  };
-  
-  // Update the filter effect with proper dependency typing
-  useEffect(() => {
-    let filtered = [...transactions];
-    
-    // Apply search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(transaction => 
-        Object.values(transaction).some(value => 
-          value?.toString().toLowerCase().includes(term)
-        )
-      );
-    }
-    
-    // Apply status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(transaction => 
-        transaction.status === statusFilter
-      );
-    }
-    
-    // Apply date range filter
-    if (startDate && endDate) {
-      filtered = filtered.filter(transaction => {
-        const transactionDate = parseTransactionDate(transaction.createddate_myanmar);
-        if (!transactionDate) return false;
-        
-        // Create end of day for the end date to include the full day
-        const endOfDayDate = new Date(endDate);
-        endOfDayDate.setHours(23, 59, 59, 999);
-        
-        return isWithinInterval(transactionDate, { 
-          start: startDate, 
-          end: endOfDayDate 
-        });
-      });
-    }
-    
-    // Apply sorting
-    if (sortConfig.key) { 
-      filtered.sort((a, b) => 
-        compareValues(sortConfig.key as keyof Transaction, a, b, sortConfig.direction)
-      );
-    }
-    
-    setFilteredTransactions(filtered);
-  }, [transactions, searchTerm, statusFilter, startDate, endDate, sortConfig]);
-  
-  const handleSearchClear = () => {
-    setSearchTerm('');
-  };
-  
-  const handleRetry = () => {
-    setRetryCount(prev => prev + 1);
-  };
-  
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-        <CircularProgress />
-      </Box>
-    );
+
+  const sortLabel = (key: SortKey, label: string) => (
+    <TableSortLabel
+      active={sortConfig.key === key}
+      direction={sortConfig.key === key ? sortConfig.direction : 'asc'}
+      onClick={() => requestSort(key)}
+    >
+      {label}
+    </TableSortLabel>
+  );
+
+  if (loading && transactions.length === 0) {
+    return <Box sx={{ minHeight: 260, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box>;
   }
-  
+
+  const summaryCards = [
+    {
+      label: 'Current balance',
+      value: formatMmk(currentBalance),
+      help: 'Latest recorded balance for this wallet',
+      icon: <AccountBalanceWalletRoundedIcon />,
+      color: theme.palette.primary.main,
+    },
+    {
+      label: hasFilters ? 'Matching transactions' : 'Transactions',
+      value: summary.uniqueTransactions.toLocaleString(),
+      help: `${summary.ledgerEntryCount.toLocaleString()} account ledger ${summary.ledgerEntryCount === 1 ? 'entry' : 'entries'}`,
+      icon: <ReceiptLongRoundedIcon />,
+      color: theme.palette.info.main,
+    },
+    {
+      label: 'Money in',
+      value: formatMmk(summary.incomingAmount),
+      help: 'Credits in the current view',
+      icon: <ArrowDownwardRoundedIcon />,
+      color: theme.palette.success.main,
+    },
+    {
+      label: 'Money out',
+      value: formatMmk(summary.outgoingAmount),
+      help: 'Debits in the current view',
+      icon: <ArrowUpwardRoundedIcon />,
+      color: theme.palette.error.main,
+    },
+  ];
+
   return (
-    <Paper 
-      sx={{ 
-        p: 2, 
-        display: 'flex', 
-        flexDirection: 'column',
-        bgcolor: isDarkMode ? alpha(theme.palette.background.paper, 0.7) : theme.palette.background.paper,
-        borderRadius: 2,
-        boxShadow: isDarkMode ? `0 4px 20px 0px ${alpha(theme.palette.common.black, 0.5)}` : theme.shadows[2],
-        border: isDarkMode ? `1px solid ${alpha(theme.palette.divider, 0.1)}` : 'none',
+    <Paper
+      elevation={0}
+      sx={{
+        p: { xs: 1.5, sm: 2.5 },
+        border: `1px solid ${alpha(theme.palette.divider, isDarkMode ? 0.18 : 0.9)}`,
+        borderRadius: 2.5,
+        bgcolor: 'background.paper',
+        boxShadow: theme.shadows[1],
       }}
     >
-      {/* Breadcrumbs navigation */}
-      <Breadcrumbs 
-        separator={<NavigateNextIcon fontSize="small" />} 
-        aria-label="breadcrumb"
-        sx={{ mb: 2 }}
-      >
-        <MuiLink
-          component={RouterLink}
-          underline="hover"
-          color={isDarkMode ? "primary.light" : "inherit"}
-          to="/wallet"
-        >
-          Wallet Accounts
-        </MuiLink>
-        <Typography color="text.primary">{decodedOwnerName}</Typography>
+      <Breadcrumbs separator={<NavigateNextRoundedIcon fontSize="small" />} aria-label="Wallet navigation" sx={{ mb: 1.25, '& .MuiBreadcrumbs-li': { fontSize: '0.78rem' } }}>
+        <Button component={RouterLink} to="/wallet" size="small" sx={{ minWidth: 0, px: 0, textTransform: 'none' }}>Wallet Accounts</Button>
+        <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{decodedOwnerName}</Typography>
       </Breadcrumbs>
-      
-      <Typography 
-        component="h2" 
-        variant="h6" 
-        color={isDarkMode ? "primary.light" : "primary"} 
-        gutterBottom
-        sx={{ 
-          mb: 3,
-          textShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : 'none',
-          fontSize: '1.5rem',
-          fontWeight: 'bold',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1
-        }}
-      >
-        <AccountBalanceWalletIcon fontSize="large" />
-        Wallet Transactions: {decodedOwnerName}
-        {currentClinic && (
-          <>
-            <Typography component="span" sx={{ 
-              ml: 2, 
-              fontSize: '0.9rem', 
-              bgcolor: alpha(theme.palette.primary.main, 0.15),
-              color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.dark,
-              px: 2,
-              py: 0.5,
-              borderRadius: 2,
-              display: 'inline-flex',
-              alignItems: 'center'
-            }}>
-              Clinic: {currentClinic.name}
-            </Typography>
-            {currentClinic.pass_id && (
-              <Typography component="span" sx={{ 
-                ml: 1, 
-                fontSize: '0.9rem', 
-                bgcolor: alpha(theme.palette.secondary.main, 0.15),
-                color: isDarkMode ? theme.palette.secondary.light : theme.palette.secondary.dark,
-                px: 2,
-                py: 0.5,
-                borderRadius: 2,
-                display: 'inline-flex',
-                alignItems: 'center'
-              }}>
-                Pass ID: {currentClinic.pass_id}
-              </Typography>
-            )}
-          </>
-        )}
-      </Typography>
-      
-      {(isMockData || error) && (
-        <Alert 
-          severity={error ? "warning" : "info"} 
-          sx={{ 
-            mb: 2,
-            bgcolor: isDarkMode ? (
-              error 
-                ? alpha(theme.palette.warning.dark, 0.2) 
-                : alpha(theme.palette.info.dark, 0.2)
-            ) : undefined,
-            color: isDarkMode ? theme.palette.common.white : undefined,
-            '& .MuiAlert-icon': {
-              color: isDarkMode ? (
-                error 
-                  ? theme.palette.warning.light 
-                  : theme.palette.info.light
-              ) : undefined
-            }
-          }}
-          action={
-            error ? (
-              <Button 
-                color="inherit" 
-                size="small" 
-                onClick={handleRetry}
-                startIcon={<ReplayIcon />}
-                sx={{
-                  color: isDarkMode ? theme.palette.common.white : undefined,
-                  '&:hover': {
-                    bgcolor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
-                  }
-                }}
-              >
-                Retry
-              </Button>
-            ) : undefined
-          }
-        >
-          {error || "Using sample transaction data. Real transaction data is currently unavailable due to database access issues."}
+
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Box sx={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 1.5, bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main' }}>
+              <AccountBalanceWalletRoundedIcon />
+            </Box>
+            <Box>
+              <Typography component="h1" sx={{ fontSize: { xs: '1.15rem', sm: '1.35rem' }, fontWeight: 780, color: 'text.primary' }}>Wallet transactions: {decodedOwnerName}</Typography>
+              <Typography sx={{ mt: 0.2, fontSize: '0.76rem', color: 'text.secondary' }}>Account ledger · Times shown in {MYANMAR_TIME_ZONE_LABEL}</Typography>
+            </Box>
+            {currentClinic?.name && <Chip size="small" label={currentClinic.name} sx={{ ml: { sm: 1 }, bgcolor: alpha(theme.palette.primary.main, 0.08), color: 'primary.dark' }} />}
+          </Box>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" size="small" startIcon={loading ? <CircularProgress size={15} /> : <RefreshRoundedIcon />} onClick={() => void fetchTransactions()} disabled={loading} sx={{ textTransform: 'none' }}>Refresh</Button>
+          <Button variant="contained" size="small" startIcon={<FileDownloadRoundedIcon />} onClick={exportToCSV} disabled={filteredTransactions.length === 0} sx={{ textTransform: 'none', boxShadow: 'none' }}>Export CSV</Button>
+        </Stack>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mt: 2 }} action={<Button color="inherit" size="small" onClick={() => void fetchTransactions()}>Retry</Button>}>
+          {error}
         </Alert>
       )}
-      
-      {/* Search Field, Status Filter, and Export */}
-      <Box 
-        sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          mb: 3,
-          flexWrap: 'wrap',
-          gap: 2
-        }}
-      >
-        <Box sx={{ 
-          display: 'flex', 
-          flexWrap: 'wrap',
-          gap: 2, 
-          alignItems: 'center'
-        }}>
-          <TextField
-            variant="outlined"
-            placeholder="Search transactions..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color={isDarkMode ? "primary" : undefined} />
-                </InputAdornment>
-              ),
-              endAdornment: searchTerm ? (
-                <InputAdornment position="end">
-                  <IconButton
-                    size="small"
-                    onClick={handleSearchClear}
-                    edge="end"
-                    color={isDarkMode ? "primary" : undefined}
-                  >
-                    <ClearIcon />
-                  </IconButton>
-                </InputAdornment>
-              ) : null,
-            }}
-            size="small"
-            sx={{
-              width: { xs: '100%', sm: '250px' },
-              '& .MuiOutlinedInput-root': {
-                '& fieldset': {
-                  borderColor: isDarkMode ? alpha(theme.palette.primary.main, 0.3) : undefined,
-                },
-                '&:hover fieldset': {
-                  borderColor: isDarkMode ? alpha(theme.palette.primary.main, 0.5) : undefined,
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: isDarkMode ? theme.palette.primary.main : undefined,
-                },
-              },
-              '& .MuiInputBase-input': {
-                color: isDarkMode ? theme.palette.common.white : undefined,
-              },
-            }}
-          />
-          
-          {/* Status Filter */}
-          <FormControl 
-            size="small" 
-            sx={{ 
-              minWidth: 120,
-              '& .MuiOutlinedInput-root': {
-                '& fieldset': {
-                  borderColor: isDarkMode ? alpha(theme.palette.primary.main, 0.3) : undefined,
-                },
-                '&:hover fieldset': {
-                  borderColor: isDarkMode ? alpha(theme.palette.primary.main, 0.5) : undefined,
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: isDarkMode ? theme.palette.primary.main : undefined,
-                },
-              },
-              '& .MuiInputBase-input': {
-                color: isDarkMode ? theme.palette.common.white : undefined,
-              },
-              '& .MuiInputLabel-root': {
-                color: isDarkMode ? alpha(theme.palette.common.white, 0.7) : undefined,
-              },
-              '& .MuiSvgIcon-root': {
-                color: isDarkMode ? theme.palette.common.white : undefined,
-              }
-            }}
-          >
-            <InputLabel id="status-filter-label">Status</InputLabel>
-            <Select
-              labelId="status-filter-label"
-              id="status-filter"
-              value={statusFilter}
-              label="Status"
-              onChange={handleStatusFilterChange}
-            >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="IN">IN</MenuItem>
-              <MenuItem value="OUT">OUT</MenuItem>
-            </Select>
-          </FormControl>
+
+      <Box sx={{ mt: 2.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: 1.25 }}>
+        {summaryCards.map((card) => (
+          <Box key={card.label} sx={{ p: 1.5, border: `1px solid ${alpha(theme.palette.divider, 0.9)}`, borderRadius: 2, bgcolor: alpha(card.color, isDarkMode ? 0.08 : 0.035), minWidth: 0 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 720, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.035em' }}>{card.label}</Typography>
+              <Box sx={{ color: card.color, display: 'flex', '& .MuiSvgIcon-root': { fontSize: 20 } }}>{card.icon}</Box>
+            </Box>
+            <Typography sx={{ mt: 0.7, fontSize: { xs: '1.05rem', sm: '1.15rem' }, fontWeight: 780, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.value}</Typography>
+            <Typography sx={{ mt: 0.35, fontSize: '0.68rem', color: 'text.secondary' }}>{card.help}</Typography>
+          </Box>
+        ))}
+      </Box>
+
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
+        <Box sx={{ mt: 2, p: 1.5, border: `1px solid ${alpha(theme.palette.divider, 0.9)}`, borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, isDarkMode ? 0.045 : 0.018) }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
+            <TextField
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              size="small"
+              placeholder="Search ID, person, phone or comment"
+              aria-label="Search wallet transactions"
+              sx={{ width: { xs: '100%', sm: 300 } }}
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment>,
+                endAdornment: searchTerm ? <InputAdornment position="end"><IconButton size="small" onClick={() => setSearchTerm('')} aria-label="Clear search"><ClearRoundedIcon fontSize="small" /></IconButton></InputAdornment> : null,
+              }}
+            />
+            <FormControl size="small" sx={{ minWidth: 132 }}>
+              <InputLabel id="wallet-direction-label">Direction</InputLabel>
+              <Select labelId="wallet-direction-label" value={statusFilter} label="Direction" onChange={(event: SelectChangeEvent) => setStatusFilter(event.target.value)}>
+                <MenuItem value="all">All directions</MenuItem>
+                <MenuItem value="IN">Money in</MenuItem>
+                <MenuItem value="OUT">Money out</MenuItem>
+              </Select>
+            </FormControl>
+            <DatePicker label="From date" value={startDate} onChange={setStartDate} maxDate={endDate || undefined} slotProps={{ textField: { size: 'small', sx: { width: { xs: '100%', sm: 155 } } } }} />
+            <DatePicker label="To date" value={endDate} onChange={setEndDate} minDate={startDate || undefined} slotProps={{ textField: { size: 'small', sx: { width: { xs: '100%', sm: 155 } } } }} />
+            {hasFilters && <Button size="small" startIcon={<FilterAltOffRoundedIcon />} onClick={resetFilters} sx={{ textTransform: 'none' }}>Clear filters</Button>}
+          </Box>
         </Box>
-        
-        {/* Export CSV Button */}
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<FileDownloadIcon />}
-          onClick={exportToCSV}
-          disabled={filteredTransactions.length === 0}
-          sx={{
-            color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
-            borderColor: isDarkMode ? alpha(theme.palette.primary.light, 0.5) : undefined,
-            '&:hover': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : undefined,
-              borderColor: isDarkMode ? theme.palette.primary.light : undefined
-            }
-          }}
-        >
-          Export CSV
-        </Button>
+      </LocalizationProvider>
+
+      <Box sx={{ mt: 1.5, mb: 0.75, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+        <Typography sx={{ fontSize: '0.74rem', color: 'text.secondary' }}>Showing {filteredTransactions.length.toLocaleString()} of {transactions.length.toLocaleString()} account entries</Typography>
+        <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary' }}>Amount is signed for this wallet · Balance is the balance after that entry</Typography>
       </Box>
-      
-      <Box sx={{ mb: 1 }}>
-        <Typography 
-          variant="body2" 
-          color={isDarkMode ? "rgba(255,255,255,0.7)" : "text.secondary"}
-          sx={{ fontStyle: 'italic' }}
-        >
-          Showing {filteredTransactions.length} of {transactions.length} transactions for {decodedOwnerName}
-        </Typography>
-      </Box>
-      
-      <TableContainer 
-        sx={{ 
-          maxHeight: '70vh',
-          borderRadius: 1,
-          border: isDarkMode ? `1px solid ${alpha(theme.palette.divider, 0.1)}` : 'none',
-          '&::-webkit-scrollbar': {
-            width: '8px',
-            height: '8px',
-          },
-          '&::-webkit-scrollbar-thumb': {
-            backgroundColor: isDarkMode ? alpha(theme.palette.primary.dark, 0.6) : alpha(theme.palette.primary.main, 0.2),
-            borderRadius: '4px',
-            '&:hover': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.primary.main, 0.7) : alpha(theme.palette.primary.main, 0.3),
-            }
-          },
-          '&::-webkit-scrollbar-track': {
-            backgroundColor: isDarkMode ? alpha(theme.palette.common.black, 0.2) : alpha(theme.palette.grey[200], 0.5),
-            borderRadius: '4px',
-          },
-        }}
-      >
-        <Table 
-          size="small" 
-          stickyHeader 
-          sx={{ 
-            '& .MuiTableCell-root': {
-              borderColor: isDarkMode ? alpha(theme.palette.divider, 0.2) : theme.palette.divider,
-              padding: '12px 16px',
-              color: isDarkMode ? theme.palette.common.white : undefined,
-            },
-            '& .MuiTableCell-head': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.common.black, 0.4) : alpha(theme.palette.primary.light, 0.1),
-              color: isDarkMode ? theme.palette.common.white : theme.palette.primary.dark,
-              fontWeight: 'bold',
-              textTransform: 'uppercase',
-              fontSize: '0.75rem',
-            },
-            '& .MuiTableRow-root:hover': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.primary.dark, 0.15) : alpha(theme.palette.primary.light, 0.05),
-            },
-            '& .MuiTableBody-root .MuiTableRow-root:nth-of-type(odd)': {
-              backgroundColor: isDarkMode ? alpha(theme.palette.common.black, 0.1) : alpha(theme.palette.grey[100], 0.3),
-            },
-          }}
-        >
+
+      <TableContainer sx={{ maxHeight: '68vh', border: `1px solid ${alpha(theme.palette.divider, 0.95)}`, borderRadius: 1.75 }}>
+        <Table stickyHeader size="small" aria-label={`Wallet transactions for ${decodedOwnerName}`} sx={{ minWidth: 1280, '& .MuiTableCell-root': { borderColor: alpha(theme.palette.divider, 0.82), px: 1.5, py: 1.05 }, '& .MuiTableCell-head': { bgcolor: isDarkMode ? theme.palette.background.paper : '#F2F5F9', fontSize: '0.67rem', fontWeight: 750, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.025em', whiteSpace: 'nowrap' }, '& .MuiTableRow-root:hover': { bgcolor: alpha(theme.palette.primary.main, 0.035) } }}>
           <TableHead>
             <TableRow>
-              {/* Date column with sort indicator */}
-              <TableCell 
-                onClick={() => requestSort('createddate_myanmar')}
-                sx={{ 
-                  cursor: 'pointer', 
-                  '&:hover': { 
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.primary.dark, 0.3) 
-                      : alpha(theme.palette.primary.light, 0.3)
-                  },
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  DATE
-                  {sortConfig.key === 'createddate_myanmar' && (
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
-                      {sortConfig.direction === 'asc' 
-                        ? <ArrowUpwardIcon fontSize="small" />
-                        : <ArrowDownwardIcon fontSize="small" />
-                      }
-                    </Box>
-                  )}
-                </Box>
-              </TableCell>
-              
-              <TableCell>TRANSACTION NUMBER</TableCell>
-              
-              <TableCell 
-                onClick={() => requestSort('type')}
-                sx={{ 
-                  cursor: 'pointer', 
-                  '&:hover': { 
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.primary.dark, 0.3) 
-                      : alpha(theme.palette.primary.light, 0.3)
-                  },
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  TYPE
-                  {sortConfig.key === 'type' && (
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
-                      {sortConfig.direction === 'asc' 
-                        ? <ArrowUpwardIcon fontSize="small" />
-                        : <ArrowDownwardIcon fontSize="small" />
-                      }
-                    </Box>
-                  )}
-                </Box>
-              </TableCell>
-              
-              <TableCell 
-                onClick={() => requestSort('status')}
-                sx={{ 
-                  cursor: 'pointer', 
-                  '&:hover': { 
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.primary.dark, 0.3) 
-                      : alpha(theme.palette.primary.light, 0.3)
-                  },
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  STATUS
-                  {sortConfig.key === 'status' && (
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
-                      {sortConfig.direction === 'asc' 
-                        ? <ArrowUpwardIcon fontSize="small" />
-                        : <ArrowDownwardIcon fontSize="small" />
-                      }
-                    </Box>
-                  )}
-                </Box>
-              </TableCell>
-              
-              <TableCell 
-                onClick={() => requestSort('balance')}
-                sx={{ 
-                  cursor: 'pointer', 
-                  '&:hover': { 
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.primary.dark, 0.3) 
-                      : alpha(theme.palette.primary.light, 0.3)
-                  },
-                  textAlign: 'right'
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  AMOUNT
-                  {sortConfig.key === 'balance' && (
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
-                      {sortConfig.direction === 'asc' 
-                        ? <ArrowUpwardIcon fontSize="small" />
-                        : <ArrowDownwardIcon fontSize="small" />
-                      }
-                    </Box>
-                  )}
-                </Box>
-              </TableCell>
-              
-              <TableCell>COMMENT</TableCell>
-              
-              <TableCell 
-                onClick={() => requestSort('accountbalance')}
-                sx={{ 
-                  cursor: 'pointer', 
-                  '&:hover': { 
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.primary.dark, 0.3) 
-                      : alpha(theme.palette.primary.light, 0.3)
-                  },
-                  textAlign: 'right'
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  BALANCE
-                  {sortConfig.key === 'accountbalance' && (
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5 }}>
-                      {sortConfig.direction === 'asc' 
-                        ? <ArrowUpwardIcon fontSize="small" />
-                        : <ArrowDownwardIcon fontSize="small" />
-                      }
-                    </Box>
-                  )}
-                </Box>
-              </TableCell>
-              
-              <TableCell>SENDER NAME</TableCell>
-              <TableCell>SENDER PHONE</TableCell>
-              <TableCell>RECIPIENT NAME</TableCell>
-              <TableCell>RECIPIENT PHONE</TableCell>
+              <TableCell>{sortLabel('createddate_myanmar', `Date · ${MYANMAR_TIME_ZONE_LABEL}`)}</TableCell>
+              <TableCell>{sortLabel('transactionNumber', 'Transaction')}</TableCell>
+              <TableCell>{sortLabel('type', 'Type')}</TableCell>
+              <TableCell>{sortLabel('status', 'Direction')}</TableCell>
+              <TableCell align="right">{sortLabel('amount', 'Amount')}</TableCell>
+              <TableCell align="right">{sortLabel('walletBalanceAfter', 'Balance after')}</TableCell>
+              <TableCell>Sender</TableCell>
+              <TableCell>Recipient</TableCell>
+              <TableCell>Comment</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {filteredTransactions.length > 0 ? (
-              filteredTransactions.map((transaction, index) => (
-                <TableRow key={`${transaction.transactionNumber}-${index}`}>
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.createddate_myanmar}
-                  </TableCell>
-                  
+            {filteredTransactions.length > 0 ? filteredTransactions.map((transaction, index) => {
+              const isIncoming = transaction.status === 'IN';
+              return (
+                <TableRow key={`${transaction.transactionNumber}:${transaction.status}:${index}`}>
                   <TableCell>
-                    <Box sx={{ 
-                      fontFamily: 'monospace', 
-                      fontSize: '0.8rem',
-                      color: isDarkMode ? alpha(theme.palette.common.white, 0.9) : theme.palette.primary.dark,
-                      fontWeight: 'medium',
-                      backgroundColor: isDarkMode ? alpha(theme.palette.primary.dark, 0.2) : 'transparent',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      display: 'inline-block'
-                    }}>
-                      {transaction.transactionNumber}
-                    </Box>
+                    <Typography sx={{ fontSize: '0.78rem', fontWeight: 650, whiteSpace: 'nowrap' }}>{formatMyanmarWalletDateTime(transaction.createddate_myanmar)}</Typography>
+                    <Typography sx={{ mt: 0.1, fontSize: '0.63rem', color: 'text.secondary' }}>{MYANMAR_TIME_ZONE_LABEL}</Typography>
                   </TableCell>
-                  
-                  <TableCell>
-                    <Chip
-                      label={transaction.type}
-                      size="small"
-                      color={transaction.type === 'CREDIT' ? 'success' : 
-                             transaction.type === 'DEBIT' ? 'error' : 
-                             transaction.type === 'Transfer' ? 'primary' : 
-                             transaction.type === 'Deposit' ? 'info' : 
-                             transaction.type === 'Share' ? 'secondary' : 
-                             'default'}
-                      variant={isDarkMode ? 'filled' : 'filled'}
-                      sx={{ 
-                        minWidth: '70px',
-                        fontWeight: 'bold',
-                        backgroundColor: isDarkMode ? (
-                          transaction.type === 'CREDIT' ? alpha(theme.palette.success.main, 0.9) : 
-                          transaction.type === 'DEBIT' ? alpha(theme.palette.error.main, 0.9) : 
-                          transaction.type === 'Transfer' ? alpha(theme.palette.primary.main, 0.9) : 
-                          transaction.type === 'Deposit' ? alpha(theme.palette.info.main, 0.9) : 
-                          transaction.type === 'Share' ? alpha(theme.palette.secondary.main, 0.9) : 
-                          alpha(theme.palette.grey[600], 0.9)
-                        ) : undefined,
-                        color: isDarkMode ? theme.palette.common.white : undefined,
-                      }}
-                    />
-                  </TableCell>
-                  
-                  <TableCell>
-                    <Chip
-                      label={transaction.status}
-                      size="small"
-                      color={transaction.status === 'IN' ? 'success' : 
-                             transaction.status === 'OUT' ? 'error' : 
-                             'default'}
-                      variant={isDarkMode ? 'filled' : 'filled'}
-                      sx={{ 
-                        minWidth: '50px',
-                        fontWeight: 'bold',
-                        backgroundColor: isDarkMode ? (
-                          transaction.status === 'IN' ? alpha(theme.palette.success.main, 0.9) : 
-                          transaction.status === 'OUT' ? alpha(theme.palette.error.main, 0.9) : 
-                          alpha(theme.palette.grey[600], 0.9)
-                        ) : undefined,
-                        color: isDarkMode ? theme.palette.common.white : undefined,
-                      }}
-                    />
-                  </TableCell>
-                  
-                  <TableCell sx={{ 
-                    color: isDarkMode 
-                      ? (transaction.type === 'CREDIT' ? theme.palette.success.light : transaction.type === 'DEBIT' ? theme.palette.error.light : theme.palette.common.white) 
-                      : (transaction.type === 'CREDIT' ? theme.palette.success.main : transaction.type === 'DEBIT' ? theme.palette.error.main : undefined),
-                    fontWeight: 'bold',
-                    textAlign: 'right'
-                  }}>
-                    {parseFloat(transaction.balance || '0').toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })}
-                  </TableCell>
-                  
-                  <TableCell sx={{ color: isDarkMode ? alpha(theme.palette.common.white, 0.7) : undefined }}>
-                    {transaction.comment || ''}
-                  </TableCell>
-                  
-                  <TableCell sx={{ 
-                    color: isDarkMode ? theme.palette.common.white : undefined,
-                    fontWeight: 'medium',
-                    textAlign: 'right'
-                  }}>
-                    {parseFloat(transaction.accountbalance || '0').toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })}
-                  </TableCell>
-                  
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.senderName || 'N/A'}
-                  </TableCell>
-                  
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.senderPhone || 'N/A'}
-                  </TableCell>
-                  
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.recipientName || 'N/A'}
-                  </TableCell>
-                  
-                  <TableCell sx={{ color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transaction.recipientPhone || 'N/A'}
-                  </TableCell>
+                  <TableCell><Typography sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.72rem', color: 'text.primary' }}>{transaction.transactionNumber}</Typography></TableCell>
+                  <TableCell><Chip label={transaction.type || 'Unknown'} size="small" variant="outlined" sx={{ height: 23, fontSize: '0.66rem', borderColor: 'divider' }} /></TableCell>
+                  <TableCell><Chip label={isIncoming ? 'IN' : transaction.status === 'OUT' ? 'OUT' : transaction.status || '—'} size="small" sx={{ minWidth: 48, height: 23, fontSize: '0.65rem', fontWeight: 750, bgcolor: isIncoming ? alpha(theme.palette.success.main, 0.12) : transaction.status === 'OUT' ? alpha(theme.palette.error.main, 0.12) : alpha(theme.palette.text.secondary, 0.1), color: isIncoming ? 'success.dark' : transaction.status === 'OUT' ? 'error.main' : 'text.secondary' }} /></TableCell>
+                  <TableCell align="right"><Typography sx={{ fontSize: '0.8rem', fontWeight: 760, whiteSpace: 'nowrap', color: isIncoming ? 'success.dark' : transaction.status === 'OUT' ? 'error.main' : 'text.primary' }}>{formatSignedMmk(transaction.amount, transaction.status)}</Typography></TableCell>
+                  <TableCell align="right"><Typography sx={{ fontSize: '0.78rem', fontWeight: 650, whiteSpace: 'nowrap' }}>{formatMmk(transaction.walletBalanceAfter)}</Typography></TableCell>
+                  <TableCell>{personCell(transaction.senderName, transaction.senderPhone)}</TableCell>
+                  <TableCell>{personCell(transaction.recipientName, transaction.recipientPhone)}</TableCell>
+                  <TableCell><Typography sx={{ minWidth: 190, maxWidth: 360, fontSize: '0.74rem', lineHeight: 1.45, color: transaction.comment ? 'text.primary' : 'text.secondary', overflowWrap: 'anywhere' }}>{transaction.comment || 'No comment'}</Typography></TableCell>
                 </TableRow>
-              ))
-            ) : (
+              );
+            }) : (
               <TableRow>
-                <TableCell colSpan={11} align="center">
-                  <Box sx={{ py: 3, color: isDarkMode ? theme.palette.common.white : undefined }}>
-                    {transactions.length > 0 ? 
-                      `No matches for the current filters. Try a different search term.` : 
-                      `No transaction data available for ${decodedOwnerName}`
-                    }
+                <TableCell colSpan={9} align="center">
+                  <Box sx={{ py: 6 }}>
+                    <ReceiptLongRoundedIcon sx={{ fontSize: 34, color: 'text.disabled' }} />
+                    <Typography sx={{ mt: 1, fontWeight: 700 }}>{transactions.length ? 'No transactions match these filters' : `No transactions found for ${decodedOwnerName}`}</Typography>
+                    <Typography sx={{ mt: 0.4, fontSize: '0.76rem', color: 'text.secondary' }}>{transactions.length ? 'Clear or adjust the filters to see more activity.' : 'This account has no wallet ledger entries for the selected clinic.'}</Typography>
+                    {transactions.length > 0 && <Button size="small" onClick={resetFilters} sx={{ mt: 1.25, textTransform: 'none' }}>Clear filters</Button>}
                   </Box>
                 </TableCell>
               </TableRow>
@@ -1022,4 +432,4 @@ const WalletTransactionDetails: React.FC = () => {
   );
 };
 
-export default WalletTransactionDetails; 
+export default WalletTransactionDetails;

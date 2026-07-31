@@ -425,7 +425,6 @@ const CustomersTable: React.FC = () => {
       customer.age ?? 'N/A',
       customer.gender,
       customer.address,
-      formatCustomerCreatedDate(customer.createdDate),
       customer.totalSpend,
       customer.totalVisits,
       customer.totalPackageCount,
@@ -433,9 +432,10 @@ const CustomersTable: React.FC = () => {
       customer.lastVisited,
       customer.lastService,
       customer.therapist,
+      formatCustomerCreatedDate(customer.createdDate),
     ]);
     const csv = [
-      ['Member ID', 'Name', 'Phone number', 'Age', 'Gender', 'Address', 'Created date', 'Total spend', 'Total visit', 'Total package count', 'Remaining count', 'Last visit', 'Last service', 'Doctor / Therapist'],
+      ['Member ID', 'Name', 'Phone number', 'Age', 'Gender', 'Address', 'Total spend', 'Total visit', 'Total package count', 'Remaining count', 'Last visit', 'Last service', 'Doctor / Therapist', 'Created date'],
       ...rows,
     ].map((row) => row.map(escapeCsv).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
@@ -653,33 +653,6 @@ const CustomersTable: React.FC = () => {
                         color: 'var(--text-secondary)',
                         fontWeight: 600,
                         borderBottom: '1px solid var(--border)',
-                        minWidth: 155,
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      <TableSortLabel
-                        active={orderBy === 'createdDate'}
-                        direction={orderBy === 'createdDate' ? order : 'asc'}
-                        onClick={() => handleRequestSort('createdDate')}
-                        sx={{
-                          color: 'var(--text-secondary) !important',
-                          '&.Mui-active': {
-                            color: 'var(--primary) !important',
-                          },
-                          '& .MuiTableSortLabel-icon': {
-                            color: 'var(--primary) !important',
-                          }
-                        }}
-                      >
-                        CREATED DATE
-                      </TableSortLabel>
-                    </TableCell>
-                    <TableCell
-                      sx={{
-                        bgcolor: 'var(--surface-secondary)',
-                        color: 'var(--text-secondary)',
-                        fontWeight: 600,
-                        borderBottom: '1px solid var(--border)',
                         minWidth: 180,
                         whiteSpace: 'nowrap'
                       }}
@@ -825,6 +798,33 @@ const CustomersTable: React.FC = () => {
                     >
                       DOCTOR / THERAPIST
                     </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: 'var(--surface-secondary)',
+                        color: 'var(--text-secondary)',
+                        fontWeight: 600,
+                        borderBottom: '1px solid var(--border)',
+                        minWidth: 155,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <TableSortLabel
+                        active={orderBy === 'createdDate'}
+                        direction={orderBy === 'createdDate' ? order : 'asc'}
+                        onClick={() => handleRequestSort('createdDate')}
+                        sx={{
+                          color: 'var(--text-secondary) !important',
+                          '&.Mui-active': {
+                            color: 'var(--primary) !important',
+                          },
+                          '& .MuiTableSortLabel-icon': {
+                            color: 'var(--primary) !important',
+                          }
+                        }}
+                      >
+                        CREATED DATE
+                      </TableSortLabel>
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody sx={{ bgcolor: 'var(--surface-secondary)' }}>
@@ -928,16 +928,6 @@ const CustomersTable: React.FC = () => {
                         sx={{
                           bgcolor: 'var(--surface-secondary)',
                           borderBottom: '1px solid var(--border)',
-                          color: 'var(--text-secondary)',
-                          whiteSpace: 'nowrap'
-                        }}
-                      >
-                        {formatCustomerCreatedDate(customer.createdDate)}
-                      </TableCell>
-                      <TableCell
-                        sx={{
-                          bgcolor: 'var(--surface-secondary)',
-                          borderBottom: '1px solid var(--border)',
                           color: 'var(--text-secondary)'
                         }}
                       >
@@ -1006,6 +996,16 @@ const CustomersTable: React.FC = () => {
                         }}
                       >
                         {customer.therapist}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          bgcolor: 'var(--surface-secondary)',
+                          borderBottom: '1px solid var(--border)',
+                          color: 'var(--text-secondary)',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {formatCustomerCreatedDate(customer.createdDate)}
                       </TableCell>
                     </TableRow>
                   ))}

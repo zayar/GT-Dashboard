@@ -45,12 +45,15 @@ import {
   CheckInOutDateRange,
   CheckInOutStatusFilter,
   DEFAULT_CHECK_IN_OUT_STATUS_FILTER,
+  formatCheckInOutPhoneNumber,
   formatGraphqlDateTimeInMyanmar,
+  formatPhoneNumberForSpreadsheet,
   getCheckInOutDateRangeBounds,
   MERCHANT_CANCEL_STATUS,
   MYANMAR_TIME_LABEL,
   ORDER_CANCEL_STATUS,
 } from '../utils/checkInOutReport';
+import { getCurrency } from '../utils/currency';
 
 const CheckInCheckOutPage: React.FC = () => {
   const [records, setRecords] = useState<CheckInOutRecord[]>([]);
@@ -183,7 +186,8 @@ const CheckInCheckOutPage: React.FC = () => {
 
       return {
         ...record,
-        DisplayDiscount: shouldShowDiscount ? record.Discount : null,
+        DisplayOrderDiscount: shouldShowDiscount ? record.Discount : null,
+        DisplayActualInvoice: shouldShowDiscount ? record.ActualInvoice : null,
         IsFirstOrderRow: shouldShowDiscount
       };
     });
@@ -236,11 +240,26 @@ const CheckInCheckOutPage: React.FC = () => {
       : numericAmount.toString();
   };
 
+  const formatCSVServiceAmount = (amount: number | null) => (
+    amount ? formatCSVAmount(amount) : ''
+  );
+
+  const formatServiceAmount = (amount: number | null) => (
+    amount ? formatCurrency(amount) : '-'
+  );
+
+  const formatPhoneNumber = useCallback(
+    (phoneNumber: string | null | undefined) => (
+      formatCheckInOutPhoneNumber(phoneNumber, getCurrency(currentClinic))
+    ),
+    [currentClinic]
+  );
+
   // Function to handle CSV export
   const handleExportCSV = () => {
     if (!recordsForDisplay.length) return;
 
-    const headers = ['Order ID', 'Check-In Time (Myanmar Time)', 'Check-Out Time (Myanmar Time)', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Discount', 'Service Amount'];
+    const headers = ['Order ID', 'Check-In Time (Myanmar Time)', 'Check-Out Time (Myanmar Time)', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Original Amount', 'Item Discount', 'Selling Amount', 'Order Discount', 'Total Amount', 'Note'];
     const rows = recordsForDisplay.map(record => [
       record.OrderId ?? '-',
       formatGraphqlDateTimeInMyanmar(record.CheckInTime),
@@ -250,11 +269,15 @@ const CheckInCheckOutPage: React.FC = () => {
       record.HelperName ?? '-',
       record.CustomerName ?? '-',
       record.SellerName ?? '-',
-      record.CustomerPhoneNumber ?? '-',
+      formatPhoneNumberForSpreadsheet(formatPhoneNumber(record.CustomerPhoneNumber)),
       record.PaymentMethod ?? '-',
       record.PaymentStatus ?? '-',
-      formatCSVAmount(record.DisplayDiscount),
-      formatCSVAmount(record.Total)
+      formatCSVServiceAmount(record.OriginalAmount),
+      record.ItemDiscount ? formatCSVAmount(record.ItemDiscount) : '',
+      formatCSVServiceAmount(record.Total),
+      formatCSVAmount(record.DisplayOrderDiscount),
+      formatCSVAmount(record.DisplayActualInvoice),
+      record.Note ?? ''
     ]);
 
     const escapeCSVCell = (value: string | number | null) => `"${String(value ?? '').replace(/"/g, '""')}"`;
@@ -440,7 +463,7 @@ const CheckInCheckOutPage: React.FC = () => {
         <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
           {loading && <LinearProgress aria-label="Loading check-in and check-out records" />}
           <TableContainer sx={{ maxHeight: '62vh', overflowX: 'auto', opacity: loading && records.length ? 0.6 : 1, transition: 'opacity 160ms ease' }}>
-          <Table stickyHeader size="small" aria-label="Check-in and check-out records" aria-busy={loading} sx={{ minWidth: 1500 }}>
+          <Table stickyHeader size="small" aria-label="Check-in and check-out records" aria-busy={loading} sx={{ minWidth: 1950 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ position: 'sticky', left: 0, zIndex: 4, minWidth: 100, borderRight: `1px solid ${theme.palette.divider}` }}>Order ID</TableCell>
@@ -454,20 +477,24 @@ const CheckInCheckOutPage: React.FC = () => {
                 <TableCell>Phone</TableCell>
                 <TableCell>Payment Method</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell align="right">Discount</TableCell>
-                <TableCell align="right">Service Amount</TableCell>
+                <TableCell align="right">Original Amount</TableCell>
+                <TableCell align="right">Item Discount</TableCell>
+                <TableCell align="right">Selling Amount</TableCell>
+                <TableCell align="right">Order Discount</TableCell>
+                <TableCell align="right">Total Amount</TableCell>
+                <TableCell sx={{ minWidth: 180 }}>Note</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading && records.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={13} align="center">
+                  <TableCell colSpan={17} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>Loading records…</Typography>
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={13} align="center">
+                  <TableCell colSpan={17} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>
                       {error ? 'Check-in/out data is unavailable.' : 'No records match the current filters.'}
                     </Typography>
@@ -512,7 +539,7 @@ const CheckInCheckOutPage: React.FC = () => {
                           variant="body2"
                           sx={{ color: 'inherit', textDecoration: 'none', whiteSpace: 'nowrap', '&:hover': { color: 'primary.main', textDecoration: 'underline' } }}
                         >
-                          {record.CustomerPhoneNumber}
+                          {formatPhoneNumber(record.CustomerPhoneNumber)}
                         </Typography>
                       ) : '-'}
                     </TableCell>
@@ -525,10 +552,22 @@ const CheckInCheckOutPage: React.FC = () => {
                         variant="filled"
                       />
                     </TableCell>
-                    <TableCell align="right">
-                      {record.DisplayDiscount === null ? '' : formatCurrency(record.DisplayDiscount)}
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
+                      {formatServiceAmount(record.OriginalAmount)}
                     </TableCell>
-                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{formatCurrency(record.Total)}</TableCell>
+                    <TableCell align="right">
+                      {record.ItemDiscount ? formatCurrency(record.ItemDiscount) : ''}
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
+                      {formatServiceAmount(record.Total)}
+                    </TableCell>
+                    <TableCell align="right">
+                      {record.DisplayOrderDiscount === null ? '' : formatCurrency(record.DisplayOrderDiscount)}
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
+                      {record.DisplayActualInvoice === null ? '' : formatCurrency(record.DisplayActualInvoice)}
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 180 }}>{record.Note ?? ''}</TableCell>
                   </TableRow>
                 ))
               )}

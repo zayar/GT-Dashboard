@@ -47,7 +47,7 @@ type SortOrder = 'asc' | 'desc';
 const CustomersBySalesperson: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
-  
+
   // State variables
   const [salespeople, setSalespeople] = useState<string[]>([]);
   const [selectedSalesperson, setSelectedSalesperson] = useState<string>('');
@@ -89,13 +89,13 @@ const CustomersBySalesperson: React.FC = () => {
       const query = `
         SELECT DISTINCT
           SellerName
-        FROM 
+        FROM
           great_time.MainPaymentView
-        WHERE 
+        WHERE
           SellerName IS NOT NULL
           AND SellerName != ''
           AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ORDER BY 
+        ORDER BY
           SellerName
       `;
 
@@ -150,10 +150,10 @@ const CustomersBySalesperson: React.FC = () => {
         SELECT DISTINCT
           CustomerName,
           CustomerPhoneNumber
-        FROM 
+        FROM
           great_time.MainPaymentView
-        WHERE 
-          CustomerName IS NOT NULL 
+        WHERE
+          CustomerName IS NOT NULL
           AND CustomerPhoneNumber IS NOT NULL
           AND SellerName = '${escapedSalesperson}'
           AND PaymentStatus = 'PAID'
@@ -162,21 +162,21 @@ const CustomersBySalesperson: React.FC = () => {
       ),
       AllCustomerInvoices AS (
         -- Get all invoices for these customers (deduplicated to one row per invoice)
-        SELECT 
+        SELECT
           p.CustomerName,
           p.CustomerPhoneNumber,
           p.InvoiceNumber,
           p.OrderCreatedDate,
           MAX(p.MemberId) AS MemberId,
           MAX(CAST(p.NetTotal AS FLOAT64)) AS InvoiceNetTotal
-        FROM 
+        FROM
           great_time.MainPaymentView p
         INNER JOIN
           CustomersFromSalesperson c
         ON
           p.CustomerName = c.CustomerName
           AND p.CustomerPhoneNumber = c.CustomerPhoneNumber
-        WHERE 
+        WHERE
           p.PaymentStatus = 'PAID'
           AND NOT STARTS_WITH(p.InvoiceNumber, 'CO-')
           AND p.PaymentMethod != 'PASS'
@@ -210,16 +210,16 @@ const CustomersBySalesperson: React.FC = () => {
         GROUP BY
           CustomerName, CustomerPhoneNumber
       )
-      SELECT 
+      SELECT
         CustomerName AS name,
         CustomerPhoneNumber AS phoneNumber,
         COALESCE(MemberId, 'N/A') AS memberId,
         TotalSpend AS totalSpend,
         LastInvoiceNumber AS lastInvoiceNumber,
         LastPurchaseDate AS lastPurchaseDate
-      FROM 
+      FROM
         CustomerSummary
-      ORDER BY 
+      ORDER BY
         LastPurchaseDate DESC
       `;
 
@@ -360,7 +360,7 @@ const CustomersBySalesperson: React.FC = () => {
   );
 
   return (
-    <Box sx={{ bgcolor: '#111923', minHeight: '100vh', p: 3 }}>
+    <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -368,21 +368,21 @@ const CustomersBySalesperson: React.FC = () => {
             onClick={() => navigate(-1)}
             sx={{
               mr: 2,
-              color: 'white',
+              color: 'var(--text-primary)',
               bgcolor: 'rgba(255,255,255,0.1)',
               '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
             }}
           >
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" component="h1" sx={{ color: 'white', fontWeight: 'bold' }}>
+          <Typography variant="h5" component="h1" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
             Customers by Salesperson
           </Typography>
         </Box>
         <IconButton
           onClick={selectedSalesperson ? fetchCustomers : fetchSalespeople}
           sx={{
-            color: 'white',
+            color: 'var(--text-primary)',
             bgcolor: 'rgba(255,255,255,0.1)',
             '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
           }}
@@ -393,29 +393,29 @@ const CustomersBySalesperson: React.FC = () => {
       </Box>
 
       {/* Salesperson Selection */}
-      <Paper sx={{ p: 3, bgcolor: '#1a2234', mb: 3, borderRadius: 2, border: '1px solid #2d3748' }}>
-        <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 2, fontWeight: 600 }}>
+      <Paper sx={{ p: 3, bgcolor: 'var(--surface)', mb: 3, borderRadius: 2, border: '1px solid var(--border)' }}>
+        <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 2, fontWeight: 600 }}>
           Select Salesperson
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
           <FormControl sx={{ minWidth: 300 }}>
-            <InputLabel sx={{ color: '#9ca3af' }}>Salesperson</InputLabel>
+            <InputLabel sx={{ color: 'var(--text-secondary)' }}>Salesperson</InputLabel>
             <Select
               value={selectedSalesperson}
               onChange={handleSalespersonChange}
               label="Salesperson"
               disabled={salesPeopleLoading}
               sx={{
-                bgcolor: '#111923',
-                color: '#f3f4f6',
+                bgcolor: 'var(--surface-secondary)',
+                color: 'var(--text-primary)',
                 '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#2d3748'
+                  borderColor: 'var(--border)'
                 },
                 '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#4a5568'
+                  borderColor: 'var(--text-muted)'
                 },
                 '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#3b82f6'
+                  borderColor: 'var(--primary)'
                 }
               }}
             >
@@ -434,11 +434,11 @@ const CustomersBySalesperson: React.FC = () => {
             onClick={fetchCustomers}
             disabled={!selectedSalesperson || loading}
             sx={{
-              bgcolor: '#3b82f6',
-              '&:hover': { bgcolor: '#2563eb' },
+              bgcolor: 'var(--primary)',
+              '&:hover': { bgcolor: 'var(--primary-hover)' },
               '&.Mui-disabled': {
-                bgcolor: '#1f2937',
-                color: '#4b5563'
+                bgcolor: 'var(--surface-secondary)',
+                color: 'var(--border-strong)'
               }
             }}
           >
@@ -463,7 +463,7 @@ const CustomersBySalesperson: React.FC = () => {
 
       {/* Customer Grid */}
       {selectedSalesperson && customers.length > 0 && (
-        <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748' }}>
+        <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)' }}>
           {/* Search and Export Controls */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, gap: 2, flexWrap: 'wrap' }}>
             <TextField
@@ -473,20 +473,20 @@ const CustomersBySalesperson: React.FC = () => {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon sx={{ color: '#9ca3af' }} />
+                    <SearchIcon sx={{ color: 'var(--text-secondary)' }} />
                   </InputAdornment>
                 ),
                 sx: {
-                  bgcolor: '#111923',
-                  color: '#f3f4f6',
+                  bgcolor: 'var(--surface-secondary)',
+                  color: 'var(--text-primary)',
                   '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#2d3748'
+                    borderColor: 'var(--border)'
                   },
                   '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#4a5568'
+                    borderColor: 'var(--text-muted)'
                   },
                   '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#3b82f6'
+                    borderColor: 'var(--primary)'
                   }
                 }
               }}
@@ -499,16 +499,16 @@ const CustomersBySalesperson: React.FC = () => {
               onClick={handleExport}
               disabled={filteredCustomers.length === 0}
               sx={{
-                borderColor: '#2d3748',
-                color: '#d1d5db',
+                borderColor: 'var(--border)',
+                color: 'var(--text-secondary)',
                 '&:hover': {
-                  borderColor: '#3b82f6',
-                  color: '#3b82f6',
+                  borderColor: 'var(--primary)',
+                  color: 'var(--primary)',
                   bgcolor: 'rgba(59, 130, 246, 0.08)'
                 },
                 '&.Mui-disabled': {
-                  borderColor: '#1f2937',
-                  color: '#4b5563'
+                  borderColor: 'var(--surface-secondary)',
+                  color: 'var(--border-strong)'
                 }
               }}
             >
@@ -517,7 +517,7 @@ const CustomersBySalesperson: React.FC = () => {
           </Box>
 
           {/* Results Summary */}
-          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 2 }}>
             Showing {filteredCustomers.length} customer{filteredCustomers.length !== 1 ? 's' : ''} for {selectedSalesperson}
           </Typography>
 
@@ -532,14 +532,14 @@ const CustomersBySalesperson: React.FC = () => {
                 height: '8px'
               },
               '&::-webkit-scrollbar-track': {
-                backgroundColor: '#111923'
+                backgroundColor: 'var(--surface-secondary)'
               },
               '&::-webkit-scrollbar-thumb': {
-                backgroundColor: '#2d3748',
+                backgroundColor: 'var(--border)',
                 borderRadius: '4px'
               },
               '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: '#3b82f6'
+                backgroundColor: 'var(--primary)'
               }
             }}
           >
@@ -548,12 +548,12 @@ const CustomersBySalesperson: React.FC = () => {
                 <TableRow>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       cursor: 'pointer',
-                      '&:hover': { color: '#3b82f6' }
+                      '&:hover': { color: 'var(--primary)' }
                     }}
                     onClick={() => handleSort('name')}
                   >
@@ -561,33 +561,33 @@ const CustomersBySalesperson: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }}
                   >
                     Phone Number
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }}
                   >
                     Member ID
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       textAlign: 'right',
                       cursor: 'pointer',
-                      '&:hover': { color: '#3b82f6' }
+                      '&:hover': { color: 'var(--primary)' }
                     }}
                     onClick={() => handleSort('totalSpend')}
                   >
@@ -595,12 +595,12 @@ const CustomersBySalesperson: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748',
+                      borderBottom: '1px solid var(--border)',
                       cursor: 'pointer',
-                      '&:hover': { color: '#3b82f6' }
+                      '&:hover': { color: 'var(--primary)' }
                     }}
                     onClick={() => handleSort('lastPurchaseDate')}
                   >
@@ -608,10 +608,10 @@ const CustomersBySalesperson: React.FC = () => {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: '#101924',
-                      color: '#d1d5db',
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
                       fontWeight: 600,
-                      borderBottom: '1px solid #2d3748'
+                      borderBottom: '1px solid var(--border)'
                     }}
                   >
                     Last Invoice Number
@@ -623,17 +623,17 @@ const CustomersBySalesperson: React.FC = () => {
                   <TableRow
                     key={`${customer.phoneNumber}-${index}`}
                     sx={{
-                      '&:hover': { bgcolor: '#1a2234' },
-                      bgcolor: index % 2 === 0 ? '#111923' : '#121826'
+                      '&:hover': { bgcolor: 'var(--surface)' },
+                      bgcolor: index % 2 === 0 ? 'var(--surface-secondary)' : 'var(--background)'
                     }}
                   >
                     <TableCell
                       sx={{
-                        color: '#f3f4f6',
-                        borderBottom: '1px solid #2d3748',
+                        color: 'var(--text-primary)',
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
                         '&:hover': {
-                          color: '#3b82f6',
+                          color: 'var(--primary)',
                           textDecoration: 'underline'
                         }
                       }}
@@ -641,26 +641,26 @@ const CustomersBySalesperson: React.FC = () => {
                     >
                       {customer.name}
                     </TableCell>
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       {customer.phoneNumber}
                     </TableCell>
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       {customer.memberId}
                     </TableCell>
                     <TableCell
                       sx={{
-                        color: '#10b981',
-                        borderBottom: '1px solid #2d3748',
+                        color: 'var(--success)',
+                        borderBottom: '1px solid var(--border)',
                         textAlign: 'right',
                         fontWeight: 600
                       }}
                     >
                       {formatCurrency(customer.totalSpend, currentClinic)}
                     </TableCell>
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       {customer.lastPurchaseDate}
                     </TableCell>
-                    <TableCell sx={{ color: '#d1d5db', borderBottom: '1px solid #2d3748' }}>
+                    <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       {customer.lastInvoiceNumber || '-'}
                     </TableCell>
                   </TableRow>
@@ -677,13 +677,13 @@ const CustomersBySalesperson: React.FC = () => {
               onChange={(_e, newPage) => setPage(newPage - 1)}
               sx={{
                 '& .MuiPaginationItem-root': {
-                  color: '#d1d5db',
-                  borderColor: '#2d3748'
+                  color: 'var(--text-secondary)',
+                  borderColor: 'var(--border)'
                 },
                 '& .MuiPaginationItem-root.Mui-selected': {
-                  bgcolor: '#3b82f6',
+                  bgcolor: 'var(--primary)',
                   '&:hover': {
-                    bgcolor: '#2563eb'
+                    bgcolor: 'var(--primary-hover)'
                   }
                 }
               }}
@@ -695,14 +695,14 @@ const CustomersBySalesperson: React.FC = () => {
       {/* Loading State */}
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-          <CircularProgress sx={{ color: '#3b82f6' }} />
+          <CircularProgress sx={{ color: 'var(--primary)' }} />
         </Box>
       )}
 
       {/* No Data State */}
       {selectedSalesperson && !loading && customers.length === 0 && !error && (
-        <Paper sx={{ p: 4, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748', textAlign: 'center' }}>
-          <Typography sx={{ color: '#9ca3af' }}>
+        <Paper sx={{ p: 4, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', textAlign: 'center' }}>
+          <Typography sx={{ color: 'var(--text-secondary)' }}>
             No customers found for {selectedSalesperson}
           </Typography>
         </Paper>

@@ -1,25 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Box, 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
-  TableRow, 
-  Paper, 
-  Typography, 
-  CircularProgress, 
-  TextField, 
-  Button, 
-  Pagination, 
+import {
+  Box,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Typography,
+  CircularProgress,
+  TextField,
+  Button,
+  Pagination,
   Avatar,
-  IconButton
+  Tooltip
 } from '@mui/material';
 import { Search as SearchIcon, Refresh as RefreshIcon } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useClinic } from '../contexts/ClinicContext';
+import DirectoryPageHeader from './DirectoryPageHeader';
 
 interface Service {
   id?: string;
@@ -37,7 +38,6 @@ const ServicesTable: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [page, setPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const rowsPerPage = 10;
   const navigate = useNavigate();
@@ -45,32 +45,32 @@ const ServicesTable: React.FC = () => {
 
   const fetchServices = async () => {
     if (!currentClinic) return;
-    
+
     setLoading(true);
     setError(null);
     try {
       // Use SQL query to get services from MainDataView
       const query = `
-        SELECT 
+        SELECT
           ServiceName AS name,
           ServiceDescription AS description,
           CAST(ServiceDuration AS STRING) AS duration,
           CAST(AVG(Price) AS FLOAT64) AS price,
           COUNT(*) AS count,
           MAX(ServiceImage) AS image
-        FROM 
+        FROM
           great_time.MainDataView
-        WHERE 
+        WHERE
           ServiceName IS NOT NULL
           AND ClinicCode = '${currentClinic.code}'
-        GROUP BY 
+        GROUP BY
           ServiceName, ServiceDescription, ServiceDuration
-        ORDER BY 
+        ORDER BY
           count DESC
         LIMIT 100
       `;
 
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`, 
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
         { query },
         {
           headers: {
@@ -79,7 +79,7 @@ const ServicesTable: React.FC = () => {
           timeout: 15000
         }
       );
-      
+
       if (response.data && response.data.data && response.data.data.length > 0) {
         // Map API response to Service interface
         const formattedServices = response.data.data.map((service: any, index: number) => ({
@@ -92,16 +92,14 @@ const ServicesTable: React.FC = () => {
           image: service.image || null
         }));
         setServices(formattedServices);
-        setTotalPages(Math.ceil(formattedServices.length / rowsPerPage));
       } else {
         setServices([]);
-        setTotalPages(1);
         console.log('No service data returned:', response.data);
       }
     } catch (err: any) {
       console.error('Error fetching services:', err);
       let errorMessage = 'Failed to fetch services. Please try again.';
-      
+
       if (err.response) {
         // The request was made and the server responded with a status code
         // that falls out of the range of 2xx
@@ -117,7 +115,7 @@ const ServicesTable: React.FC = () => {
         console.error('Request setup error:', err.message);
         errorMessage = `Request error: ${err.message}`;
       }
-      
+
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -135,7 +133,7 @@ const ServicesTable: React.FC = () => {
     setPage(1);
   };
 
-  const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
+  const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
     setPage(value);
   };
 
@@ -150,10 +148,16 @@ const ServicesTable: React.FC = () => {
     }));
   };
 
-  const filteredServices = services.filter(service => 
+  const filteredServices = services.filter(service =>
     service.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     service.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const totalPages = Math.max(1, Math.ceil(filteredServices.length / rowsPerPage));
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const paginatedServices = filteredServices.slice(
     (page - 1) * rowsPerPage,
@@ -168,136 +172,168 @@ const ServicesTable: React.FC = () => {
     });
   };
 
+  const cleanDescription = (description: string) => description
+    .replace(/\uFFFD/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const totalBookings = services.reduce((sum, service) => sum + Number(service.count || 0), 0);
+  const averagePrice = services.length
+    ? services.reduce((sum, service) => sum + Number(service.price || 0), 0) / services.length
+    : 0;
+
   return (
-    <Box 
-      sx={{ 
-        p: 3, 
-        display: 'flex', 
-        flexDirection: 'column', 
+    <Box
+      sx={{
+        p: { xs: 2, md: 3 },
+        display: 'flex',
+        flexDirection: 'column',
         minHeight: '100vh',
-        bgcolor: '#101729',
-        color: '#e2e8f0',
+        bgcolor: 'var(--background)',
+        color: 'var(--text-primary)',
         fontSize: '14px'
       }}
     >
-      {/* Header row with title and search */}
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        mb: 3
-      }}>
-        <Typography variant="h5" component="h1" sx={{ fontWeight: 600, fontSize: '1.4rem' }}>
-          Services
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2 }}>
+      <DirectoryPageHeader
+        title="Services"
+        subtitle="Compare demand, pricing, duration, and service catalogue quality."
+        count={filteredServices.length}
+        countLabel={searchTerm ? 'matches' : 'services'}
+        actions={
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={fetchServices}
+            disabled={loading}
+            sx={{ color: 'var(--primary)', borderColor: 'var(--border)' }}
+          >
+            Refresh
+          </Button>
+        }
+      />
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
+          gap: 1.5,
+          mb: 2.5,
+        }}
+      >
+        {[
+          { label: 'Services loaded', value: services.length.toLocaleString() },
+          { label: 'Total usage', value: totalBookings.toLocaleString() },
+          { label: 'Average price', value: `${formatPrice(averagePrice)} MMK` },
+        ].map((metric) => (
+          <Paper key={metric.label} sx={{ p: 2, bgcolor: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+            <Typography sx={{ color: 'var(--text-secondary)', fontSize: '0.78rem', fontWeight: 650 }}>{metric.label}</Typography>
+            <Typography sx={{ mt: 0.45, color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 750 }}>{metric.value}</Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      <Paper sx={{ p: 1, mb: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
           <TextField
-            placeholder="Search services..."
+            placeholder="Search services or descriptions..."
             size="small"
             value={searchTerm}
             onChange={handleSearchChange}
+            fullWidth
             InputProps={{
-              startAdornment: <SearchIcon sx={{ mr: 1, color: '#94a3b8' }} />,
+              startAdornment: <SearchIcon sx={{ mr: 1, color: 'var(--text-secondary)' }} />,
             }}
-            sx={{ 
-              width: 250,
-              '& .MuiOutlinedInput-root': { 
-                bgcolor: '#1a2235',
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                bgcolor: 'var(--surface)',
                 borderRadius: 1,
                 fontSize: '0.9rem',
-                '& fieldset': { borderColor: '#2d3748' },
-                '&:hover fieldset': { borderColor: '#4a5568' },
-                '&.Mui-focused fieldset': { borderColor: '#6d8fff' }
+                '& fieldset': { borderColor: 'var(--border)' },
+                '&:hover fieldset': { borderColor: 'var(--text-muted)' },
+                '&.Mui-focused fieldset': { borderColor: 'var(--primary)' }
               },
-              '& .MuiInputBase-input': { color: 'white' }
+              '& .MuiInputBase-input': { color: 'var(--text-primary)' },
+              '& .MuiOutlinedInput-notchedOutline': { border: 0 },
             }}
           />
-        </Box>
-        <IconButton 
-          onClick={fetchServices} 
-          sx={{ color: '#6d8fff', bgcolor: '#1a2235', borderRadius: 1, p: 1 }}
-        >
-          <RefreshIcon />
-        </IconButton>
-      </Box>
+      </Paper>
 
       {/* Services Table */}
       {loading ? (
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: 'calc(100vh - 160px)' 
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: 'calc(100vh - 160px)'
         }}>
-          <CircularProgress sx={{ color: '#6d8fff' }} />
+          <CircularProgress sx={{ color: 'var(--primary)' }} />
         </Box>
       ) : error ? (
-        <Box sx={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: 'calc(100vh - 160px)' 
+        <Box sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: 'calc(100vh - 160px)'
         }}>
           <Typography variant="body1" color="error" sx={{ mb: 2, fontSize: '0.9rem' }}>
             {error}
           </Typography>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={fetchServices}
-            sx={{ 
-              bgcolor: '#6d8fff', 
+            sx={{
+              bgcolor: 'var(--primary)',
               fontSize: '0.9rem',
-              '&:hover': { bgcolor: '#5a79e6' } 
+              '&:hover': { bgcolor: 'var(--primary-hover)' }
             }}
           >
             Retry
           </Button>
         </Box>
       ) : (
-        <Paper 
-          sx={{ 
-            flex: 1, 
+        <Paper
+          sx={{
+            flex: 1,
             overflow: 'hidden',
-            bgcolor: '#1a2235', 
-            color: 'white',
+            bgcolor: 'var(--surface)',
+            color: 'var(--text-primary)',
             boxShadow: 'none',
-            border: '1px solid #2d3748' 
+            border: '1px solid var(--border)'
           }}
         >
-          <TableContainer sx={{ 
-            maxHeight: 'calc(100vh - 220px)', 
+          <TableContainer sx={{
+            maxHeight: 'calc(100vh - 220px)',
             '&::-webkit-scrollbar': {
               width: '8px',
               height: '8px',
             },
             '&::-webkit-scrollbar-track': {
-              backgroundColor: '#111923',
+              backgroundColor: 'var(--surface-secondary)',
             },
             '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#2d3748',
+              backgroundColor: 'var(--border)',
               borderRadius: '4px',
             },
             '&::-webkit-scrollbar-thumb:hover': {
-              backgroundColor: '#4a5568',
+              backgroundColor: 'var(--text-muted)',
             }
           }}>
             <Table stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ bgcolor: '#111923', color: '#94a3b8', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }}>
+                  <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                     Service
                   </TableCell>
-                  <TableCell sx={{ bgcolor: '#111923', color: '#94a3b8', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }}>
+                  <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                     Description
                   </TableCell>
-                  <TableCell sx={{ bgcolor: '#111923', color: '#94a3b8', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }}>
+                  <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                     Duration
                   </TableCell>
-                  <TableCell sx={{ bgcolor: '#111923', color: '#94a3b8', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }}>
+                  <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                     Price
                   </TableCell>
-                  <TableCell sx={{ bgcolor: '#111923', color: '#94a3b8', fontWeight: 'bold', borderBottom: '1px solid #2d3748' }}>
+                  <TableCell sx={{ bgcolor: 'var(--surface-secondary)', color: 'var(--text-secondary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                     Usage Count
                   </TableCell>
                 </TableRow>
@@ -305,31 +341,39 @@ const ServicesTable: React.FC = () => {
               <TableBody>
                 {paginatedServices.length > 0 ? (
                   paginatedServices.map((service) => (
-                    <TableRow 
-                      key={service.id} 
+                    <TableRow
+                      key={service.id}
                       onClick={() => handleServiceClick(service.name)}
-                      sx={{ 
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleServiceClick(service.name);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-label={`Open details for ${service.name}`}
+                      sx={{
                         cursor: 'pointer',
-                        '&:hover': { bgcolor: '#2d3748' },
-                        borderBottom: '1px solid #2d3748'
+                        '&:hover': { bgcolor: 'var(--primary-soft)' },
+                        borderBottom: '1px solid var(--border)'
                       }}
                     >
-                      <TableCell 
-                        sx={{ 
+                      <TableCell
+                        sx={{
                           borderBottom: 'none',
-                          color: 'white',
+                          color: 'var(--text-primary)',
                           display: 'flex',
                           alignItems: 'center'
                         }}
                       >
-                        <Avatar 
+                        <Avatar
                           src={!imageErrors[service.id || ''] ? service.image : undefined}
                           alt={service.name}
-                          sx={{ 
-                            mr: 2, 
-                            width: 40, 
+                          sx={{
+                            mr: 2,
+                            width: 40,
                             height: 40,
-                            bgcolor: '#3b82f6',
+                            bgcolor: 'var(--primary)',
                             fontSize: '1rem'
                           }}
                           imgProps={{
@@ -338,27 +382,54 @@ const ServicesTable: React.FC = () => {
                         >
                           {(imageErrors[service.id || ''] || !service.image) && service.name?.charAt(0)?.toUpperCase()}
                         </Avatar>
-                        <Typography variant="body1">
+                        <Typography
+                          variant="body1"
+                          component={RouterLink}
+                          to={`/services/${encodeURIComponent(service.name)}`}
+                          onClick={(event) => event.stopPropagation()}
+                          sx={{
+                            color: 'var(--text-primary)',
+                            fontWeight: 650,
+                            textDecoration: 'none',
+                            '&:hover': { color: 'var(--primary)', textDecoration: 'underline' },
+                            '&:focus-visible': { outline: '2px solid var(--primary)', outlineOffset: 3, borderRadius: 0.5 },
+                          }}
+                        >
                           {service.name}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ borderBottom: 'none', color: 'white' }}>
-                        {service.description}
+                      <TableCell sx={{ borderBottom: 'none', color: 'var(--text-secondary)', maxWidth: 520 }}>
+                        <Tooltip title={cleanDescription(service.description)} placement="top-start" enterDelay={500}>
+                          <Typography
+                            component="span"
+                            sx={{
+                              color: 'inherit',
+                              fontSize: '0.875rem',
+                              display: '-webkit-box',
+                              WebkitBoxOrient: 'vertical',
+                              WebkitLineClamp: 2,
+                              overflow: 'hidden',
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {cleanDescription(service.description)}
+                          </Typography>
+                        </Tooltip>
                       </TableCell>
-                      <TableCell sx={{ borderBottom: 'none', color: 'white' }}>
-                        {service.duration} min
+                      <TableCell sx={{ borderBottom: 'none', color: 'var(--text-primary)' }}>
+                        {service.duration === 'N/A' ? 'N/A' : `${service.duration} min`}
                       </TableCell>
-                      <TableCell sx={{ borderBottom: 'none', color: 'white' }}>
-                        {formatPrice(service.price)}
+                      <TableCell sx={{ borderBottom: 'none', color: 'var(--text-primary)' }}>
+                        {formatPrice(service.price)} MMK
                       </TableCell>
-                      <TableCell sx={{ borderBottom: 'none', color: 'white' }}>
+                      <TableCell sx={{ borderBottom: 'none', color: 'var(--text-primary)' }}>
                         {service.count}
                       </TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={5} sx={{ textAlign: 'center', py: 4, borderBottom: 'none', color: '#94a3b8' }}>
+                    <TableCell colSpan={5} sx={{ textAlign: 'center', py: 4, borderBottom: 'none', color: 'var(--text-secondary)' }}>
                       No services found. Try a different search term.
                     </TableCell>
                   </TableRow>
@@ -366,25 +437,25 @@ const ServicesTable: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
-          
+
           {/* Pagination */}
-          <Box sx={{ 
-            display: 'flex', 
-            justifyContent: 'center', 
-            p: 2, 
-            bgcolor: '#1a2635', 
-            borderTop: '1px solid #2d3748' 
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            p: 2,
+            bgcolor: 'var(--surface-secondary)',
+            borderTop: '1px solid var(--border)'
           }}>
-            <Pagination 
-              count={totalPages} 
-              page={page} 
-              onChange={handlePageChange} 
+            <Pagination
+              count={totalPages}
+              page={page}
+              onChange={handlePageChange}
               sx={{
                 '& .MuiPaginationItem-root': {
-                  color: 'white',
+                  color: 'var(--text-primary)',
                 },
                 '& .MuiPaginationItem-page.Mui-selected': {
-                  bgcolor: '#3b82f6',
+                  bgcolor: 'var(--primary)',
                 }
               }}
             />
@@ -395,4 +466,4 @@ const ServicesTable: React.FC = () => {
   );
 };
 
-export default ServicesTable; 
+export default ServicesTable;

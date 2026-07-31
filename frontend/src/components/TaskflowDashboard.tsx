@@ -141,9 +141,9 @@ const TaskflowDashboard: React.FC = () => {
           status,
           CheckInTime
         FROM BookingDetails
-        ORDER BY 
+        ORDER BY
           CASE WHEN RoomName IS NULL THEN 1 ELSE 0 END, -- Rooms first
-          RoomName, 
+          RoomName,
           PractitionerName
       `;
 
@@ -194,7 +194,7 @@ const TaskflowDashboard: React.FC = () => {
         practitioners: 0
       };
     }
-    
+
     return {
       totalTasks: summaryStats.totalBookings,
       customers: summaryStats.totalCustomers,
@@ -239,14 +239,14 @@ const TaskflowDashboard: React.FC = () => {
   const taskStatusData = useMemo(() => {
     if (!summaryStats) {
       return [
-        { name: 'Completed', value: 0, color: '#10b981' },
-        { name: 'Processing', value: 0, color: '#3b82f6' }
+        { name: 'Completed', value: 0, color: 'var(--success)' },
+        { name: 'Processing', value: 0, color: 'var(--primary)' }
       ];
     }
-    
+
     return [
-      { name: 'Completed', value: summaryStats.completedBookings, color: '#10b981' },
-      { name: 'Processing', value: summaryStats.processingBookings, color: '#3b82f6' }
+      { name: 'Completed', value: summaryStats.completedBookings, color: 'var(--success)' },
+      { name: 'Processing', value: summaryStats.processingBookings, color: 'var(--primary)' }
     ];
   }, [summaryStats]);
 
@@ -262,7 +262,7 @@ const TaskflowDashboard: React.FC = () => {
       services: string;
       bookingId: string;
     }> = [];
-    
+
     const allServiceNames = new Set<string>();
 
     // Each booking is one row
@@ -288,10 +288,10 @@ const TaskflowDashboard: React.FC = () => {
       // Put 'No Room' at the end
       if (a.room === 'No Room' && b.room !== 'No Room') return 1;
       if (a.room !== 'No Room' && b.room === 'No Room') return -1;
-      
+
       const roomComp = a.room.localeCompare(b.room);
       if (roomComp !== 0) return roomComp;
-      
+
       return a.practitioner.localeCompare(b.practitioner);
     });
 
@@ -301,11 +301,11 @@ const TaskflowDashboard: React.FC = () => {
     const rowServiceCounts = practitionerCustomerRows.map(row => {
       const serviceList = row.services.split(', ').map(s => s.trim());
       const serviceCounts: { [service: string]: number } = {};
-      
+
       services.forEach(service => {
         serviceCounts[service] = serviceList.filter(s => s === service).length;
       });
-      
+
       return serviceCounts;
     });
 
@@ -327,17 +327,17 @@ const TaskflowDashboard: React.FC = () => {
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
-        bgcolor: '#111923'
+        bgcolor: 'var(--surface-secondary)'
       }}>
-        <CircularProgress sx={{ color: '#3b82f6' }} />
+        <CircularProgress sx={{ color: 'var(--primary)' }} />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ bgcolor: '#111923', minHeight: '100vh', p: 3 }}>
-        <Paper sx={{ p: 4, bgcolor: '#1a2234', textAlign: 'center', borderRadius: 2 }}>
+      <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
+        <Paper sx={{ p: 4, bgcolor: 'var(--surface)', textAlign: 'center', borderRadius: 2 }}>
           <Typography color="error" sx={{ mb: 2 }}>
             {error}
           </Typography>
@@ -348,7 +348,7 @@ const TaskflowDashboard: React.FC = () => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box sx={{ bgcolor: '#111923', minHeight: '100vh', p: 3 }}>
+      <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
         {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -356,14 +356,14 @@ const TaskflowDashboard: React.FC = () => {
               onClick={handleBack}
               sx={{
                 mr: 2,
-                color: 'white',
+                color: 'var(--text-primary)',
                 bgcolor: 'rgba(255,255,255,0.1)',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
               }}
             >
               <ArrowBackIcon />
             </IconButton>
-            <Typography variant="h5" component="h1" sx={{ color: 'white', fontWeight: 'bold' }}>
+            <Typography variant="h5" component="h1" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
               Taskflow Dashboard
             </Typography>
           </Box>
@@ -375,15 +375,15 @@ const TaskflowDashboard: React.FC = () => {
                 textField: {
                   size: 'small',
                   sx: {
-                    bgcolor: '#1a2234',
+                    bgcolor: 'var(--surface)',
                     borderRadius: 1,
                     '& .MuiOutlinedInput-root': {
-                      color: '#d1d5db',
-                      '& fieldset': { borderColor: '#2d3748' },
-                      '&:hover fieldset': { borderColor: '#4a5568' },
-                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' }
+                      color: 'var(--text-secondary)',
+                      '& fieldset': { borderColor: 'var(--border)' },
+                      '&:hover fieldset': { borderColor: 'var(--text-muted)' },
+                      '&.Mui-focused fieldset': { borderColor: 'var(--primary)' }
                     },
-                    '& .MuiSvgIcon-root': { color: '#d1d5db' }
+                    '& .MuiSvgIcon-root': { color: 'var(--text-secondary)' }
                   }
                 }
               }}
@@ -391,7 +391,7 @@ const TaskflowDashboard: React.FC = () => {
             <IconButton
               onClick={fetchTaskflowData}
               sx={{
-                color: 'white',
+                color: 'var(--text-primary)',
                 bgcolor: 'rgba(255,255,255,0.1)',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
               }}
@@ -404,14 +404,14 @@ const TaskflowDashboard: React.FC = () => {
         {/* Summary Cards */}
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: '#1a2234', border: '1px solid #2d3748' }}>
+            <Card sx={{ bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
               <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Box sx={{ p: 1.5, bgcolor: 'rgba(59, 130, 246, 0.1)', borderRadius: '50%' }}>
-                  <AssignmentIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
+                  <AssignmentIcon sx={{ fontSize: 32, color: 'var(--primary)' }} />
                 </Box>
                 <Box>
-                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>Total Tasks</Typography>
-                  <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
+                  <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>Total Tasks</Typography>
+                  <Typography variant="h4" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
                     {summary.totalTasks}
                   </Typography>
                 </Box>
@@ -420,14 +420,14 @@ const TaskflowDashboard: React.FC = () => {
           </Grid>
 
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: '#1a2234', border: '1px solid #2d3748' }}>
+            <Card sx={{ bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
               <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Box sx={{ p: 1.5, bgcolor: 'rgba(59, 130, 246, 0.1)', borderRadius: '50%' }}>
-                  <PeopleIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
+                  <PeopleIcon sx={{ fontSize: 32, color: 'var(--primary)' }} />
                 </Box>
                 <Box>
-                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>Customers</Typography>
-                  <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
+                  <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>Customers</Typography>
+                  <Typography variant="h4" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
                     {summary.customers}
                   </Typography>
                 </Box>
@@ -436,14 +436,14 @@ const TaskflowDashboard: React.FC = () => {
           </Grid>
 
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: '#1a2234', border: '1px solid #2d3748' }}>
+            <Card sx={{ bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
               <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Box sx={{ p: 1.5, bgcolor: 'rgba(59, 130, 246, 0.1)', borderRadius: '50%' }}>
-                  <MedicalServicesIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
+                  <MedicalServicesIcon sx={{ fontSize: 32, color: 'var(--primary)' }} />
                 </Box>
                 <Box>
-                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>Services</Typography>
-                  <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
+                  <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>Services</Typography>
+                  <Typography variant="h4" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
                     {summary.services}
                   </Typography>
                 </Box>
@@ -452,14 +452,14 @@ const TaskflowDashboard: React.FC = () => {
           </Grid>
 
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: '#1a2234', border: '1px solid #2d3748' }}>
+            <Card sx={{ bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
               <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Box sx={{ p: 1.5, bgcolor: 'rgba(59, 130, 246, 0.1)', borderRadius: '50%' }}>
-                  <PersonIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
+                  <PersonIcon sx={{ fontSize: 32, color: 'var(--primary)' }} />
                 </Box>
                 <Box>
-                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>Practitioners</Typography>
-                  <Typography variant="h4" sx={{ color: '#f3f4f6', fontWeight: 'bold' }}>
+                  <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>Practitioners</Typography>
+                  <Typography variant="h4" sx={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
                     {summary.practitioners}
                   </Typography>
                 </Box>
@@ -472,8 +472,8 @@ const TaskflowDashboard: React.FC = () => {
         <Grid container spacing={3} sx={{ mb: 3 }}>
           {/* Services List */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748', height: 350 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 2, fontWeight: 600 }}>
+            <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', height: 350 }}>
+              <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 2, fontWeight: 600 }}>
                 Services
               </Typography>
               <Box sx={{ maxHeight: 270, overflowY: 'auto' }}>
@@ -486,13 +486,13 @@ const TaskflowDashboard: React.FC = () => {
                       alignItems: 'center',
                       p: 1.5,
                       mb: 1,
-                      bgcolor: '#111923',
+                      bgcolor: 'var(--surface-secondary)',
                       borderRadius: 1,
-                      '&:hover': { bgcolor: '#1a2234' }
+                      '&:hover': { bgcolor: 'var(--surface)' }
                     }}
                   >
-                    <Typography sx={{ color: '#d1d5db' }}>{item.service}</Typography>
-                    <Typography sx={{ color: '#3b82f6', fontWeight: 600 }}>{item.count}</Typography>
+                    <Typography sx={{ color: 'var(--text-secondary)' }}>{item.service}</Typography>
+                    <Typography sx={{ color: 'var(--primary)', fontWeight: 600 }}>{item.count}</Typography>
                   </Box>
                 ))}
               </Box>
@@ -501,8 +501,8 @@ const TaskflowDashboard: React.FC = () => {
 
           {/* Task Status Pie Chart */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748', height: 350 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 2, fontWeight: 600, textAlign: 'center' }}>
+            <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', height: 350 }}>
+              <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 2, fontWeight: 600, textAlign: 'center' }}>
                 Task Status
               </Typography>
               <Box sx={{ height: 280 }}>
@@ -517,7 +517,7 @@ const TaskflowDashboard: React.FC = () => {
                     legend: {
                       position: 'bottom',
                       labels: {
-                        colors: '#d1d5db'
+                        colors: 'var(--text-secondary)'
                       }
                     },
                     dataLabels: {
@@ -550,8 +550,8 @@ const TaskflowDashboard: React.FC = () => {
 
           {/* Practitioners List */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748', height: 350 }}>
-              <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 2, fontWeight: 600 }}>
+            <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', height: 350 }}>
+              <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 2, fontWeight: 600 }}>
                 Practitioners
               </Typography>
               <Box sx={{ maxHeight: 270, overflowY: 'auto' }}>
@@ -564,13 +564,13 @@ const TaskflowDashboard: React.FC = () => {
                       alignItems: 'center',
                       p: 1.5,
                       mb: 1,
-                      bgcolor: '#111923',
+                      bgcolor: 'var(--surface-secondary)',
                       borderRadius: 1,
-                      '&:hover': { bgcolor: '#1a2234' }
+                      '&:hover': { bgcolor: 'var(--surface)' }
                     }}
                   >
-                    <Typography sx={{ color: '#d1d5db' }}>{item.practitioner}</Typography>
-                    <Typography sx={{ color: '#3b82f6', fontWeight: 600 }}>{item.count}</Typography>
+                    <Typography sx={{ color: 'var(--text-secondary)' }}>{item.practitioner}</Typography>
+                    <Typography sx={{ color: 'var(--primary)', fontWeight: 600 }}>{item.count}</Typography>
                   </Box>
                 ))}
               </Box>
@@ -579,14 +579,14 @@ const TaskflowDashboard: React.FC = () => {
         </Grid>
 
         {/* Heatmap Grid */}
-        <Paper sx={{ p: 3, bgcolor: '#1a2234', borderRadius: 2, border: '1px solid #2d3748' }}>
-          <Typography variant="h6" sx={{ color: '#f3f4f6', mb: 3, fontWeight: 600 }}>
+        <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)' }}>
+          <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 3, fontWeight: 600 }}>
             Room & Task Overview
           </Typography>
 
           {heatmapData.rows.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 8 }}>
-              <Typography sx={{ color: '#9ca3af' }}>
+              <Typography sx={{ color: 'var(--text-secondary)' }}>
                 No task data available for the selected date
               </Typography>
             </Box>
@@ -601,52 +601,52 @@ const TaskflowDashboard: React.FC = () => {
                   height: '8px',
                 },
                 '&::-webkit-scrollbar-track': {
-                  backgroundColor: '#111923',
+                  backgroundColor: 'var(--surface-secondary)',
                 },
                 '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: '#2d3748',
+                  backgroundColor: 'var(--border)',
                   borderRadius: '4px',
                 },
                 '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: '#3b82f6',
+                  backgroundColor: 'var(--primary)',
                 }
               }}
             >
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 0, zIndex: 3, minWidth: 120 }}>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)', position: 'sticky', left: 0, zIndex: 3, minWidth: 120 }}>
                       Room
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 120, zIndex: 3, minWidth: 150 }}>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)', position: 'sticky', left: 120, zIndex: 3, minWidth: 150 }}>
                       Practitioner(s)
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 270, zIndex: 3, minWidth: 150 }}>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)', position: 'sticky', left: 270, zIndex: 3, minWidth: 150 }}>
                       Customer Name
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 420, zIndex: 3, minWidth: 120 }}>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)', position: 'sticky', left: 420, zIndex: 3, minWidth: 120 }}>
                       Helpers
                     </TableCell>
-                    <TableCell sx={{ bgcolor: '#101924', color: '#d1d5db', fontWeight: 600, borderBottom: '1px solid #2d3748', position: 'sticky', left: 540, zIndex: 3, minWidth: 120, textAlign: 'center' }}>
+                    <TableCell sx={{ bgcolor: 'var(--surface)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)', position: 'sticky', left: 540, zIndex: 3, minWidth: 120, textAlign: 'center' }}>
                       Status
                     </TableCell>
                     {heatmapData.services.map((service) => (
                       <TableCell
                         key={service}
                         sx={{
-                          bgcolor: '#101924',
-                          color: '#d1d5db',
+                          bgcolor: 'var(--surface)',
+                          color: 'var(--text-secondary)',
                           fontWeight: 600,
-                          borderBottom: '1px solid #2d3748',
+                          borderBottom: '1px solid var(--border)',
                           minWidth: 120,
                           textAlign: 'center',
                           verticalAlign: 'bottom',
                           height: 100
                         }}
                       >
-                        <Box sx={{ 
-                          writingMode: 'vertical-rl', 
-                          transform: 'rotate(180deg)', 
+                        <Box sx={{
+                          writingMode: 'vertical-rl',
+                          transform: 'rotate(180deg)',
                           textAlign: 'left',
                           maxHeight: 100,
                           overflow: 'hidden',
@@ -663,15 +663,15 @@ const TaskflowDashboard: React.FC = () => {
                   {heatmapData.rows.map((row, rowIndex) => (
                     <TableRow
                       key={`${row.bookingId}-${rowIndex}`}
-                      sx={{ '&:hover': { bgcolor: '#1a2234' } }}
+                      sx={{ '&:hover': { bgcolor: 'var(--surface)' } }}
                     >
                       <TableCell
                         sx={{
-                          color: row.room === 'No Room' ? '#6b7280' : '#f3f4f6',
-                          borderBottom: '1px solid #2d3748',
+                          color: row.room === 'No Room' ? '#6b7280' : 'var(--text-primary)',
+                          borderBottom: '1px solid var(--border)',
                           position: 'sticky',
                           left: 0,
-                          bgcolor: '#1a2234',
+                          bgcolor: 'var(--surface)',
                           fontWeight: 600,
                           display: 'flex',
                           alignItems: 'center',
@@ -679,16 +679,16 @@ const TaskflowDashboard: React.FC = () => {
                           height: '60px' // Ensure consistent height
                         }}
                       >
-                        {row.room !== 'No Room' && <MeetingRoomIcon sx={{ fontSize: 18, color: '#3b82f6' }} />}
+                        {row.room !== 'No Room' && <MeetingRoomIcon sx={{ fontSize: 18, color: 'var(--primary)' }} />}
                         {row.room}
                       </TableCell>
                       <TableCell
                         sx={{
-                          color: '#f3f4f6',
-                          borderBottom: '1px solid #2d3748',
+                          color: 'var(--text-primary)',
+                          borderBottom: '1px solid var(--border)',
                           position: 'sticky',
                           left: 120,
-                          bgcolor: '#1a2234',
+                          bgcolor: 'var(--surface)',
                           fontWeight: 500
                         }}
                       >
@@ -696,32 +696,32 @@ const TaskflowDashboard: React.FC = () => {
                       </TableCell>
                       <TableCell
                         sx={{
-                          color: '#f3f4f6',
-                          borderBottom: '1px solid #2d3748',
+                          color: 'var(--text-primary)',
+                          borderBottom: '1px solid var(--border)',
                           position: 'sticky',
                           left: 270,
-                          bgcolor: '#1a2234'
+                          bgcolor: 'var(--surface)'
                         }}
                       >
                         {row.customer}
                       </TableCell>
                       <TableCell
                         sx={{
-                          color: '#d1d5db',
-                          borderBottom: '1px solid #2d3748',
+                          color: 'var(--text-secondary)',
+                          borderBottom: '1px solid var(--border)',
                           position: 'sticky',
                           left: 420,
-                          bgcolor: '#1a2234'
+                          bgcolor: 'var(--surface)'
                         }}
                       >
                         {row.helper}
                       </TableCell>
                       <TableCell
                         sx={{
-                          borderBottom: '1px solid #2d3748',
+                          borderBottom: '1px solid var(--border)',
                           position: 'sticky',
                           left: 540,
-                          bgcolor: '#1a2234',
+                          bgcolor: 'var(--surface)',
                           textAlign: 'center'
                         }}
                       >
@@ -748,7 +748,7 @@ const TaskflowDashboard: React.FC = () => {
                             key={`${row.bookingId}-${service}`}
                             align="center"
                             sx={{
-                              borderBottom: '1px solid #2d3748',
+                              borderBottom: '1px solid var(--border)',
                               bgcolor: count > 0 ? (row.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)') : 'transparent',
                               color: count > 0 ? (row.status === 'COMPLETED' ? '#34d399' : '#60a5fa') : '#6b7280',
                               fontWeight: count > 0 ? 700 : 400,
