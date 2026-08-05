@@ -102,6 +102,7 @@ const PaymentDetails: React.FC = () => {
         (record.SalePerson?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServiceName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServicePackageName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
+        (record.Note?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         // Handle search for wallet top-up
         (normalizedSearchTerm === 'topup' &&
           (record.WalletTopUp !== null &&
@@ -183,6 +184,7 @@ const PaymentDetails: React.FC = () => {
         PaymentMethod: record.PaymentMethod,
         PaymentType: record.PaymentType,
         PaymentAmount: record.PaymentAmount,
+        Note: isFirstInvoiceRow ? record.Note : null,
         PaymentNote: record.PaymentNote
       };
     });
@@ -356,6 +358,7 @@ const PaymentDetails: React.FC = () => {
         'Payment Method': record.PaymentMethod || '',
         'Payment Type': record.PaymentType || '',
         'Payment Amount': record.PaymentAmount || '',
+        'Note': record.Note || '',
         'Payment Note': record.PaymentNote || ''
       });
     });
@@ -388,6 +391,7 @@ const PaymentDetails: React.FC = () => {
       { wch: 15 },  // Payment Method
       { wch: 15 },  // Payment Type
       { wch: 15 },  // Payment Amount
+      { wch: 25 },  // Note
       { wch: 20 }   // Payment Note
     ];
     worksheet['!cols'] = colWidths;
@@ -961,6 +965,7 @@ const PaymentDetails: React.FC = () => {
                     PaymentMethod: 'Payment Method',
           PaymentType: 'Payment Type',
           PaymentAmount: 'Payment Amount',
+          Note: 'Note',
           PaymentNote: 'Payment Note'
         }}
       />

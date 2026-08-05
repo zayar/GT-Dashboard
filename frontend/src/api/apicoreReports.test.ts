@@ -121,6 +121,85 @@ describe('live check-in/out mapping', () => {
     });
   });
 
+  it('falls back to the order merchant note used by the legacy Sales report', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'checkin-so-790354-1',
+          in_time: '2026-07-25T12:37:00.000Z',
+          merchant_note: '',
+          status: 'CHECKOUT',
+          order_id: 'order-so-790354',
+          service: { id: 'service-1', name: 'Cleasing Mask + Tonic Shampoo' },
+          orders: {
+            order_id: 'SO-790354',
+            metadata: '{"merchant_note":" Birthday Gift Voucher "}',
+          },
+        },
+        {
+          id: 'checkin-so-790354-2',
+          in_time: '2026-07-25T12:37:00.000Z',
+          merchant_note: null,
+          status: 'CHECKOUT',
+          order_id: 'order-so-790354',
+          service: { id: 'service-2', name: 'Color Lock' },
+          orders: {
+            order_id: 'SO-790354',
+            metadata: '{"merchant_note":" Birthday Gift Voucher "}',
+          },
+        },
+      ],
+      [],
+    );
+
+    expect(rows.map((row) => row.Note)).toEqual([
+      'Birthday Gift Voucher',
+      'Birthday Gift Voucher',
+    ]);
+  });
+
+  it('keeps a service-specific check-in note ahead of the order note', () => {
+    const [record] = mapCheckInOutRecords(
+      [
+        {
+          id: 'checkin-service-note',
+          in_time: '2026-07-25T12:37:00.000Z',
+          merchant_note: 'Nan Baby Myint',
+          status: 'CHECKIN',
+          orders: {
+            order_id: 'SO-123456',
+            metadata: '{"merchant_note":"General order note"}',
+          },
+        },
+      ],
+      [],
+    );
+
+    expect(record.Note).toBe('Nan Baby Myint');
+  });
+
+  it('ignores malformed or non-text order merchant notes', () => {
+    const rows = mapCheckInOutRecords(
+      [
+        {
+          id: 'malformed-order-metadata',
+          in_time: '2026-07-25T12:37:00.000Z',
+          status: 'CHECKIN',
+          orders: { metadata: '{not-json' },
+        },
+        {
+          id: 'non-text-order-note',
+          in_time: '2026-07-25T12:37:00.000Z',
+          status: 'CHECKIN',
+          orders: { metadata: '{"merchant_note":123}' },
+        },
+      ],
+      [],
+    );
+
+    expect(rows.map((row) => row.Note)).toEqual([null, null]);
+  });
+
   it('labels merchant and order cancellations from their source relations', () => {
     const rows = mapCheckInOutRecords(
       [

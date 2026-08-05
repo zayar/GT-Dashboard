@@ -58,7 +58,8 @@ const COLUMN_WIDTHS: { [key: string]: string } = {
   PaymentMethod: '110px',
   PaymentType: '100px',
   PaymentAmount: '110px',
-  PaymentNote: '140px'
+  Note: '300px',
+  PaymentNote: '240px'
 };
 
 const DataTable: React.FC<DataTableProps> = ({
@@ -328,10 +329,16 @@ const DataTable: React.FC<DataTableProps> = ({
                           fontSize: '0.85rem',
                           width: COLUMN_WIDTHS[key] || '120px',
                           minWidth: COLUMN_WIDTHS[key] || '120px',
-                          maxWidth: COLUMN_WIDTHS[key] || '120px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
+                          maxWidth: key === 'Note' || key === 'PaymentNote'
+                            ? '420px'
+                            : COLUMN_WIDTHS[key] || '120px',
+                          overflow: key === 'Note' || key === 'PaymentNote' ? 'visible' : 'hidden',
+                          textOverflow: key === 'Note' || key === 'PaymentNote' ? 'clip' : 'ellipsis',
+                          whiteSpace: key === 'Note' || key === 'PaymentNote' ? 'pre-wrap' : 'nowrap',
+                          overflowWrap: key === 'Note' || key === 'PaymentNote' ? 'anywhere' : 'normal',
+                          wordBreak: key === 'Note' || key === 'PaymentNote' ? 'break-word' : 'normal',
+                          verticalAlign: key === 'Note' || key === 'PaymentNote' ? 'top' : 'middle',
+                          lineHeight: key === 'Note' || key === 'PaymentNote' ? 1.45 : 'inherit',
                           cursor: (key === 'CustomerName' && onCustomerClick) ||
                                   (key === 'ServiceName' && onServiceClick) ||
                                   (key === 'TherapistName' && onTherapistClick)

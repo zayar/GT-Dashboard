@@ -27,25 +27,16 @@ import { useClinic } from '../contexts/ClinicContext';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import { formatCurrency, getCurrency } from '../utils/currency';
+import {
+  buildSalesBySalesPersonQuery,
+  filterReportableSalesTransactions,
+  SalesBySalesPersonTransaction,
+  SalesPersonSummary,
+  summarizeSalesBySalesPerson,
+} from '../utils/salesBySalesPerson';
 
-interface SalesPersonData {
-  salesPerson: string;
-  transactionCount: number;
-  totalAmount: number;
-}
-
-interface Transaction {
-  Date: string;
-  InvoiceNumber: string;
-  CustomerName: string;
-  CustomerPhoneNumber: string;
-  ServiceName: string;
-  ServicePackageName: string | null;
-  PaymentMethod: string;
-  PaymentStatus: string;
-  InvoiceNetTotal: number;
-  SellerName: string | null;
-}
+type SalesPersonData = SalesPersonSummary;
+type Transaction = SalesBySalesPersonTransaction;
 
 const SalesBySalesPerson: React.FC = () => {
   const navigate = useNavigate();
@@ -102,37 +93,14 @@ const SalesBySalesPerson: React.FC = () => {
       }
 
       // Format dates for SQL query
-      const formatDate = (date: Date) => {
-        return date.toISOString().split('T')[0];
-      };
+      const formattedStartDate = format(queryStartDate, 'yyyy-MM-dd');
+      const formattedEndDate = format(queryEndDate, 'yyyy-MM-dd');
 
-      const formattedStartDate = formatDate(queryStartDate);
-      const formattedEndDate = formatDate(queryEndDate);
-
-      // SQL query to get all transactions for the date range
-      const query = `
-      SELECT
-        FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) AS Date,
-        InvoiceNumber,
-        CustomerName,
-        CustomerPhoneNumber,
-        ServiceName,
-        ServicePackageName,
-        PaymentMethod,
-        PaymentStatus,
-        CAST(NetTotal AS FLOAT64) AS InvoiceNetTotal,
-        SellerName
-      FROM
-        great_time.MainPaymentView
-      WHERE
-        DATE(OrderCreatedDate) BETWEEN '${formattedStartDate}' AND '${formattedEndDate}'
-        AND PaymentStatus = 'PAID'
-        AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-        AND PaymentMethod != 'PASS'
-        AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-      ORDER BY
-        Date DESC, InvoiceNumber;
-      `;
+      const query = buildSalesBySalesPersonQuery({
+        clinicCode: currentClinic.code,
+        startDate: formattedStartDate,
+        endDate: formattedEndDate,
+      });
 
       console.log('Executing query:', query);
 
@@ -155,15 +123,13 @@ const SalesBySalesPerson: React.FC = () => {
       console.log('Sales data fetched successfully, records:', salesData.length);
 
       // Filter out records with 0 MMK value
-      const filteredSalesData = salesData.filter((sale: Transaction) =>
-        sale.InvoiceNetTotal && sale.InvoiceNetTotal > 0
-      );
+      const filteredSalesData = filterReportableSalesTransactions(salesData);
 
       setTransactions(filteredSalesData);
       setFilteredTransactions(filteredSalesData);
 
       // Process data for sales by sales person summary
-      processDataForSalesPerson(filteredSalesData);
+      setSalesBySalesPerson(summarizeSalesBySalesPerson(filteredSalesData));
 
       setLoading(false);
     } catch (error: any) {
@@ -172,44 +138,6 @@ const SalesBySalesPerson: React.FC = () => {
       setLoading(false);
     }
   }, [timePeriod, startDate, endDate, currentClinic]);
-
-  // Function to process sales data by sales person
-  const processDataForSalesPerson = (data: Transaction[]) => {
-    if (!data.length) {
-      setSalesBySalesPerson([]);
-      return;
-    }
-
-    // Group by sales person
-    const salesPersonMap = new Map<string, { count: number; total: number }>();
-
-    data.forEach(transaction => {
-      const salesPerson = transaction.SellerName || 'Unknown';
-      const amount = Number(transaction.InvoiceNetTotal) || 0;
-
-      if (!salesPersonMap.has(salesPerson)) {
-        salesPersonMap.set(salesPerson, { count: 0, total: 0 });
-      }
-
-      const current = salesPersonMap.get(salesPerson)!;
-      salesPersonMap.set(salesPerson, {
-        count: current.count + 1,
-        total: current.total + amount
-      });
-    });
-
-    // Convert to array for rendering
-    const salesData = Array.from(salesPersonMap.entries()).map(([salesPerson, data]) => ({
-      salesPerson,
-      transactionCount: data.count,
-      totalAmount: data.total
-    }));
-
-    // Sort by total amount (highest first)
-    salesData.sort((a, b) => b.totalAmount - a.totalAmount);
-
-    setSalesBySalesPerson(salesData);
-  };
 
   // Handle time period change
   const handleTimePeriodChange = (event: SelectChangeEvent<'daily' | 'weekly' | 'monthly' | 'custom'>) => {
@@ -286,7 +214,7 @@ const SalesBySalesPerson: React.FC = () => {
       'Package': transaction.ServicePackageName || '-',
       'Payment Method': transaction.PaymentMethod,
       'Status': transaction.PaymentStatus,
-      'Amount': formatCurrency(Number(transaction.InvoiceNetTotal), currentClinic)
+      'Amount': formatCurrency(Number(transaction.PaymentAmount), currentClinic)
     }));
 
     // Create worksheet from data
@@ -733,7 +661,7 @@ const SalesBySalesPerson: React.FC = () => {
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.PaymentMethod}</TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.PaymentStatus}</TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                            {formatCurrency(Number(transaction.InvoiceNetTotal), currentClinic)}
+                            {formatCurrency(Number(transaction.PaymentAmount), currentClinic)}
                           </TableCell>
                         </TableRow>
                       ))}

@@ -31,6 +31,11 @@ import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { formatCurrency } from '../utils/currency';
+import {
+  buildCustomersBySalespersonQuery,
+  buildSalespeopleQuery,
+  type SalespersonOption,
+} from '../utils/customersBySalesperson';
 
 interface Customer {
   name: string;
@@ -49,7 +54,7 @@ const CustomersBySalesperson: React.FC = () => {
   const { currentClinic } = useClinic();
 
   // State variables
-  const [salespeople, setSalespeople] = useState<string[]>([]);
+  const [salespeople, setSalespeople] = useState<SalespersonOption[]>([]);
   const [selectedSalesperson, setSelectedSalesperson] = useState<string>('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
@@ -86,18 +91,7 @@ const CustomersBySalesperson: React.FC = () => {
       setSalesPeopleLoading(true);
       setError('');
 
-      const query = `
-        SELECT DISTINCT
-          SellerName
-        FROM
-          great_time.MainPaymentView
-        WHERE
-          SellerName IS NOT NULL
-          AND SellerName != ''
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-        ORDER BY
-          SellerName
-      `;
+      const query = buildSalespeopleQuery({ clinicCode: currentClinic.code });
 
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/query`,
@@ -116,7 +110,10 @@ const CustomersBySalesperson: React.FC = () => {
       }
 
       const salespeopleData = response.data.data || [];
-      setSalespeople(salespeopleData.map((item: any) => item.SellerName));
+      setSalespeople(salespeopleData.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+      })));
     } catch (err: any) {
       console.error('Error fetching salespeople:', err);
       setError(err.response?.data?.error || err.message || 'Failed to fetch salespeople');
@@ -141,87 +138,10 @@ const CustomersBySalesperson: React.FC = () => {
       setError('');
       setValidationError('');
 
-      // Escape single quotes in salesperson name
-      const escapedSalesperson = selectedSalesperson.replace(/'/g, "''");
-
-      const query = `
-      WITH CustomersFromSalesperson AS (
-        -- First, identify customers who have bought from this salesperson (at least once)
-        SELECT DISTINCT
-          CustomerName,
-          CustomerPhoneNumber
-        FROM
-          great_time.MainPaymentView
-        WHERE
-          CustomerName IS NOT NULL
-          AND CustomerPhoneNumber IS NOT NULL
-          AND SellerName = '${escapedSalesperson}'
-          AND PaymentStatus = 'PAID'
-          AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-          AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-      ),
-      AllCustomerInvoices AS (
-        -- Get all invoices for these customers (deduplicated to one row per invoice)
-        SELECT
-          p.CustomerName,
-          p.CustomerPhoneNumber,
-          p.InvoiceNumber,
-          p.OrderCreatedDate,
-          MAX(p.MemberId) AS MemberId,
-          MAX(CAST(p.NetTotal AS FLOAT64)) AS InvoiceNetTotal
-        FROM
-          great_time.MainPaymentView p
-        INNER JOIN
-          CustomersFromSalesperson c
-        ON
-          p.CustomerName = c.CustomerName
-          AND p.CustomerPhoneNumber = c.CustomerPhoneNumber
-        WHERE
-          p.PaymentStatus = 'PAID'
-          AND NOT STARTS_WITH(p.InvoiceNumber, 'CO-')
-          AND p.PaymentMethod != 'PASS'
-          AND LOWER(p.ClinicCode) = LOWER('${currentClinic.code}')
-        GROUP BY
-          p.CustomerName, p.CustomerPhoneNumber, p.InvoiceNumber, p.OrderCreatedDate
-      ),
-      CustomerPurchasesRanked AS (
-        -- Add row number to find the most recent purchase
-        SELECT
-          CustomerName,
-          CustomerPhoneNumber,
-          InvoiceNumber,
-          OrderCreatedDate,
-          MemberId,
-          InvoiceNetTotal,
-          ROW_NUMBER() OVER (PARTITION BY CustomerName, CustomerPhoneNumber ORDER BY OrderCreatedDate DESC) AS rn
-        FROM AllCustomerInvoices
-      ),
-      CustomerSummary AS (
-        -- Now sum all invoices for each customer
-        SELECT
-          CustomerName,
-          CustomerPhoneNumber,
-          MAX(MemberId) AS MemberId,
-          SUM(InvoiceNetTotal) AS TotalSpend,
-          MAX(CASE WHEN rn = 1 THEN InvoiceNumber END) AS LastInvoiceNumber,
-          MAX(CASE WHEN rn = 1 THEN FORMAT_TIMESTAMP('%d %b, %Y', OrderCreatedDate) END) AS LastPurchaseDate
-        FROM
-          CustomerPurchasesRanked
-        GROUP BY
-          CustomerName, CustomerPhoneNumber
-      )
-      SELECT
-        CustomerName AS name,
-        CustomerPhoneNumber AS phoneNumber,
-        COALESCE(MemberId, 'N/A') AS memberId,
-        TotalSpend AS totalSpend,
-        LastInvoiceNumber AS lastInvoiceNumber,
-        LastPurchaseDate AS lastPurchaseDate
-      FROM
-        CustomerSummary
-      ORDER BY
-        LastPurchaseDate DESC
-      `;
+      const query = buildCustomersBySalespersonQuery({
+        clinicCode: currentClinic.code,
+        sellerId: selectedSalesperson,
+      });
 
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/query`,
@@ -347,7 +267,10 @@ const CustomersBySalesperson: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Customers');
 
     // Generate filename
-    const sanitizedSalesperson = selectedSalesperson.replace(/[^a-z0-9]/gi, '_');
+    const salespersonName = salespeople.find(
+      salesperson => salesperson.id === selectedSalesperson
+    )?.name || selectedSalesperson;
+    const sanitizedSalesperson = salespersonName.replace(/[^a-z0-9]/gi, '_');
     const filename = `customers_by_${sanitizedSalesperson}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
     // Download file
@@ -358,6 +281,9 @@ const CustomersBySalesperson: React.FC = () => {
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
   );
+  const selectedSalespersonName = salespeople.find(
+    salesperson => salesperson.id === selectedSalesperson
+  )?.name || '';
 
   return (
     <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
@@ -423,8 +349,8 @@ const CustomersBySalesperson: React.FC = () => {
                 <em>Select a salesperson</em>
               </MenuItem>
               {salespeople.map((salesperson) => (
-                <MenuItem key={salesperson} value={salesperson}>
-                  {salesperson}
+                <MenuItem key={salesperson.id} value={salesperson.id}>
+                  {salesperson.name}
                 </MenuItem>
               ))}
             </Select>
@@ -518,7 +444,7 @@ const CustomersBySalesperson: React.FC = () => {
 
           {/* Results Summary */}
           <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 2 }}>
-            Showing {filteredCustomers.length} customer{filteredCustomers.length !== 1 ? 's' : ''} for {selectedSalesperson}
+            Showing {filteredCustomers.length} customer{filteredCustomers.length !== 1 ? 's' : ''} for {selectedSalespersonName}
           </Typography>
 
           {/* Table */}
@@ -703,7 +629,7 @@ const CustomersBySalesperson: React.FC = () => {
       {selectedSalesperson && !loading && customers.length === 0 && !error && (
         <Paper sx={{ p: 4, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', textAlign: 'center' }}>
           <Typography sx={{ color: 'var(--text-secondary)' }}>
-            No customers found for {selectedSalesperson}
+            No customers found for {selectedSalespersonName}
           </Typography>
         </Paper>
       )}
@@ -712,4 +638,3 @@ const CustomersBySalesperson: React.FC = () => {
 };
 
 export default CustomersBySalesperson;
-

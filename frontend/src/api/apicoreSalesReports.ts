@@ -20,6 +20,7 @@ export interface SalesDetailRecord {
   PaymentMethod: string;
   PaymentType: string | null;
   PaymentAmount: number | null;
+  Note: string | null;
   PaymentNote: string | null;
   InvoiceNetTotal: number;
   ItemQuantity: number | null;
@@ -266,6 +267,9 @@ export function buildSalesOrderWhere(input: {
     clinic_id: {
       equals: input.clinicId,
     },
+    status: {
+      not: 'CANCEL',
+    },
     created_at: {
       gte: toMyanmarUtcIso(input.startDate),
       lte: toMyanmarUtcIso(input.endDate),
@@ -403,6 +407,29 @@ function walletTopUp(order: RawReportOrder) {
   return order.order_id?.toUpperCase().startsWith('TO-') ? 'Topup' : '';
 }
 
+function parseMetadata(metadata: string | null | undefined) {
+  if (!metadata) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(metadata);
+    return parsed && typeof parsed === 'object'
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function orderMerchantNote(order: RawReportOrder) {
+  const merchantNote = parseMetadata(order.metadata).merchant_note;
+
+  return typeof merchantNote === 'string'
+    ? merchantNote.trim() || null
+    : null;
+}
+
 function itemName(item: RawOrderItem) {
   if (item.service?.name) {
     return item.service.name;
@@ -412,13 +439,9 @@ function itemName(item: RawOrderItem) {
   }
 
   if (item.metadata) {
-    try {
-      const metadata = JSON.parse(item.metadata) as { name?: unknown };
-      if (typeof metadata.name === 'string') {
-        return metadata.name;
-      }
-    } catch {
-      // Malformed historical metadata should not hide the rest of the report.
+    const metadataName = parseMetadata(item.metadata).name;
+    if (typeof metadataName === 'string') {
+      return metadataName;
     }
   }
 
@@ -433,7 +456,7 @@ function reportablePayments(order: RawReportOrder) {
       return false;
     }
 
-    const key = [
+    const key = payment.id || [
       payment.payment_method,
       payment.payment_amount,
       payment.payment_date,
@@ -447,32 +470,12 @@ function reportablePayments(order: RawReportOrder) {
   });
 }
 
-function salesDetailPayments(order: RawReportOrder) {
-  const payments = reportablePayments(order);
-  if (payments.length > 0) {
-    return payments;
-  }
-
-  const fallbackAmount = parseNumber(order.balance);
-  if (!(fallbackAmount > 0) || !isReportableMethod(order.payment_method)) {
-    return [];
-  }
-
-  return [{
-    id: `${order.id}-legacy-payment`,
-    payment_amount: fallbackAmount,
-    payment_method: order.payment_method,
-    payment_note: null,
-    payment_date: order.created_at,
-  }];
-}
-
 export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailRecord[] {
   return orders
-    .filter((order) => isReportableMethod(order.payment_method))
+    .filter((order) => order.status !== 'CANCEL' && isReportableMethod(order.payment_method))
     .flatMap((order) => {
       const items = order.order_items ?? [];
-      const payments = salesDetailPayments(order);
+      const payments = reportablePayments(order);
       const rowCount = Math.max(items.length, payments.length, 1);
       const duplicateCounts = new Map<string, number>();
 
@@ -505,6 +508,7 @@ export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailReco
           PaymentMethod: method,
           PaymentType: method,
           PaymentAmount: payment ? parseNumber(payment.payment_amount) : null,
+          Note: orderMerchantNote(order),
           PaymentNote: payment?.payment_note ?? null,
           InvoiceNetTotal: parseNumber(order.net_total),
           ItemQuantity: item?.quantity ?? null,
@@ -531,6 +535,10 @@ export function mapPaymentReportRecords(
   const rangeEnd = new Date(toMyanmarUtcIso(endDate)).getTime();
 
   return orders.flatMap((order) => {
+    if (order.status === 'CANCEL') {
+      return [];
+    }
+
     const serviceNames = Array.from(new Set(
       (order.order_items ?? [])
         .map(itemName)

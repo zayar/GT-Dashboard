@@ -113,6 +113,7 @@ interface RawCheckInRow {
     payment_method?: string | null;
     payment_status?: string | null;
     status?: string | null;
+    metadata?: string | null;
     seller?: {
       display_name?: string | null;
     } | null;
@@ -233,6 +234,7 @@ const GET_CHECKIN_OUT_DATA = `
         payment_method
         payment_status
         status
+        metadata
         seller {
           display_name
         }
@@ -634,6 +636,14 @@ function parseItemMetadata(metadata: string | null | undefined) {
   }
 }
 
+function getOrderMerchantNote(metadata: string | null | undefined) {
+  const merchantNote = parseItemMetadata(metadata).merchant_note;
+
+  return typeof merchantNote === 'string'
+    ? merchantNote.trim() || null
+    : null;
+}
+
 function getOrderItemDiscount(
   row: RawCheckInRow,
   item: RawOrderItem | undefined,
@@ -716,7 +726,10 @@ export function mapCheckInOutRecords(
       VisitStatus: visitStatus,
       OrderStatus: orderStatus,
       BookingStatus: bookingStatus,
-      Note: row.merchant_note?.trim() || null,
+      // Some sale paths only persist the invoice note in order metadata. Keep
+      // the service-level check-in note first, then match the legacy Sales
+      // report's metadata.merchant_note source when the check-in note is blank.
+      Note: row.merchant_note?.trim() || getOrderMerchantNote(order?.metadata),
     };
   });
 }
