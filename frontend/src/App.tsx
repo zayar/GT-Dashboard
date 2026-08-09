@@ -25,6 +25,7 @@ import HelperList from './components/HelperList';
 import InactiveCustomersReport from './components/InactiveCustomersReport';
 import Login from './components/Login';
 import PaymentDetails from './components/PaymentDetails';
+import OutstandingReceivables from './components/OutstandingReceivables';
 import SalesBySalesPerson from './components/SalesBySalesPerson';
 import CustomersBySalesperson from './components/CustomersBySalesperson';
 import ServiceBehaviorReport from './components/ServiceBehaviorReport';
@@ -2152,6 +2153,7 @@ const AppContent = () => {
             <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
             <Route path="/payment-details" element={<PaymentDetails />} />
             <Route path="/banking-details" element={<BankingDetails />} />
+            <Route path="/outstanding-receivables" element={<OutstandingReceivables />} />
             {/* <Route path="/appointments" element={<Appointments />} /> */}{/* Removed old appointments */}
             <Route path="/appointments-list" element={<AppointmentsListPage />} />
             <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />

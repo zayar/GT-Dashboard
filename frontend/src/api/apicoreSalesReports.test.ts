@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPaymentOrderWhere,
+  buildOutstandingOrderWhere,
   buildSalesOrderWhere,
+  mapOutstandingReportRecords,
   mapPaymentReportRecords,
   mapSalesDetailRecords,
   resolveReportDateRange,
@@ -115,6 +117,17 @@ describe('APICORE sales and payment reports', () => {
             lte: '2026-07-24T17:29:59.999Z',
           },
         },
+      },
+    });
+
+    expect(buildOutstandingOrderWhere({
+      clinicId: 'clinic-uuid',
+      asOfDate: new Date(2026, 6, 24),
+    })).toEqual({
+      clinic_id: { equals: 'clinic-uuid' },
+      status: { equals: 'ACTIVE' },
+      created_at: {
+        lte: '2026-07-24T17:29:59.999Z',
       },
     });
   });
@@ -303,5 +316,78 @@ describe('APICORE sales and payment reports', () => {
     }]);
     expect(paymentRows.reduce((sum, row) => sum + row.PaymentAmount, 0)).toBe(2_110_000);
     expect(paymentRows.map((row) => row.InvoiceNumber)).not.toContain('CO-3670176');
+  });
+
+  it('reconstructs outstanding balances at invoice grain as of a historical date', () => {
+    const partialOrder = {
+      ...order,
+      id: 'partial-order',
+      order_id: 'SO-924554',
+      created_at: '2026-08-01T10:00:00.000Z',
+      net_total: '750000',
+      payment_status: 'PAID',
+      payments: [
+        {
+          id: 'payment-before-snapshot',
+          payment_amount: '400000',
+          payment_method: 'CASH',
+          payment_note: null,
+          payment_date: '2026-08-01T10:30:00.000Z',
+        },
+        {
+          id: 'payment-after-snapshot',
+          payment_amount: '350000',
+          payment_method: 'KPAY',
+          payment_note: null,
+          payment_date: '2026-08-02T10:30:00.000Z',
+        },
+      ],
+    };
+    const unpaidOrder = {
+      ...order,
+      id: 'unpaid-order',
+      order_id: 'CO-3670176',
+      created_at: '2026-08-01T08:00:00.000Z',
+      net_total: '35000',
+      payment_status: 'UNPAID',
+      payments: [],
+    };
+    const agedOrder = {
+      ...order,
+      id: 'aged-order',
+      order_id: 'SO-AGED',
+      created_at: '2026-05-01T08:00:00.000Z',
+      net_total: '100000',
+      payment_status: 'UNPAID',
+      payments: [],
+    };
+
+    const rows = mapOutstandingReportRecords(
+      [partialOrder, unpaidOrder, agedOrder] as any,
+      new Date(2026, 7, 1),
+    );
+
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        InvoiceNumber: 'SO-924554',
+        InvoiceTotal: 750000,
+        AmountPaid: 400000,
+        OutstandingBalance: 350000,
+        PaymentStatus: 'PARTIAL_PAID',
+        LastPaymentDate: '2026-08-01',
+      }),
+      expect.objectContaining({
+        InvoiceNumber: 'CO-3670176',
+        AmountPaid: 0,
+        OutstandingBalance: 35000,
+        PaymentStatus: 'UNPAID',
+        AgingBucket: '0-30',
+      }),
+      expect.objectContaining({
+        InvoiceNumber: 'SO-AGED',
+        OutstandingBalance: 100000,
+        AgingBucket: '90+',
+      }),
+    ]));
   });
 });

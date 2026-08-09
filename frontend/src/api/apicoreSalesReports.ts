@@ -50,6 +50,27 @@ export interface PaymentReportRecord {
   PaymentAmount: number;
 }
 
+export type OutstandingPaymentStatus = 'PARTIAL_PAID' | 'UNPAID';
+export type OutstandingAgingBucket = '0-30' | '31-60' | '61-90' | '90+';
+
+export interface OutstandingReportRecord {
+  OrderDate: string;
+  InvoiceNumber: string;
+  CustomerName: string;
+  CustomerPhoneNumber: string;
+  MemberId: string;
+  SalePerson: string;
+  ServiceName: string;
+  PaymentMethods: string;
+  InvoiceTotal: number;
+  AmountPaid: number;
+  OutstandingBalance: number;
+  PaymentStatus: OutstandingPaymentStatus;
+  AgeDays: number;
+  AgingBucket: OutstandingAgingBucket;
+  LastPaymentDate: string;
+}
+
 interface RawOrderPayment {
   id: string;
   payment_amount: number | string;
@@ -305,6 +326,23 @@ export function buildPaymentOrderWhere(input: {
   };
 }
 
+export function buildOutstandingOrderWhere(input: {
+  clinicId: string;
+  asOfDate: Date;
+}) {
+  return {
+    clinic_id: {
+      equals: input.clinicId,
+    },
+    status: {
+      equals: 'ACTIVE',
+    },
+    created_at: {
+      lte: toMyanmarUtcIso(endOfDay(input.asOfDate)),
+    },
+  };
+}
+
 async function fetchAllOrders(input: {
   clinicId: string;
   where: Record<string, unknown>;
@@ -379,6 +417,11 @@ function formatMyanmarDate(value: string) {
   );
 
   return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function formatWallClockDate(value: Date) {
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
 }
 
 function normalizedMethod(value: string | null | undefined) {
@@ -588,6 +631,96 @@ export function mapPaymentReportRecords(
   ));
 }
 
+function calendarDayNumber(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return Date.UTC(year, month - 1, day) / 86_400_000;
+}
+
+export function outstandingAgingBucket(ageDays: number): OutstandingAgingBucket {
+  if (ageDays <= 30) return '0-30';
+  if (ageDays <= 60) return '31-60';
+  if (ageDays <= 90) return '61-90';
+  return '90+';
+}
+
+export function mapOutstandingReportRecords(
+  orders: RawReportOrder[],
+  asOfDate: Date,
+): OutstandingReportRecord[] {
+  const asOfEndTime = new Date(toMyanmarUtcIso(endOfDay(asOfDate))).getTime();
+  const asOfDay = calendarDayNumber(formatWallClockDate(asOfDate));
+
+  return orders.flatMap((order) => {
+    const orderTime = new Date(order.created_at).getTime();
+    const invoiceTotal = parseNumber(order.net_total);
+
+    if (
+      order.status !== 'ACTIVE'
+      || orderTime > asOfEndTime
+      || invoiceTotal <= 0
+      || !isReportableMethod(order.payment_method)
+    ) {
+      return [];
+    }
+
+    const paymentsToDate = reportablePayments(order)
+      .filter((payment) => {
+        const paymentTime = new Date(payment.payment_date).getTime();
+        return !Number.isNaN(paymentTime) && paymentTime <= asOfEndTime;
+      });
+    const amountPaid = Math.min(
+      invoiceTotal,
+      paymentsToDate.reduce(
+        (sum, payment) => sum + parseNumber(payment.payment_amount),
+        0,
+      ),
+    );
+    const outstandingBalance = Math.max(0, invoiceTotal - amountPaid);
+
+    if (outstandingBalance <= 0) {
+      return [];
+    }
+
+    const orderDate = formatMyanmarDate(order.created_at);
+    const ageDays = Math.max(0, asOfDay - calendarDayNumber(orderDate));
+    const serviceNames = Array.from(new Set(
+      (order.order_items ?? [])
+        .map(itemName)
+        .filter((name): name is string => Boolean(name)),
+    )).join(' · ');
+    const paymentMethods = Array.from(new Set(
+      paymentsToDate.map((payment) => normalizedMethod(payment.payment_method)),
+    )).join(' · ');
+    const lastPayment = [...paymentsToDate]
+      .sort((left, right) => right.payment_date.localeCompare(left.payment_date))[0];
+    const paymentStatus: OutstandingPaymentStatus = amountPaid > 0
+      ? 'PARTIAL_PAID'
+      : 'UNPAID';
+
+    return [{
+      OrderDate: orderDate,
+      InvoiceNumber: order.order_id ?? '',
+      CustomerName: customerName(order),
+      CustomerPhoneNumber: customerPhoneNumber(order),
+      MemberId: memberId(order),
+      SalePerson: sellerName(order) || 'Unknown',
+      ServiceName: serviceNames,
+      PaymentMethods: paymentMethods || 'UNSPECIFIED',
+      InvoiceTotal: invoiceTotal,
+      AmountPaid: amountPaid,
+      OutstandingBalance: outstandingBalance,
+      PaymentStatus: paymentStatus,
+      AgeDays: ageDays,
+      AgingBucket: outstandingAgingBucket(ageDays),
+      LastPaymentDate: lastPayment ? formatMyanmarDate(lastPayment.payment_date) : '',
+    }];
+  }).sort((left, right) => (
+    right.AgeDays - left.AgeDays
+    || right.OutstandingBalance - left.OutstandingBalance
+    || right.InvoiceNumber.localeCompare(left.InvoiceNumber)
+  ));
+}
+
 export async function fetchSalesDetailRecords(input: ReportDateInput & {
   clinicId: string;
   accessToken: string;
@@ -620,4 +753,18 @@ export async function fetchPaymentReportRecords(input: ReportDateInput & {
   });
 
   return mapPaymentReportRecords(orders, range.startDate, range.endDate);
+}
+
+export async function fetchOutstandingReportRecords(input: {
+  clinicId: string;
+  asOfDate: Date;
+  accessToken: string;
+}) {
+  const orders = await fetchAllOrders({
+    clinicId: input.clinicId,
+    accessToken: input.accessToken,
+    where: buildOutstandingOrderWhere(input),
+  });
+
+  return mapOutstandingReportRecords(orders, input.asOfDate);
 }
