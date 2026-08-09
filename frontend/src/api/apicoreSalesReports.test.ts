@@ -6,6 +6,11 @@ import {
   mapSalesDetailRecords,
   resolveReportDateRange,
 } from './apicoreSalesReports';
+import {
+  buildSalesBySalesPersonTransactions,
+  filterReportableSalesTransactions,
+  summarizeSalesBySalesPerson,
+} from '../utils/salesBySalesPerson';
 
 const order = {
   id: 'order-uuid',
@@ -25,9 +30,11 @@ const order = {
   member: {
     name: 'Global Name',
     member_id: 'GLOBAL-1',
+    phonenumber: '09999999999',
     clinic_members: [{
       name: 'Clinic Name',
       member_id: 'CLINIC-7',
+      phonenumber: '09123456789',
     }],
   },
   user: {
@@ -132,6 +139,7 @@ describe('APICORE sales and payment reports', () => {
       Date: '2026-07-24',
       InvoiceNumber: 'SO-001',
       CustomerName: 'Clinic Name',
+      CustomerPhoneNumber: '09123456789',
       MemberId: 'CLINIC-7',
       SalePerson: 'Seller Name',
       ServiceName: 'Facial',
@@ -239,5 +247,61 @@ describe('APICORE sales and payment reports', () => {
         PaymentAmount: 80000,
       }),
     ]);
+  });
+
+  it('reconciles gross sales separately from cash received across payment statuses', () => {
+    const orderForStatus = (
+      invoice: string,
+      paymentStatus: string,
+      netTotal: number,
+      paymentAmount: number | null,
+    ) => ({
+      ...order,
+      id: `${invoice}-id`,
+      order_id: invoice,
+      created_at: '2026-08-01T10:00:00.000Z',
+      total: String(netTotal),
+      net_total: String(netTotal),
+      payment_status: paymentStatus,
+      seller: { display_name: 'Hsu Yee' },
+      payments: paymentAmount === null ? [] : [{
+        id: `${invoice}-payment`,
+        payment_amount: String(paymentAmount),
+        payment_method: 'CASH',
+        payment_note: null,
+        payment_date: '2026-08-01T10:00:00.000Z',
+      }],
+      order_items: [{
+        ...order.order_items[0],
+        id: `${invoice}-item`,
+        total: String(netTotal),
+      }],
+    });
+    const orders = [
+      orderForStatus('SO-PAID', 'PAID', 1_710_000, 1_710_000),
+      orderForStatus('SO-924554', 'PARTIAL_PAID', 750_000, 400_000),
+      orderForStatus('CO-3670176', 'UNPAID', 35_000, null),
+    ];
+
+    const salesTransactions = filterReportableSalesTransactions(
+      buildSalesBySalesPersonTransactions(mapSalesDetailRecords(orders as any))
+    );
+    const salesSummary = summarizeSalesBySalesPerson(salesTransactions);
+    const paymentRows = mapPaymentReportRecords(
+      orders as any,
+      new Date(2026, 7, 1, 0, 0, 0, 0),
+      new Date(2026, 7, 1, 23, 59, 59, 999),
+    );
+
+    expect(salesSummary).toEqual([{
+      salesPerson: 'Hsu Yee',
+      transactionCount: 3,
+      paidSales: 1_710_000,
+      partialPaidSales: 750_000,
+      unpaidSales: 35_000,
+      totalAmount: 2_495_000,
+    }]);
+    expect(paymentRows.reduce((sum, row) => sum + row.PaymentAmount, 0)).toBe(2_110_000);
+    expect(paymentRows.map((row) => row.InvoiceNumber)).not.toContain('CO-3670176');
   });
 });

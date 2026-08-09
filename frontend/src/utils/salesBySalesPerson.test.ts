@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildSalesBySalesPersonQuery,
+  buildSalesBySalesPersonTransactions,
   filterReportableSalesTransactions,
   SalesBySalesPersonTransaction,
   summarizeSalesBySalesPerson,
@@ -19,28 +19,54 @@ const transaction = (
   ServicePackageName: null,
   PaymentMethod: 'CASH',
   PaymentStatus: 'PAID',
-  PaymentAmount: amount,
+  SalesAmount: amount,
   SellerName: seller,
 });
 
 describe('sales by sales person reporting', () => {
-  it('queries actual payment rows and keeps CO invoices', () => {
-    const query = buildSalesBySalesPersonQuery({
-      clinicCode: "clinic'code",
-      startDate: '2026-08-05',
-      endDate: '2026-08-05',
-    });
+  it('collapses item and split-payment rows to one gross-sale invoice', () => {
+    const rows = [
+      {
+        Date: '2026-08-01',
+        InvoiceNumber: 'SO-924554',
+        CustomerName: 'Customer',
+        CustomerPhoneNumber: '09123456789',
+        SalePerson: 'Hsu Yee',
+        ServiceName: 'Glow Booster Injection',
+        ServicePackageName: null,
+        PaymentMethod: 'MMQR',
+        PaymentStatus: 'PARTIAL_PAID',
+        InvoiceNetTotal: 750_000,
+      },
+      {
+        Date: '2026-08-01',
+        InvoiceNumber: 'SO-924554',
+        CustomerName: 'Customer',
+        CustomerPhoneNumber: '09123456789',
+        SalePerson: 'Hsu Yee',
+        ServiceName: 'Follow-up Service',
+        ServicePackageName: null,
+        PaymentMethod: 'CASH',
+        PaymentStatus: 'PARTIAL_PAID',
+        InvoiceNetTotal: 750_000,
+      },
+    ];
 
-    expect(query).toContain('great_time.PaymentReportView');
-    expect(query).toContain('CAST(PaymentAmount AS FLOAT64) > 0');
-    expect(query).toContain("COALESCE(PaymentStatus, 'PAID') AS PaymentStatus");
-    expect(query).not.toContain("AND PaymentStatus = 'PAID'");
-    expect(query).toContain("COALESCE(PaymentType, PaymentMethod) != 'PASS'");
-    expect(query).not.toContain("NOT STARTS_WITH(InvoiceNumber, 'CO-')");
-    expect(query).toContain("LOWER('clinic''code')");
+    expect(buildSalesBySalesPersonTransactions(rows)).toEqual([{
+      Date: '2026-08-01',
+      InvoiceNumber: 'SO-924554',
+      CustomerName: 'Customer',
+      CustomerPhoneNumber: '09123456789',
+      ServiceName: 'Glow Booster Injection, Follow-up Service',
+      ServicePackageName: null,
+      PaymentMethod: 'MMQR, CASH',
+      PaymentStatus: 'PARTIAL_PAID',
+      SalesAmount: 750_000,
+      SellerName: 'Hsu Yee',
+    }]);
   });
 
-  it('matches the old report totals without multiplying invoices by service rows', () => {
+  it('summarizes each invoice once without multiplying service rows', () => {
     const rows = [
       transaction('SO-567298', 'Hsu Yee', 7_290_000),
       transaction('SO-715474', 'Nyein Su', 1_200_000),
@@ -51,19 +77,36 @@ describe('sales by sales person reporting', () => {
     ];
 
     expect(summarizeSalesBySalesPerson(rows)).toEqual([
-      { salesPerson: 'Hsu Yee', transactionCount: 1, totalAmount: 7_290_000 },
-      { salesPerson: 'Nyein Su', transactionCount: 1, totalAmount: 1_200_000 },
-      { salesPerson: 'Aung Myint Myat', transactionCount: 1, totalAmount: 525_000 },
-      { salesPerson: 'Mi Mi', transactionCount: 2, totalAmount: 425_000 },
-      { salesPerson: 'Thinzar', transactionCount: 1, totalAmount: 35_000 },
+      { salesPerson: 'Hsu Yee', transactionCount: 1, paidSales: 7_290_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 7_290_000 },
+      { salesPerson: 'Nyein Su', transactionCount: 1, paidSales: 1_200_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 1_200_000 },
+      { salesPerson: 'Aung Myint Myat', transactionCount: 1, paidSales: 525_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 525_000 },
+      { salesPerson: 'Mi Mi', transactionCount: 2, paidSales: 425_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 425_000 },
+      { salesPerson: 'Thinzar', transactionCount: 1, paidSales: 35_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 35_000 },
     ]);
   });
 
-  it('removes null and zero payment rows before summarizing', () => {
+  it('adds partial-paid and unpaid invoice values to gross sales without treating them as receipts', () => {
+    const rows = [
+      transaction('SO-PAID', 'Hsu Yee', 1_710_000),
+      { ...transaction('SO-924554', 'Hsu Yee', 750_000), PaymentStatus: 'PARTIAL_PAID' },
+      { ...transaction('CO-3670176', 'Hsu Yee', 35_000), PaymentStatus: 'UNPAID' },
+    ];
+
+    expect(summarizeSalesBySalesPerson(rows)).toEqual([{
+      salesPerson: 'Hsu Yee',
+      transactionCount: 3,
+      paidSales: 1_710_000,
+      partialPaidSales: 750_000,
+      unpaidSales: 35_000,
+      totalAmount: 2_495_000,
+    }]);
+  });
+
+  it('removes null and zero-value invoices before summarizing', () => {
     const rows = [
       transaction('SO-1', 'Seller', 100),
       transaction('SO-2', 'Seller', 0),
-      { ...transaction('SO-3', 'Seller', 0), PaymentAmount: null as unknown as number },
+      { ...transaction('SO-3', 'Seller', 0), SalesAmount: null as unknown as number },
     ];
 
     expect(filterReportableSalesTransactions(rows)).toEqual([rows[0]]);

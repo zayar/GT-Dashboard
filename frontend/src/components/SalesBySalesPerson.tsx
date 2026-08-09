@@ -17,23 +17,25 @@ import {
   FormControl,
   InputLabel,
   OutlinedInput,
-  Button
+  Button,
+  Chip
 } from '@mui/material';
-import axios from 'axios';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { useNavigate } from 'react-router-dom';
 import { useClinic } from '../contexts/ClinicContext';
+import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
-import { formatCurrency, getCurrency } from '../utils/currency';
+import { formatCurrency } from '../utils/currency';
 import {
-  buildSalesBySalesPersonQuery,
+  buildSalesBySalesPersonTransactions,
   filterReportableSalesTransactions,
   SalesBySalesPersonTransaction,
   SalesPersonSummary,
   summarizeSalesBySalesPerson,
 } from '../utils/salesBySalesPerson';
+import { fetchSalesDetailRecords } from '../api/apicoreSalesReports';
 
 type SalesPersonData = SalesPersonSummary;
 type Transaction = SalesBySalesPersonTransaction;
@@ -41,6 +43,7 @@ type Transaction = SalesBySalesPersonTransaction;
 const SalesBySalesPerson: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
+  const { getAccessToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [timePeriod, setTimePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('weekly');
@@ -92,38 +95,23 @@ const SalesBySalesPerson: React.FC = () => {
           break;
       }
 
-      // Format dates for SQL query
-      const formattedStartDate = format(queryStartDate, 'yyyy-MM-dd');
-      const formattedEndDate = format(queryEndDate, 'yyyy-MM-dd');
-
-      const query = buildSalesBySalesPersonQuery({
-        clinicCode: currentClinic.code,
-        startDate: formattedStartDate,
-        endDate: formattedEndDate,
-      });
-
-      console.log('Executing query:', query);
-
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
-        { query },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-          },
-          timeout: 15000 // 15 seconds timeout
-        }
-      );
-
-      if (!response.data.success) {
-        throw new Error('Failed to fetch sales data: ' + (response.data.error || 'Unknown error'));
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error('Your session has expired. Please sign in again.');
       }
 
-      const salesData = response.data.data || [];
-      console.log('Sales data fetched successfully, records:', salesData.length);
+      const salesData = await fetchSalesDetailRecords({
+        clinicId: currentClinic.id,
+        filterType: 'day',
+        startDate: queryStartDate,
+        endDate: queryEndDate,
+        selectedDate: null,
+        accessToken,
+      });
 
-      // Filter out records with 0 MMK value
-      const filteredSalesData = filterReportableSalesTransactions(salesData);
+      const filteredSalesData = filterReportableSalesTransactions(
+        buildSalesBySalesPersonTransactions(salesData)
+      );
 
       setTransactions(filteredSalesData);
       setFilteredTransactions(filteredSalesData);
@@ -137,7 +125,7 @@ const SalesBySalesPerson: React.FC = () => {
       setError(`Failed to load sales data: ${error.message || 'Unknown error'}`);
       setLoading(false);
     }
-  }, [timePeriod, startDate, endDate, currentClinic]);
+  }, [timePeriod, startDate, endDate, currentClinic, getAccessToken]);
 
   // Handle time period change
   const handleTimePeriodChange = (event: SelectChangeEvent<'daily' | 'weekly' | 'monthly' | 'custom'>) => {
@@ -155,6 +143,9 @@ const SalesBySalesPerson: React.FC = () => {
   // Calculate totals
   const totalTransactions = salesBySalesPerson.reduce((sum, person) => sum + person.transactionCount, 0);
   const totalAmount = salesBySalesPerson.reduce((sum, person) => sum + person.totalAmount, 0);
+  const totalPaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.paidSales, 0);
+  const totalPartialPaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.partialPaidSales, 0);
+  const totalUnpaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.unpaidSales, 0);
 
   // Function to export Sales Summary to Excel
   const exportSalesToExcel = () => {
@@ -166,13 +157,19 @@ const SalesBySalesPerson: React.FC = () => {
     const rows = [
       ...salesBySalesPerson.map(person => ({
         'Sales Person': person.salesPerson,
-        'Transaction Count': person.transactionCount,
-        'Total Amount': formatCurrency(person.totalAmount, currentClinic)
+        'Invoice Count': person.transactionCount,
+        'Paid Sales': formatCurrency(person.paidSales, currentClinic),
+        'Partial Paid Sales': formatCurrency(person.partialPaidSales, currentClinic),
+        'Unpaid Sales': formatCurrency(person.unpaidSales, currentClinic),
+        'Total Sales': formatCurrency(person.totalAmount, currentClinic)
       })),
       {
         'Sales Person': 'Total',
-        'Transaction Count': totalTransactions,
-        'Total Amount': formatCurrency(totalAmount, currentClinic)
+        'Invoice Count': totalTransactions,
+        'Paid Sales': formatCurrency(totalPaidSales, currentClinic),
+        'Partial Paid Sales': formatCurrency(totalPartialPaidSales, currentClinic),
+        'Unpaid Sales': formatCurrency(totalUnpaidSales, currentClinic),
+        'Total Sales': formatCurrency(totalAmount, currentClinic)
       }
     ];
 
@@ -182,8 +179,11 @@ const SalesBySalesPerson: React.FC = () => {
     // Set column widths
     const colWidths = [
       { wch: 25 }, // Sales Person
-      { wch: 20 }, // Transaction Count
-      { wch: 20 }, // Total Amount
+      { wch: 15 }, // Invoice Count
+      { wch: 20 }, // Paid Sales
+      { wch: 20 }, // Partial Paid Sales
+      { wch: 20 }, // Unpaid Sales
+      { wch: 20 }, // Total Sales
     ];
     worksheet['!cols'] = colWidths;
 
@@ -214,7 +214,7 @@ const SalesBySalesPerson: React.FC = () => {
       'Package': transaction.ServicePackageName || '-',
       'Payment Method': transaction.PaymentMethod,
       'Status': transaction.PaymentStatus,
-      'Amount': formatCurrency(Number(transaction.PaymentAmount), currentClinic)
+      'Sale Amount': formatCurrency(Number(transaction.SalesAmount), currentClinic)
     }));
 
     // Create worksheet from data
@@ -399,7 +399,7 @@ const SalesBySalesPerson: React.FC = () => {
               Total Sales: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{formatCurrency(totalAmount, currentClinic)}</span>
             </Typography>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline', ml: 3 }}>
-              Transactions: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalTransactions}</span>
+              Invoices: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalTransactions}</span>
             </Typography>
           </Box>
         </Box>
@@ -427,7 +427,12 @@ const SalesBySalesPerson: React.FC = () => {
           {/* Sales Summary by Sales Person */}
           <Paper elevation={0} sx={{ p: 3, bgcolor: 'var(--surface)', mb: 3, borderRadius: '8px', border: '1px solid var(--border)' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" color="var(--text-primary)">Sales Summary</Typography>
+              <Box>
+                <Typography variant="h6" color="var(--text-primary)">Sales Summary</Typography>
+                <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
+                  Gross invoice sales by order date. Partial-paid and unpaid columns show the full sale value; use Payment Report for cash received.
+                </Typography>
+              </Box>
               <Button
                 onClick={exportSalesToExcel}
                 variant="contained"
@@ -457,13 +462,31 @@ const SalesBySalesPerson: React.FC = () => {
                       color: 'var(--text-secondary)',
                       fontWeight: 600,
                       borderBottom: '1px solid var(--border)'
-                    }} align="center">Transaction Count</TableCell>
+                    }} align="center">Invoice Count</TableCell>
                     <TableCell sx={{
                       bgcolor: 'var(--surface)',
                       color: 'var(--text-secondary)',
                       fontWeight: 600,
                       borderBottom: '1px solid var(--border)'
-                    }} align="right">Total Amount</TableCell>
+                    }} align="right">Paid Sales</TableCell>
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      borderBottom: '1px solid var(--border)'
+                    }} align="right">Partial Paid</TableCell>
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      borderBottom: '1px solid var(--border)'
+                    }} align="right">Unpaid</TableCell>
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      borderBottom: '1px solid var(--border)'
+                    }} align="right">Total Sales</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -493,6 +516,15 @@ const SalesBySalesPerson: React.FC = () => {
                         {salesPerson.transactionCount}
                       </TableCell>
                       <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
+                        {formatCurrency(salesPerson.paidSales, currentClinic)}
+                      </TableCell>
+                      <TableCell sx={{ color: 'var(--warning)', borderBottom: '1px solid var(--border)' }} align="right">
+                        {formatCurrency(salesPerson.partialPaidSales, currentClinic)}
+                      </TableCell>
+                      <TableCell sx={{ color: 'var(--error)', borderBottom: '1px solid var(--border)' }} align="right">
+                        {formatCurrency(salesPerson.unpaidSales, currentClinic)}
+                      </TableCell>
+                      <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', fontWeight: 600 }} align="right">
                         {formatCurrency(salesPerson.totalAmount, currentClinic)}
                       </TableCell>
                     </TableRow>
@@ -504,6 +536,15 @@ const SalesBySalesPerson: React.FC = () => {
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="center">
                       {totalTransactions}
+                    </TableCell>
+                    <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
+                      {formatCurrency(totalPaidSales, currentClinic)}
+                    </TableCell>
+                    <TableCell sx={{ color: 'var(--warning)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
+                      {formatCurrency(totalPartialPaidSales, currentClinic)}
+                    </TableCell>
+                    <TableCell sx={{ color: 'var(--error)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
+                      {formatCurrency(totalUnpaidSales, currentClinic)}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
                       {formatCurrency(totalAmount, currentClinic)}
@@ -620,7 +661,7 @@ const SalesBySalesPerson: React.FC = () => {
                         color: 'var(--text-secondary)',
                         fontWeight: 600,
                         borderBottom: '1px solid var(--border)'
-                      }} align="right">Amount</TableCell>
+                      }} align="right">Sale Amount</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -659,9 +700,22 @@ const SalesBySalesPerson: React.FC = () => {
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.ServiceName}</TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.ServicePackageName || '-'}</TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.PaymentMethod}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.PaymentStatus}</TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
+                            <Chip
+                              label={transaction.PaymentStatus || 'UNKNOWN'}
+                              size="small"
+                              color={transaction.PaymentStatus === 'PAID'
+                                ? 'success'
+                                : transaction.PaymentStatus === 'PARTIAL_PAID'
+                                  ? 'warning'
+                                  : transaction.PaymentStatus === 'UNPAID'
+                                    ? 'error'
+                                    : 'default'}
+                              variant="outlined"
+                            />
+                          </TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                            {formatCurrency(Number(transaction.PaymentAmount), currentClinic)}
+                            {formatCurrency(Number(transaction.SalesAmount), currentClinic)}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -692,7 +746,7 @@ const SalesBySalesPerson: React.FC = () => {
                 <Pagination
                   count={Math.ceil(filteredTransactions.length / transactionsRowsPerPage)}
                   page={transactionsPage + 1}
-                  onChange={(event, newPage) => setTransactionsPage(newPage - 1)}
+                  onChange={(_, newPage) => setTransactionsPage(newPage - 1)}
                   sx={{
                     '& .MuiPaginationItem-root': {
                       color: 'var(--text-secondary)',

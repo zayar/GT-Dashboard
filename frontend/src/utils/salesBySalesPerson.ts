@@ -7,109 +7,133 @@ export interface SalesBySalesPersonTransaction {
   ServicePackageName: string | null;
   PaymentMethod: string;
   PaymentStatus: string;
-  PaymentAmount: number;
+  SalesAmount: number;
   SellerName: string | null;
 }
 
 export interface SalesPersonSummary {
   salesPerson: string;
   transactionCount: number;
+  paidSales: number;
+  partialPaidSales: number;
+  unpaidSales: number;
   totalAmount: number;
 }
 
-interface SalesQueryParams {
-  clinicCode: string;
-  startDate: string;
-  endDate: string;
+export interface SalesDetailSourceRecord {
+  Date: string;
+  InvoiceNumber: string;
+  CustomerName: string;
+  CustomerPhoneNumber: string;
+  SalePerson: string;
+  ServiceName: string | null;
+  ServicePackageName: string | null;
+  PaymentMethod: string;
+  PaymentStatus: string;
+  InvoiceNetTotal: number;
 }
 
-const escapeSqlString = (value: string) => value.replace(/'/g, "''");
+const addDistinct = (values: Set<string>, value: string | null | undefined) => {
+  const normalized = value?.trim();
+  if (normalized) values.add(normalized);
+};
 
 /**
- * PaymentReportView contains both item rows and payment rows. Restricting the
- * result to positive PaymentAmount rows produces one row per actual payment,
- * so invoice totals are not repeated for every service line.
+ * Sales Details can contain several item and payment rows for one invoice.
+ * Collapse them to the invoice grain before assigning gross sales to a seller.
  */
-export const buildSalesBySalesPersonQuery = ({
-  clinicCode,
-  startDate,
-  endDate,
-}: SalesQueryParams) => {
-  const escapedClinicCode = escapeSqlString(clinicCode);
+export const buildSalesBySalesPersonTransactions = (
+  records: SalesDetailSourceRecord[]
+): SalesBySalesPersonTransaction[] => {
+  const invoices = new Map<string, {
+    transaction: SalesBySalesPersonTransaction;
+    services: Set<string>;
+    packages: Set<string>;
+    methods: Set<string>;
+  }>();
 
-  return `
-      WITH invoice_items AS (
-        SELECT
-          ClinicCode,
-          InvoiceNumber,
-          STRING_AGG(DISTINCT NULLIF(ServiceName, ''), ', ') AS ServiceName,
-          STRING_AGG(DISTINCT NULLIF(ServicePackageName, ''), ', ') AS ServicePackageName
-        FROM
-          great_time.PaymentReportView
-        WHERE
-          DATE(OrderCreatedDate) BETWEEN DATE('${startDate}') AND DATE('${endDate}')
-          AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
-        GROUP BY
-          ClinicCode, InvoiceNumber
-      ),
-      paid_transactions AS (
-        SELECT
-          ClinicCode,
-          FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) AS Date,
-          InvoiceNumber,
-          CustomerName,
-          CustomerPhoneNumber,
-          COALESCE(PaymentType, PaymentMethod) AS PaymentMethod,
-          COALESCE(PaymentStatus, 'PAID') AS PaymentStatus,
-          CAST(PaymentAmount AS FLOAT64) AS PaymentAmount,
-          SellerName
-        FROM
-          great_time.PaymentReportView
-        WHERE
-          DATE(OrderCreatedDate) BETWEEN DATE('${startDate}') AND DATE('${endDate}')
-          AND CAST(PaymentAmount AS FLOAT64) > 0
-          AND COALESCE(PaymentType, PaymentMethod) != 'PASS'
-          AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
-      )
-      SELECT
-        paid.Date,
-        paid.InvoiceNumber,
-        paid.CustomerName,
-        paid.CustomerPhoneNumber,
-        items.ServiceName,
-        items.ServicePackageName,
-        paid.PaymentMethod,
-        paid.PaymentStatus,
-        paid.PaymentAmount,
-        paid.SellerName
-      FROM
-        paid_transactions paid
-      LEFT JOIN
-        invoice_items items
-      ON
-        paid.ClinicCode = items.ClinicCode
-        AND paid.InvoiceNumber = items.InvoiceNumber
-      ORDER BY
-        paid.Date DESC, paid.InvoiceNumber;
-  `;
+  records.forEach((record, index) => {
+    const invoiceKey = record.InvoiceNumber?.trim() || `row-${index}`;
+    let invoice = invoices.get(invoiceKey);
+
+    if (!invoice) {
+      invoice = {
+        transaction: {
+          Date: record.Date,
+          InvoiceNumber: record.InvoiceNumber,
+          CustomerName: record.CustomerName,
+          CustomerPhoneNumber: record.CustomerPhoneNumber,
+          ServiceName: null,
+          ServicePackageName: null,
+          PaymentMethod: record.PaymentMethod,
+          PaymentStatus: record.PaymentStatus,
+          SalesAmount: Number(record.InvoiceNetTotal) || 0,
+          SellerName: record.SalePerson || null,
+        },
+        services: new Set<string>(),
+        packages: new Set<string>(),
+        methods: new Set<string>(),
+      };
+      invoices.set(invoiceKey, invoice);
+    }
+
+    addDistinct(invoice.services, record.ServiceName);
+    addDistinct(invoice.packages, record.ServicePackageName);
+    addDistinct(invoice.methods, record.PaymentMethod);
+    if (!invoice.transaction.PaymentStatus && record.PaymentStatus) {
+      invoice.transaction.PaymentStatus = record.PaymentStatus;
+    }
+    if (!invoice.transaction.SellerName && record.SalePerson) {
+      invoice.transaction.SellerName = record.SalePerson;
+    }
+  });
+
+  return Array.from(invoices.values())
+    .map(({ transaction, services, packages, methods }) => ({
+      ...transaction,
+      ServiceName: Array.from(services).join(', ') || null,
+      ServicePackageName: Array.from(packages).join(', ') || null,
+      PaymentMethod: Array.from(methods).join(', ') || transaction.PaymentMethod,
+    }))
+    .sort((left, right) => (
+      right.Date.localeCompare(left.Date)
+      || right.InvoiceNumber.localeCompare(left.InvoiceNumber)
+    ));
 };
 
 export const filterReportableSalesTransactions = (
   transactions: SalesBySalesPersonTransaction[]
-) => transactions.filter(transaction => Number(transaction.PaymentAmount) > 0);
+) => transactions.filter(transaction => Number(transaction.SalesAmount) > 0);
 
 export const summarizeSalesBySalesPerson = (
   transactions: SalesBySalesPersonTransaction[]
 ): SalesPersonSummary[] => {
-  const totals = new Map<string, { count: number; total: number }>();
+  const totals = new Map<string, {
+    count: number;
+    paid: number;
+    partialPaid: number;
+    unpaid: number;
+    total: number;
+  }>();
 
   transactions.forEach(transaction => {
     const salesPerson = transaction.SellerName || 'Unknown';
-    const current = totals.get(salesPerson) || { count: 0, total: 0 };
+    const current = totals.get(salesPerson) || {
+      count: 0,
+      paid: 0,
+      partialPaid: 0,
+      unpaid: 0,
+      total: 0,
+    };
+    const amount = Number(transaction.SalesAmount) || 0;
+    const status = transaction.PaymentStatus?.trim().toUpperCase();
 
     totals.set(salesPerson, {
       count: current.count + 1,
-      total: current.total + (Number(transaction.PaymentAmount) || 0),
+      paid: current.paid + (status === 'PAID' ? amount : 0),
+      partialPaid: current.partialPaid + (status === 'PARTIAL_PAID' ? amount : 0),
+      unpaid: current.unpaid + (status === 'UNPAID' ? amount : 0),
+      total: current.total + amount,
     });
   });
 
@@ -117,6 +141,9 @@ export const summarizeSalesBySalesPerson = (
     .map(([salesPerson, data]) => ({
       salesPerson,
       transactionCount: data.count,
+      paidSales: data.paid,
+      partialPaidSales: data.partialPaid,
+      unpaidSales: data.unpaid,
       totalAmount: data.total,
     }))
     .sort((a, b) => b.totalAmount - a.totalAmount);

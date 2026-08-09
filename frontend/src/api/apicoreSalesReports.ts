@@ -11,6 +11,7 @@ export interface SalesDetailRecord {
   Date: string;
   InvoiceNumber: string;
   CustomerName: string;
+  CustomerPhoneNumber: string;
   MemberId: string;
   SalePerson: string;
   ServiceName: string | null;
@@ -94,9 +95,11 @@ interface RawReportOrder {
   member?: {
     name?: string | null;
     member_id?: string | null;
+    phonenumber?: string | null;
     clinic_members?: Array<{
       name?: string | null;
       member_id?: string | null;
+      phonenumber?: string | null;
     }> | null;
   } | null;
   user?: {
@@ -151,9 +154,11 @@ const GET_SALES_PAYMENT_ORDERS = `
       member {
         name
         member_id
+        phonenumber
         clinic_members(where: $clinicMembersWhere2) {
           name
           member_id
+          phonenumber
         }
       }
       user {
@@ -397,6 +402,12 @@ function memberId(order: RawReportOrder) {
     || '';
 }
 
+function customerPhoneNumber(order: RawReportOrder) {
+  return order.member?.clinic_members?.[0]?.phonenumber?.trim()
+    || order.member?.phonenumber?.trim()
+    || '';
+}
+
 function sellerName(order: RawReportOrder) {
   return order.seller?.display_name?.trim()
     || order.user?.name?.trim()
@@ -499,6 +510,7 @@ export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailReco
           Date: formatMyanmarDate(order.created_at),
           InvoiceNumber: order.order_id ?? '',
           CustomerName: customerName(order),
+          CustomerPhoneNumber: customerPhoneNumber(order),
           MemberId: memberId(order),
           SalePerson: sellerName(order),
           ServiceName: serviceName,
