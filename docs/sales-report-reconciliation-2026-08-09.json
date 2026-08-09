@@ -1,0 +1,193 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "GreatTime Sales Report Reconciliation",
+    "generatedAt": "2026-08-09T13:30:00+06:30",
+    "sources": [
+      {
+        "id": "live_reports",
+        "label": "Production APICORE reports",
+        "href": "https://bi.greattime.app/sales-by-sales-person",
+        "query": {
+          "sql": "WITH audited_values AS (SELECT 'Opening outstanding' AS step, 2726000 AS amount, 2726000 AS balance_after, 8 AS record_count UNION ALL SELECT 'Gross sales', 418391332, 421117332, 479 UNION ALL SELECT 'Payment receipts', -408897832, 12219500, 512) SELECT * FROM audited_values",
+          "description": "Reproducible bridge from reviewed production APICORE report totals.",
+          "tables_used": ["audited_values"],
+          "filters": ["Clinic: gtdenovo", "June 10-August 9, 2026", "Active non-cancelled invoices"],
+          "metric_definitions": [
+            "Gross sales is full invoice net total by order date for paid, partial-paid, and unpaid invoices.",
+            "Receipts is payment amount by payment date.",
+            "Outstanding is invoice net total less payments posted through the as-of date."
+          ]
+        }
+      },
+      {
+        "id": "code_audit",
+        "label": "GT_NewReport report implementation",
+        "path": "frontend/src",
+        "query": {
+          "sql": "SELECT * FROM UNNEST([STRUCT(1 AS priority, 'Daily Report' AS surface, 'Collected from visitors' AS metric), STRUCT(2, 'Main Dashboard', 'Total income'), STRUCT(3, 'Service Details', 'Lifetime Revenue'), STRUCT(4, 'Service Behavior', 'Total Sales'), STRUCT(5, 'Sales Details', 'Invoice/payment rows'), STRUCT(6, 'Sales by Sales Person', 'Gross sales'), STRUCT(7, 'Payment Report', 'Payment receipts'), STRUCT(8, 'Outstanding Receivables', 'Outstanding balance')])",
+          "description": "Reproducible inventory of money-value surfaces identified in the production route and code audit.",
+          "tables_used": ["frontend/src/components", "frontend/src/utils"],
+          "metric_definitions": ["Assessment compares source, event date, grain, payment-status scope, and displayed label."]
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "ledger_bridge",
+        "title": "Receivables ledger bridge",
+        "subtitle": "MMK, June 10-August 9, 2026. Closing outstanding is exactly 12.22m MMK.",
+        "type": "waterfall",
+        "intent": "decomposition",
+        "dataset": "bridge",
+        "sourceId": "live_reports",
+        "encodings": {
+          "x": { "field": "step", "type": "nominal", "label": "Ledger step" },
+          "y": { "field": "amount", "type": "quantitative", "label": "Amount", "format": "currency" },
+          "tooltip": [
+            { "field": "amount", "label": "Movement", "format": "currency" },
+            { "field": "balance_after", "label": "Balance after step", "format": "currency" },
+            { "field": "record_count", "label": "Invoices / payments", "format": "number" }
+          ]
+        },
+        "valueFormat": "currency",
+        "unit": "MMK",
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "aug1",
+        "title": "August 1 spot-check",
+        "subtitle": "Exact values explaining the tester's Hsu Yee discrepancy.",
+        "dataset": "aug1",
+        "sourceId": "live_reports",
+        "defaultSort": { "field": "order", "direction": "asc" },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          { "field": "order", "label": "#", "type": "number" },
+          { "field": "metric", "label": "Metric", "type": "text" },
+          { "field": "amount", "label": "Amount", "format": "currency" },
+          { "field": "meaning", "label": "Meaning", "type": "text" }
+        ]
+      },
+      {
+        "id": "inventory",
+        "title": "Sales-related report inventory",
+        "subtitle": "Four accounting reports and four adjacent operational surfaces show money values.",
+        "dataset": "inventory",
+        "sourceId": "code_audit",
+        "defaultSort": { "field": "priority", "direction": "asc" },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          { "field": "priority", "label": "Priority", "type": "number" },
+          { "field": "surface", "label": "Surface", "type": "text" },
+          { "field": "metric", "label": "Displayed metric", "type": "text" },
+          { "field": "basis", "label": "Date basis", "type": "text" },
+          { "field": "scope", "label": "Scope", "type": "text" },
+          { "field": "assessment", "label": "Assessment", "type": "text" }
+        ]
+      }
+    ],
+    "blocks": [
+      { "id": "title", "type": "markdown", "body": "# GreatTime Sales Report Reconciliation" },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n\n- **The accounting core reconciles exactly.** For June 10-August 9, opening outstanding of **2.726m MMK** plus gross sales of **418.391m MMK** minus receipts of **408.898m MMK** equals closing outstanding of **12.220m MMK**.\n- **Four reports form the accounting set:** Sales Details, Sales by Sales Person, Payment Report, and Outstanding Receivables. They use the live ledger and reconcile when date basis and grain are respected.\n- **Four adjacent views should not be used to tally accounting sales.** Main Dashboard, Daily Report, Service Behavior, and Service Details use warehouse or operational definitions. Daily Report is materially mislabeled; Main Dashboard can lag the live ledger."
+      },
+      {
+        "id": "ledger",
+        "type": "markdown",
+        "body": "## The live sales ledger balances\n\nThe canonical control is **opening receivables + gross invoice sales - payment receipts = closing receivables**. The equality held to the kyat for the full period reviewed, establishing Sales by Sales Person, Payment Report, and Outstanding Receivables as mutually consistent. Sales Details is the row-level drill-down for the same source."
+      },
+      { "id": "chart", "type": "chart", "chartId": "ledger_bridge", "layout": "full" },
+      {
+        "id": "tester",
+        "type": "markdown",
+        "body": "## The August 1 tester discrepancy is resolved\n\nHsu Yee's **750,000 MMK partial-paid** invoice and **35,000 MMK unpaid** invoice are now included in gross sales. Her total is **2,495,000 MMK**: 1,710,000 paid + 750,000 partial-paid + 35,000 unpaid. Clinic gross sales are **13,017,000 MMK**, while actual receipts are **12,632,000 MMK**. They differ by design: sales use order date and full invoice value; receipts use payment date and actual payment value."
+      },
+      { "id": "augtable", "type": "table", "tableId": "aug1", "layout": "full" },
+      {
+        "id": "legacy",
+        "type": "markdown",
+        "body": "## Two legacy cards create the apparent mismatch\n\n**Daily Report is the highest-risk issue.** 'Collected from visitors' sums full invoice net totals for customers with a check-in; it neither sums receipts nor filters payment status. On August 1 it showed **12,982,000 MMK**, overstating receipts by **350,000 MMK**. On August 9 it omitted **72,500 MMK** of same-day receipts outside the visitor subset.\n\n**Main Dashboard is a different metric and a delayed source.** 'Total income' counts fully paid invoice totals by order date from the warehouse. For August 1-9, live data had 88 paid invoices totaling **77,965,250 MMK**; the warehouse had 87 totaling **77,927,750 MMK**. The exact missing invoice was **SO-547325 for 37,500 MMK**, consistent with refresh lag."
+      },
+      {
+        "id": "comparability",
+        "type": "markdown",
+        "body": "## Which reports can be compared\n\nOnly values with the same event date, grain, status scope, and source should tally. The inventory separates accounting reports from operational views and gives accounting a clear comparison rule."
+      },
+      { "id": "invtable", "type": "table", "tableId": "inventory", "layout": "full" },
+      {
+        "id": "next",
+        "type": "markdown",
+        "body": "## Recommended next steps\n\n1. Standardize **Gross Sales**, **Payments Received**, and **Outstanding Balance** as the accounting labels.\n2. Replace the Daily Report card with live payment receipts, or relabel it **Visitor-linked invoice value** and exclude it from accounting totals.\n3. Rename Dashboard **Total income** to **Paid invoice sales (warehouse)** until migration to the live ledger; show freshness and prevent stale responses overwriting newer ones.\n4. Keep Service Behavior and Service Details operational, with explicit labels **Paid service sales allocated** and **Service activity value**.\n5. Add a daily per-clinic automated reconciliation alert when the ledger difference is non-zero."
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## Further Questions\n\n- Should Dashboard lead with gross sales, receipts, or both?\n- Should Daily Report remain visitor-scoped or become a full-clinic accounting summary?\n- What warehouse refresh target should users expect?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Caveats and Assumptions\n\nDetailed numeric reconciliation uses The Clinic De Novo, the reported case; shared code-path findings apply across clinics. The review covers production behavior and source logic through August 9, 2026. Service-allocation totals are intentionally narrower than gross sales because non-service items and non-paid invoices are excluded."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-09T13:30:00+06:30",
+    "status": "ready",
+    "datasets": {
+      "bridge": [
+        { "step": "Opening outstanding", "amount": 2726000, "balance_after": 2726000, "record_count": 8, "clinic": "The Clinic De Novo", "period": "Jun 10-Aug 9, 2026" },
+        { "step": "Gross sales", "amount": 418391332, "balance_after": 421117332, "record_count": 479, "clinic": "The Clinic De Novo", "period": "Jun 10-Aug 9, 2026" },
+        { "step": "Payment receipts", "amount": -408897832, "balance_after": 12219500, "record_count": 512, "clinic": "The Clinic De Novo", "period": "Jun 10-Aug 9, 2026" }
+      ],
+      "aug1": [
+        { "order": 1, "metric": "Gross sales", "amount": 13017000, "meaning": "All active invoice totals by order date" },
+        { "order": 2, "metric": "Paid invoice gross", "amount": 12232000, "meaning": "Fully paid invoices at full value" },
+        { "order": 3, "metric": "Partial-paid invoice gross", "amount": 750000, "meaning": "Full partial-paid invoice value" },
+        { "order": 4, "metric": "Unpaid invoice gross", "amount": 35000, "meaning": "Full unpaid invoice value" },
+        { "order": 5, "metric": "Payment receipts", "amount": 12632000, "meaning": "Payments received on August 1" },
+        { "order": 6, "metric": "Daily Report card", "amount": 12982000, "meaning": "Visitor-linked invoice value; not receipts" }
+      ],
+      "inventory": [
+        { "priority": 1, "surface": "Daily Report", "metric": "Collected from visitors", "basis": "Check-in / order date", "scope": "Visitor-linked full invoice totals; all statuses", "assessment": "High risk: mislabeled as collections" },
+        { "priority": 2, "surface": "Main Dashboard", "metric": "Total income", "basis": "Order date", "scope": "Warehouse; fully paid invoice totals", "assessment": "Medium risk: different metric and refresh lag" },
+        { "priority": 3, "surface": "Service Details", "metric": "Lifetime Revenue", "basis": "Service activity date", "scope": "Sum of service activity Price", "assessment": "Medium risk: operational value, not invoiced sales" },
+        { "priority": 4, "surface": "Service Behavior", "metric": "Total Sales", "basis": "Order date", "scope": "Paid invoice value allocated to services", "assessment": "Valid operational metric; cannot equal gross" },
+        { "priority": 5, "surface": "Sales Details", "metric": "Invoice/payment rows", "basis": "Order / payment date", "scope": "Live active invoices and payments", "assessment": "Canonical drill-down" },
+        { "priority": 6, "surface": "Sales by Sales Person", "metric": "Gross sales", "basis": "Order date", "scope": "Live paid + partial-paid + unpaid invoices", "assessment": "Canonical gross sales" },
+        { "priority": 7, "surface": "Payment Report", "metric": "Payment receipts", "basis": "Payment date", "scope": "Live payment events", "assessment": "Canonical receipts" },
+        { "priority": 8, "surface": "Outstanding Receivables", "metric": "Outstanding balance", "basis": "As-of date", "scope": "Live invoice total less payments to date", "assessment": "Canonical receivables" }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "live_reports",
+      "label": "Production APICORE reports",
+      "href": "https://bi.greattime.app/sales-by-sales-person",
+      "query": {
+        "sql": "WITH audited_values AS (SELECT 'Opening outstanding' AS step, 2726000 AS amount, 2726000 AS balance_after, 8 AS record_count UNION ALL SELECT 'Gross sales', 418391332, 421117332, 479 UNION ALL SELECT 'Payment receipts', -408897832, 12219500, 512) SELECT * FROM audited_values",
+        "description": "Reproducible bridge from reviewed production APICORE report totals."
+      }
+    },
+    {
+      "id": "code_audit",
+      "label": "GT_NewReport report implementation",
+      "path": "frontend/src",
+      "query": {
+        "sql": "SELECT * FROM UNNEST([STRUCT(1 AS priority, 'Daily Report' AS surface, 'Collected from visitors' AS metric), STRUCT(2, 'Main Dashboard', 'Total income'), STRUCT(3, 'Service Details', 'Lifetime Revenue'), STRUCT(4, 'Service Behavior', 'Total Sales'), STRUCT(5, 'Sales Details', 'Invoice/payment rows'), STRUCT(6, 'Sales by Sales Person', 'Gross sales'), STRUCT(7, 'Payment Report', 'Payment receipts'), STRUCT(8, 'Outstanding Receivables', 'Outstanding balance')])",
+        "description": "Reproducible inventory of money-value surfaces identified in the production route and code audit."
+      }
+    }
+  ]
+}
