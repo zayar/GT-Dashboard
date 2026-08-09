@@ -268,7 +268,7 @@ export function buildSalesOrderWhere(input: {
       equals: input.clinicId,
     },
     status: {
-      not: 'CANCEL',
+      notIn: ['CANCEL'],
     },
     created_at: {
       gte: toMyanmarUtcIso(input.startDate),

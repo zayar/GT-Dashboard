@@ -88,7 +88,7 @@ describe('APICORE sales and payment reports', () => {
       ...range,
     })).toEqual({
       clinic_id: { equals: 'clinic-uuid' },
-      status: { not: 'CANCEL' },
+      status: { notIn: ['CANCEL'] },
       created_at: {
         gte: '2026-07-23T17:30:00.000Z',
         lte: '2026-07-24T17:29:59.999Z',
