@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -30,8 +30,18 @@ import {
 } from 'chart.js';
 import { addDays, format, subMonths } from 'date-fns';
 import { useClinic } from '../contexts/ClinicContext';
+import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
 import { useNavigate } from 'react-router-dom';
+import {
+  loadCanonicalActivityMetrics,
+  loadCanonicalSalesMetrics,
+} from '../utils/loadCanonicalSalesMetrics';
+import {
+  CANONICAL_SALES_METRICS,
+  EMPTY_CANONICAL_SALES_METRICS,
+  resolveCanonicalMetricPeriodRanges,
+} from '../utils/canonicalSalesMetrics';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ChartTooltip, ChartLegend, Filler);
 
@@ -45,8 +55,9 @@ interface AnimatedMetricProps {
 
 interface MetricCardProps extends AnimatedMetricProps {
   label: string;
+  description?: string;
   context: string;
-  change: number;
+  change?: number;
   icon: string;
   accent: string;
   accentSoft: string;
@@ -127,6 +138,7 @@ const ChangePill: React.FC<{ value: number; context: string }> = ({ value, conte
 
 const MetricCard: React.FC<MetricCardProps> = ({
   label,
+  description,
   value,
   formatter,
   context,
@@ -152,7 +164,7 @@ const MetricCard: React.FC<MetricCardProps> = ({
       >
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
           <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" sx={{ color: 'var(--text-secondary)', fontWeight: 600, mb: 1.15 }}>
+            <Typography title={description} variant="body2" sx={{ color: 'var(--text-secondary)', fontWeight: 600, mb: 1.15 }}>
               {label}
             </Typography>
             <Typography
@@ -185,7 +197,13 @@ const MetricCard: React.FC<MetricCardProps> = ({
           </Box>
         </Box>
         <Box sx={{ mt: 1.6 }}>
-          <ChangePill value={change} context={context} />
+          {typeof change === 'number' ? (
+            <ChangePill value={change} context={context} />
+          ) : (
+            <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>
+              {context}
+            </Typography>
+          )}
         </Box>
       </Paper>
     </Box>
@@ -195,6 +213,7 @@ const MetricCard: React.FC<MetricCardProps> = ({
 // Dashboard component
 const Dashboard: React.FC = () => {
   const { currentClinic } = useClinic();
+  const { getAccessToken } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
   const reduceMotion = usePrefersReducedMotion();
@@ -203,10 +222,12 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const latestAccountingRequestIdRef = useRef(0);
 
   // State for statistics
-  const [totalIncome, setTotalIncome] = useState<number>(0);
-  const [incomeChange, setIncomeChange] = useState<number>(0);
+  const [accountingMetrics, setAccountingMetrics] = useState(EMPTY_CANONICAL_SALES_METRICS);
+  const [grossSalesChange, setGrossSalesChange] = useState<number>(0);
+  const [paymentsReceivedChange, setPaymentsReceivedChange] = useState<number>(0);
   const [customerCount, setCustomerCount] = useState<number>(0);
   const [customerChange, setCustomerChange] = useState<number>(0);
   const [appointmentRate, setAppointmentRate] = useState<number>(0);
@@ -259,21 +280,6 @@ const Dashboard: React.FC = () => {
     return value.toLocaleString('en-US');
   };
 
-  // Show no data state instead of fallback
-  const showNoDataState = () => {
-    setTotalIncome(0);
-    setIncomeChange(0);
-    setCustomerCount(0);
-    setCustomerChange(0);
-    setAppointmentRate(0);
-    setAppointmentChange(0);
-    setServiceCount(0);
-    setServiceChange(0);
-    setLoading(false);
-    setError(null);
-    setUsingFallbackData(true);
-  };
-
   // Fetch data based on selected period and current clinic
   useEffect(() => {
     if (!currentClinic) {
@@ -283,129 +289,64 @@ const Dashboard: React.FC = () => {
     }
 
     const fetchChartData = async () => {
+      const requestId = ++latestAccountingRequestIdRef.current;
       setLoading(true);
       setError(null);
       try {
-        // Define time constraints based on the selected period. Query the actual
-        // dashboard dataset directly instead of issuing a redundant probe request.
-        let timeConstraint = '';
-        let prevTimeConstraint = '';
-
-        if (period === 'monthly') {
-          const currentMonth = format(new Date(), 'yyyy-MM');
-          const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
-          timeConstraint = `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = '${currentMonth}'`;
-          prevTimeConstraint = `FORMAT_DATE('%Y-%m', DATE(OrderCreatedDate)) = '${previousMonth}'`;
-        } else if (period === 'weekly') {
-          timeConstraint = 'DATE(OrderCreatedDate) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-          prevTimeConstraint = 'DATE(OrderCreatedDate) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)';
-        } else if (period === 'annual') {
-          const currentYear = new Date().getFullYear();
-          timeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear}`;
-          prevTimeConstraint = `EXTRACT(YEAR FROM OrderCreatedDate) = ${currentYear - 1}`;
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          throw new Error('Your session has expired. Please sign in again.');
         }
+        const ranges = resolveCanonicalMetricPeriodRanges(period);
+        const [currentMetrics, previousMetrics] = await Promise.all([
+          loadCanonicalSalesMetrics({
+            clinicId: currentClinic.id,
+            startDate: ranges.current.startDate,
+            endDate: ranges.current.endDate,
+            asOfDate: ranges.current.endDate,
+            accessToken,
+          }),
+          loadCanonicalActivityMetrics({
+            clinicId: currentClinic.id,
+            startDate: ranges.previous.startDate,
+            endDate: ranges.previous.endDate,
+            accessToken,
+          }),
+        ]);
+        if (latestAccountingRequestIdRef.current !== requestId) return;
 
-        const fullQuery = `
-          WITH PaymentRows AS (
-            SELECT
-              OrderCreatedDate,
-              OrderId,
-              CAST(NetTotal AS FLOAT64) as InvoiceRevenue,
-              COALESCE(
-                NULLIF(TRIM(InvoiceNumber), ''),
-                CONCAT('ORDER:', CAST(OrderId AS STRING))
-              ) as InvoiceKey
-            FROM \`great_time.MainPaymentView\`
-            WHERE PaymentMethod != 'PASS'
-              AND PaymentStatus = 'PAID'
-              AND CAST(NetTotal AS FLOAT64) > 0
-              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-              AND ((${timeConstraint}) OR (${prevTimeConstraint}))
-          ),
-
-          -- Keep invoice-level revenue once. MainPaymentView can contain repeated
-          -- item/payment rows and many clinics do not populate ServiceName.
-          InvoiceData AS (
-            SELECT
-              InvoiceKey,
-              MIN(OrderCreatedDate) as OrderCreatedDate,
-              MAX(InvoiceRevenue) as Revenue
-            FROM PaymentRows
-            GROUP BY InvoiceKey
-          ),
-
-          -- Current period stats
-          CurrentStats AS (
-            SELECT
-              IFNULL(SUM(Revenue), 0) as total_revenue
-            FROM InvoiceData
-            WHERE ${timeConstraint}
-          ),
-
-          -- Previous period stats for comparison
-          PreviousStats AS (
-            SELECT
-              IFNULL(SUM(Revenue), 0) as prev_month_revenue
-            FROM InvoiceData
-            WHERE ${prevTimeConstraint}
-          )
-
-          SELECT
-            cs.total_revenue,
-            ps.prev_month_revenue
-          FROM CurrentStats cs
-          CROSS JOIN PreviousStats ps
-        `;
-
-        const fullResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: fullQuery }),
-        });
-
-        if (!fullResponse.ok) {
-          throw new Error(`Failed to fetch data (Status: ${fullResponse.status})`);
-        }
-
-        const fullResponseData = await fullResponse.json();
-
-        if (!fullResponseData.success) {
-          throw new Error(fullResponseData.error || 'The dashboard query failed.');
-        }
-
-        const data = fullResponseData.data || [];
-
-        if (data.length === 0) {
-          showNoDataState(); // Show no data state instead of showing error
-          return;
-        }
-
-        const statsRow = data[0];
-        const totalIncomeValue = Number(statsRow.total_revenue) || 0;
-        const prevMonthIncome = Number(statsRow.prev_month_revenue) || 0;
-
-        // Calculate percentage changes
         const calculatePercentageChange = (current: number, previous: number): number => {
           if (previous === 0) return current > 0 ? 100 : 0;
           return ((current - previous) / previous) * 100;
         };
-
-        const incomeChangePercentage = calculatePercentageChange(totalIncomeValue, prevMonthIncome);
-
-        setTotalIncome(totalIncomeValue);
-        setIncomeChange(incomeChangePercentage);
+        setAccountingMetrics(currentMetrics);
+        setGrossSalesChange(calculatePercentageChange(
+          currentMetrics.grossSales,
+          previousMetrics.grossSales,
+        ));
+        setPaymentsReceivedChange(calculatePercentageChange(
+          currentMetrics.paymentsReceived,
+          previousMetrics.paymentsReceived,
+        ));
+        setUsingFallbackData(
+          currentMetrics.invoiceCount === 0
+          && currentMetrics.paymentCount === 0
+          && currentMetrics.outstandingInvoiceCount === 0,
+        );
 
         // Fetch statistics from QueenDataView for cards
         await fetchStatsData();
 
       } catch (err) {
+        if (latestAccountingRequestIdRef.current !== requestId) return;
+        setAccountingMetrics(EMPTY_CANONICAL_SALES_METRICS);
         setError(err instanceof Error ? err.message : 'Unable to load dashboard data.');
         setUsingFallbackData(false);
       } finally {
-        setLoading(false);
-        setLastUpdated(new Date());
+        if (latestAccountingRequestIdRef.current === requestId) {
+          setLoading(false);
+          setLastUpdated(new Date());
+        }
       }
     };
 
@@ -843,7 +784,7 @@ const Dashboard: React.FC = () => {
     fetchTopServices();
     fetchPaymentMethods();
     fetchTopTherapists();
-  }, [period, currentClinic]);
+  }, [period, currentClinic, getAccessToken]);
 
   // Format currency using the utility function
   const formatCurrency = (value: number): string => {
@@ -852,24 +793,25 @@ const Dashboard: React.FC = () => {
 
   const periodDetails = useMemo(() => {
     const now = new Date();
+    const accountingRanges = resolveCanonicalMetricPeriodRanges(period, now);
 
     if (period === 'weekly') {
       return {
         label: 'Last 7 days',
-        comparison: 'vs previous 7 days'
+        comparison: accountingRanges.comparisonLabel,
       };
     }
 
     if (period === 'annual') {
       return {
         label: `${now.getFullYear()} year to date`,
-        comparison: `vs ${now.getFullYear() - 1}`
+        comparison: accountingRanges.comparisonLabel,
       };
     }
 
     return {
       label: format(now, 'MMMM yyyy'),
-      comparison: 'vs previous month'
+      comparison: accountingRanges.comparisonLabel,
     };
   }, [period]);
 
@@ -1149,27 +1091,81 @@ const Dashboard: React.FC = () => {
 
       {usingFallbackData && (
         <Alert severity="info" sx={{ mb: 3, bgcolor: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
-          <AlertTitle>No activity for this period</AlertTitle>
-          No records were found for {periodDetails.label}. Try another period or confirm the selected clinic.
+          <AlertTitle>No accounting activity for this period</AlertTitle>
+          No gross sales, payment receipts, or outstanding invoices were found for {periodDetails.label}.
         </Alert>
       )}
 
-      <Grid container spacing={2} sx={{ mb: 2.5 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <AlertTitle>Accounting metrics unavailable</AlertTitle>
+          {error}
+        </Alert>
+      )}
+
+      <Typography variant="overline" sx={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+        Accounting metrics · live APICORE
+      </Typography>
+      <Grid container spacing={2} sx={{ mb: 2.5, mt: 0.25 }}>
         {[
           {
-            label: 'Total income',
-            value: totalIncome,
+            label: CANONICAL_SALES_METRICS.grossSales.label,
+            description: CANONICAL_SALES_METRICS.grossSales.description,
+            value: accountingMetrics.grossSales,
             formatter: (value: number) => formatCurrency(value),
-            change: incomeChange,
+            change: grossSalesChange,
+            context: `${periodDetails.comparison} · ${accountingMetrics.invoiceCount.toLocaleString()} invoices`,
             icon: 'fas fa-coins',
             accent: 'var(--primary)',
             accentSoft: 'var(--primary-soft)'
           },
           {
+            label: CANONICAL_SALES_METRICS.paymentsReceived.label,
+            description: CANONICAL_SALES_METRICS.paymentsReceived.description,
+            value: accountingMetrics.paymentsReceived,
+            formatter: (value: number) => formatCurrency(value),
+            change: paymentsReceivedChange,
+            context: `${periodDetails.comparison} · ${accountingMetrics.paymentCount.toLocaleString()} payments`,
+            icon: 'fas fa-money-bill-wave',
+            accent: 'var(--success)',
+            accentSoft: 'rgba(18, 166, 117, 0.10)'
+          },
+          {
+            label: CANONICAL_SALES_METRICS.outstandingBalance.label,
+            description: CANONICAL_SALES_METRICS.outstandingBalance.description,
+            value: accountingMetrics.outstandingBalance,
+            formatter: (value: number) => formatCurrency(value),
+            context: `${accountingMetrics.outstandingInvoiceCount.toLocaleString()} invoices · as of today`,
+            icon: 'fas fa-file-invoice-dollar',
+            accent: 'var(--warning)',
+            accentSoft: 'rgba(245, 158, 11, 0.10)'
+          }
+        ].map((metric, index) => (
+          <Grid item xs={12} md={4} key={metric.label}>
+            {loading ? (
+              <Paper sx={{ p: 2.25, borderRadius: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <Skeleton width="42%" />
+                <Skeleton width="70%" height={46} />
+                <Skeleton width="55%" />
+              </Paper>
+            ) : (
+              <MetricCard {...metric} delay={index * 0.07} />
+            )}
+          </Grid>
+        ))}
+      </Grid>
+
+      <Typography variant="overline" sx={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+        Operational activity · warehouse
+      </Typography>
+      <Grid container spacing={2} sx={{ mb: 2.5, mt: 0.25 }}>
+        {[
+          {
             label: 'Unique customers',
             value: customerCount,
             formatter: (value: number) => formatNumber(Math.round(value)),
             change: customerChange,
+            context: periodDetails.comparison,
             icon: 'fas fa-users',
             accent: 'var(--warning)',
             accentSoft: 'rgba(245, 158, 11, 0.10)'
@@ -1179,6 +1175,7 @@ const Dashboard: React.FC = () => {
             value: appointmentRate / 100,
             formatter: (value: number) => `${value.toFixed(2)}x`,
             change: appointmentChange,
+            context: periodDetails.comparison,
             icon: 'fas fa-calendar-check',
             accent: 'var(--success)',
             accentSoft: 'rgba(18, 166, 117, 0.10)'
@@ -1188,12 +1185,13 @@ const Dashboard: React.FC = () => {
             value: serviceCount,
             formatter: (value: number) => formatNumber(Math.round(value)),
             change: serviceChange,
+            context: periodDetails.comparison,
             icon: 'fas fa-spa',
             accent: 'var(--primary)',
             accentSoft: 'var(--primary-soft)'
           }
         ].map((metric, index) => (
-          <Grid item xs={12} sm={6} lg={3} key={metric.label}>
+          <Grid item xs={12} md={4} key={metric.label}>
             {loading ? (
               <Paper sx={{ p: 2.25, borderRadius: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
                 <Skeleton width="42%" />
@@ -1201,7 +1199,7 @@ const Dashboard: React.FC = () => {
                 <Skeleton width="55%" />
               </Paper>
             ) : (
-              <MetricCard {...metric} context={periodDetails.comparison} delay={index * 0.07} />
+              <MetricCard {...metric} delay={(index + 3) * 0.07} />
             )}
           </Grid>
         ))}

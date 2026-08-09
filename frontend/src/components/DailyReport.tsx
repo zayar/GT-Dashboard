@@ -19,6 +19,7 @@ import {
   TablePagination,
   ToggleButton,
   ToggleButtonGroup,
+  Alert,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -27,6 +28,7 @@ import { useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useClinic } from '../contexts/ClinicContext';
+import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -38,6 +40,12 @@ import {
   CustomerServiceActivityPeriod,
   getCustomerServiceActivityRange,
 } from '../utils/customerServiceActivity';
+import { loadCanonicalSalesMetrics } from '../utils/loadCanonicalSalesMetrics';
+import {
+  CANONICAL_SALES_METRICS,
+  CanonicalSalesMetrics,
+  EMPTY_CANONICAL_SALES_METRICS,
+} from '../utils/canonicalSalesMetrics';
 
 interface DailyReportData {
   CustomerName: string;
@@ -61,8 +69,13 @@ interface DailyReportProps {
 const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
+  const { getAccessToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [accountingMetrics, setAccountingMetrics] = useState<CanonicalSalesMetrics>(
+    EMPTY_CANONICAL_SALES_METRICS,
+  );
+  const [accountingError, setAccountingError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<DailyReportData[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [period, setPeriod] = useState<CustomerServiceActivityPeriod>('week');
@@ -102,6 +115,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     try {
       setLoading(true);
       setError(null);
+      setAccountingError(null);
 
       const query = buildCustomerServiceActivityQuery({
         clinicCode: currentClinic.code,
@@ -129,6 +143,32 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
 
       const data = response.data.data || [];
       setRawData(data);
+
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          throw new Error('Your session has expired. Please sign in again.');
+        }
+
+        const metrics = await loadCanonicalSalesMetrics({
+          clinicId: currentClinic.id,
+          startDate: reportRange.startDate,
+          endDate: reportRange.endDate,
+          asOfDate: reportRange.endDate,
+          accessToken,
+        });
+        if (!isLatestRequest()) return;
+        setAccountingMetrics(metrics);
+      } catch (accountingFetchError) {
+        if (!isLatestRequest()) return;
+        console.error('Error fetching canonical sales metrics:', accountingFetchError);
+        setAccountingMetrics(EMPTY_CANONICAL_SALES_METRICS);
+        setAccountingError(
+          accountingFetchError instanceof Error
+            ? accountingFetchError.message
+            : 'Unable to load accounting metrics.',
+        );
+      }
       setLastUpdated(new Date());
     } catch (err: any) {
       if (!isLatestRequest()) return;
@@ -137,7 +177,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     } finally {
       if (isLatestRequest()) setLoading(false);
     }
-  }, [currentClinic, rangeEnabled, reportRange.endDateKey, reportRange.startDateKey]);
+  }, [currentClinic, getAccessToken, rangeEnabled, reportRange.endDate, reportRange.endDateKey, reportRange.startDate, reportRange.startDateKey]);
 
   useEffect(() => {
     if (currentClinic) {
@@ -166,8 +206,6 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     });
 
     const customerRecords = Array.from(uniqueCustomers.values());
-    const collectedRevenue = customerRecords.reduce((sum, record) => sum + (Number(record.TotalPaymentAmount) || 0), 0);
-    const payingCustomers = customerRecords.filter(record => (Number(record.TotalPaymentAmount) || 0) > 0);
     const topEntry = (counts: Map<string, number>) =>
       Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0];
     const topService = topEntry(serviceCounts);
@@ -178,8 +216,6 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
       totalServices: uniqueServices.size,
       servicesDelivered: rawData.length,
       newCustomers: customerRecords.filter(record => record.IsNewCustomer === 'Yes').length,
-      collectedRevenue,
-      averageSpend: payingCustomers.length ? collectedRevenue / payingCustomers.length : 0,
       sellerAssignedCustomers: customerRecords.filter(record => record.SellerNames?.trim()).length,
       topService: topService ? { name: topService[0], count: topService[1] } : null,
       topPractitioner: topPractitioner ? { name: topPractitioner[0], count: topPractitioner[1] } : null
@@ -346,7 +382,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
         'Practitioner(s)': heatmapData.practitionerMap[customer],
         'Helper(s)': heatmapData.helperMap[customer],
         'Seller(s)': heatmapData.sellerMap[customer],
-        'Payment Amount': heatmapData.paymentAmountMap[customer] || 0,
+        'Visitor-linked Invoice Value': heatmapData.paymentAmountMap[customer] || 0,
         'Payment Method(s)': heatmapData.paymentMethodMap[customer],
         'Payment Note(s)': heatmapData.paymentNoteMap[customer]
       };
@@ -374,7 +410,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
       { wch: 25 }, // Practitioner(s)
       { wch: 25 }, // Helper(s)
       { wch: 25 }, // Seller(s)
-      { wch: 15 }, // Payment Amount
+      { wch: 22 }, // Visitor-linked Invoice Value
       { wch: 20 }, // Payment Method(s)
       { wch: 30 }, // Payment Note(s)
       ...heatmapData.services.map(() => ({ wch: 20 })) // Service columns
@@ -595,13 +631,32 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
           </Box>
         </Box>
 
-      {/* Owner-focused summary */}
+      {accountingError && (
+        <Alert severity="warning" sx={{ mb: 2.5 }}>
+          Accounting metrics could not be loaded: {accountingError}
+        </Alert>
+      )}
+
+      {/* Canonical accounting and operational summary */}
       <Grid container spacing={2} sx={{ mb: 2.5 }}>
         {[
           {
-            label: 'Collected from visitors',
-            value: formatCurrency(summary.collectedRevenue, currentClinic),
-            detail: `${summary.totalCustomers} customers`
+            label: CANONICAL_SALES_METRICS.grossSales.label,
+            description: CANONICAL_SALES_METRICS.grossSales.description,
+            value: formatCurrency(accountingMetrics.grossSales, currentClinic),
+            detail: `${accountingMetrics.invoiceCount.toLocaleString()} invoices · ${CANONICAL_SALES_METRICS.grossSales.dateBasis}`
+          },
+          {
+            label: CANONICAL_SALES_METRICS.paymentsReceived.label,
+            description: CANONICAL_SALES_METRICS.paymentsReceived.description,
+            value: formatCurrency(accountingMetrics.paymentsReceived, currentClinic),
+            detail: `${accountingMetrics.paymentCount.toLocaleString()} payments · ${CANONICAL_SALES_METRICS.paymentsReceived.dateBasis}`
+          },
+          {
+            label: CANONICAL_SALES_METRICS.outstandingBalance.label,
+            description: CANONICAL_SALES_METRICS.outstandingBalance.description,
+            value: formatCurrency(accountingMetrics.outstandingBalance, currentClinic),
+            detail: `${accountingMetrics.outstandingInvoiceCount.toLocaleString()} invoices · as of ${reportRange.endDateKey}`
           },
           {
             label: 'Customers served',
@@ -614,14 +669,14 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
             detail: `${summary.totalServices} unique services`
           },
           {
-            label: 'Average spend',
-            value: formatCurrency(summary.averageSpend, currentClinic),
-            detail: 'Per paying customer'
+            label: 'New customers',
+            value: summary.newCustomers.toLocaleString(),
+            detail: `${summary.sellerAssignedCustomers} customers assigned to sellers`
           }
         ].map(card => (
-          <Grid item xs={12} sm={6} lg={3} key={card.label}>
+          <Grid item xs={12} sm={6} lg={4} key={card.label}>
             <Paper sx={{ p: 2.5, height: '100%', bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
-              <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>{card.label}</Typography>
+              <Typography title={'description' in card ? card.description : undefined} variant="body2" sx={{ color: 'var(--text-secondary)' }}>{card.label}</Typography>
               <Typography variant="h5" sx={{ color: 'var(--text-primary)', fontWeight: 700, mt: 1 }}>{card.value}</Typography>
               <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>{card.detail}</Typography>
             </Paper>
@@ -643,7 +698,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
           <Box>
             <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>Customer service activity</Typography>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
-              Customer-level payments, staff assignments, and service usage
+              Visitor-linked invoice value, staff assignments, and service usage. Use Payments Received above for accounting collections.
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -827,7 +882,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                       textAlign: 'right'
                     }}
                   >
-                    Payment
+                    Visitor-linked Invoice Value
                   </TableCell>
                   <TableCell
                     sx={{

@@ -386,7 +386,7 @@ const ServiceBehaviorReport: React.FC = () => {
       Rank: index + 1,
       'Service Name': service.serviceName,
       Bookings: service.bookings,
-      'Total Sales': service.totalSales,
+      'Paid Service Sales Allocated': service.totalSales,
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
     worksheet['!cols'] = [{ wch: 8 }, { wch: 42 }, { wch: 14 }, { wch: 22 }];
@@ -403,7 +403,7 @@ const ServiceBehaviorReport: React.FC = () => {
       'Doctor / Therapist': item.practitionerName,
       'Service Name': item.serviceName,
       Bookings: item.bookings,
-      'Total Sales': item.totalSales,
+      'Paid Service Sales Allocated': item.totalSales,
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
     worksheet['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 42 }, { wch: 14 }, { wch: 22 }];
@@ -839,7 +839,7 @@ const ServiceBehaviorReport: React.FC = () => {
                     aria-label="Sort service performance"
                   >
                     <ToggleButton value="bookings">Sort by Bookings</ToggleButton>
-                    <ToggleButton value="sales">Sort by Sales</ToggleButton>
+                    <ToggleButton value="sales">Sort by Paid Service Sales</ToggleButton>
                   </ToggleButtonGroup>
                   <Button
                     variant="outlined"
@@ -958,7 +958,7 @@ const ServiceBehaviorReport: React.FC = () => {
                           direction={serviceSortKey === 'sales' ? serviceSortDirection : 'desc'}
                           onClick={() => updateServiceSort('sales')}
                         >
-                          TOTAL SALES
+                          PAID SERVICE SALES ALLOCATED
                         </TableSortLabel>
                       </TableCell>
                     </TableRow>
@@ -1069,7 +1069,7 @@ const ServiceBehaviorReport: React.FC = () => {
                     aria-label="Sort practitioner service performance"
                   >
                     <ToggleButton value="bookings">Sort by Bookings</ToggleButton>
-                    <ToggleButton value="sales">Sort by Sales</ToggleButton>
+                    <ToggleButton value="sales">Sort by Paid Service Sales</ToggleButton>
                   </ToggleButtonGroup>
                   <Button
                     variant="outlined"
@@ -1169,7 +1169,7 @@ const ServiceBehaviorReport: React.FC = () => {
                           direction={practitionerSortKey === 'sales' ? practitionerSortDirection : 'desc'}
                           onClick={() => updatePractitionerSort('sales')}
                         >
-                          TOTAL SALES
+                          PAID SERVICE SALES ALLOCATED
                         </TableSortLabel>
                       </TableCell>
                     </TableRow>

@@ -996,7 +996,7 @@ SELECT
               </Grid>
               <Grid item xs={6} sm={6} md={3}>
                 <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: 'var(--surface-secondary)', borderRadius: 2, border: '1px solid var(--border)' }}>
-                  <Typography variant="body2" color="var(--text-secondary)">Lifetime Revenue</Typography>
+                  <Typography variant="body2" color="var(--text-secondary)">Service Activity Value</Typography>
                   <Typography variant="h6" sx={{ color: 'var(--text-primary)', fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
                     {formatCurrency(Number(serviceData.total_revenue || 0), currentClinic)}
                   </Typography>
