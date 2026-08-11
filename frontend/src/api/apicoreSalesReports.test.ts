@@ -296,8 +296,15 @@ describe('APICORE sales and payment reports', () => {
       orderForStatus('CO-3670176', 'UNPAID', 35_000, null),
     ];
 
+    const outstandingRows = mapOutstandingReportRecords(
+      orders as any,
+      new Date(2026, 7, 1),
+    );
     const salesTransactions = filterReportableSalesTransactions(
-      buildSalesBySalesPersonTransactions(mapSalesDetailRecords(orders as any))
+      buildSalesBySalesPersonTransactions(
+        mapSalesDetailRecords(orders as any),
+        outstandingRows,
+      )
     );
     const salesSummary = summarizeSalesBySalesPerson(salesTransactions);
     const paymentRows = mapPaymentReportRecords(
@@ -310,7 +317,8 @@ describe('APICORE sales and payment reports', () => {
       salesPerson: 'Hsu Yee',
       transactionCount: 3,
       paidSales: 1_710_000,
-      partialPaidSales: 750_000,
+      partialPaidSales: 400_000,
+      partialOutstandingSales: 350_000,
       unpaidSales: 35_000,
       totalAmount: 2_495_000,
     }]);

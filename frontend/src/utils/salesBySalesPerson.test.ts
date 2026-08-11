@@ -20,11 +20,13 @@ const transaction = (
   PaymentMethod: 'CASH',
   PaymentStatus: 'PAID',
   SalesAmount: amount,
+  AmountPaid: amount,
+  OutstandingAmount: 0,
   SellerName: seller,
 });
 
 describe('sales by sales person reporting', () => {
-  it('collapses item and split-payment rows to one gross-sale invoice', () => {
+  it('collapses invoice rows and uses the as-of outstanding state', () => {
     const rows = [
       {
         Date: '2026-08-01',
@@ -35,7 +37,8 @@ describe('sales by sales person reporting', () => {
         ServiceName: 'Glow Booster Injection',
         ServicePackageName: null,
         PaymentMethod: 'MMQR',
-        PaymentStatus: 'PARTIAL_PAID',
+        PaymentStatus: 'PAID',
+        PaymentAmount: 400_000,
         InvoiceNetTotal: 750_000,
       },
       {
@@ -47,12 +50,18 @@ describe('sales by sales person reporting', () => {
         ServiceName: 'Follow-up Service',
         ServicePackageName: null,
         PaymentMethod: 'CASH',
-        PaymentStatus: 'PARTIAL_PAID',
+        PaymentStatus: 'PAID',
+        PaymentAmount: 350_000,
         InvoiceNetTotal: 750_000,
       },
     ];
 
-    expect(buildSalesBySalesPersonTransactions(rows)).toEqual([{
+    expect(buildSalesBySalesPersonTransactions(rows, [{
+      InvoiceNumber: 'SO-924554',
+      AmountPaid: 400_000,
+      OutstandingBalance: 350_000,
+      PaymentStatus: 'PARTIAL_PAID',
+    }])).toEqual([{
       Date: '2026-08-01',
       InvoiceNumber: 'SO-924554',
       CustomerName: 'Customer',
@@ -62,6 +71,8 @@ describe('sales by sales person reporting', () => {
       PaymentMethod: 'MMQR, CASH',
       PaymentStatus: 'PARTIAL_PAID',
       SalesAmount: 750_000,
+      AmountPaid: 400_000,
+      OutstandingAmount: 350_000,
       SellerName: 'Hsu Yee',
     }]);
   });
@@ -77,29 +88,48 @@ describe('sales by sales person reporting', () => {
     ];
 
     expect(summarizeSalesBySalesPerson(rows)).toEqual([
-      { salesPerson: 'Hsu Yee', transactionCount: 1, paidSales: 7_290_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 7_290_000 },
-      { salesPerson: 'Nyein Su', transactionCount: 1, paidSales: 1_200_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 1_200_000 },
-      { salesPerson: 'Aung Myint Myat', transactionCount: 1, paidSales: 525_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 525_000 },
-      { salesPerson: 'Mi Mi', transactionCount: 2, paidSales: 425_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 425_000 },
-      { salesPerson: 'Thinzar', transactionCount: 1, paidSales: 35_000, partialPaidSales: 0, unpaidSales: 0, totalAmount: 35_000 },
+      { salesPerson: 'Hsu Yee', transactionCount: 1, paidSales: 7_290_000, partialPaidSales: 0, partialOutstandingSales: 0, unpaidSales: 0, totalAmount: 7_290_000 },
+      { salesPerson: 'Nyein Su', transactionCount: 1, paidSales: 1_200_000, partialPaidSales: 0, partialOutstandingSales: 0, unpaidSales: 0, totalAmount: 1_200_000 },
+      { salesPerson: 'Aung Myint Myat', transactionCount: 1, paidSales: 525_000, partialPaidSales: 0, partialOutstandingSales: 0, unpaidSales: 0, totalAmount: 525_000 },
+      { salesPerson: 'Mi Mi', transactionCount: 2, paidSales: 425_000, partialPaidSales: 0, partialOutstandingSales: 0, unpaidSales: 0, totalAmount: 425_000 },
+      { salesPerson: 'Thinzar', transactionCount: 1, paidSales: 35_000, partialPaidSales: 0, partialOutstandingSales: 0, unpaidSales: 0, totalAmount: 35_000 },
     ]);
   });
 
-  it('adds partial-paid and unpaid invoice values to gross sales without treating them as receipts', () => {
+  it('reconciles partial cash received and outstanding amounts to gross sales', () => {
     const rows = [
       transaction('SO-PAID', 'Hsu Yee', 1_710_000),
-      { ...transaction('SO-924554', 'Hsu Yee', 750_000), PaymentStatus: 'PARTIAL_PAID' },
-      { ...transaction('CO-3670176', 'Hsu Yee', 35_000), PaymentStatus: 'UNPAID' },
+      {
+        ...transaction('SO-924554', 'Hsu Yee', 750_000),
+        PaymentStatus: 'PARTIAL_PAID',
+        AmountPaid: 400_000,
+        OutstandingAmount: 350_000,
+      },
+      {
+        ...transaction('CO-3670176', 'Hsu Yee', 35_000),
+        PaymentStatus: 'UNPAID',
+        AmountPaid: 0,
+        OutstandingAmount: 35_000,
+      },
     ];
 
-    expect(summarizeSalesBySalesPerson(rows)).toEqual([{
+    const summary = summarizeSalesBySalesPerson(rows);
+
+    expect(summary).toEqual([{
       salesPerson: 'Hsu Yee',
       transactionCount: 3,
       paidSales: 1_710_000,
-      partialPaidSales: 750_000,
+      partialPaidSales: 400_000,
+      partialOutstandingSales: 350_000,
       unpaidSales: 35_000,
       totalAmount: 2_495_000,
     }]);
+    expect(
+      summary[0].paidSales
+      + summary[0].partialPaidSales
+      + summary[0].partialOutstandingSales
+      + summary[0].unpaidSales
+    ).toBe(summary[0].totalAmount);
   });
 
   it('removes null and zero-value invoices before summarizing', () => {

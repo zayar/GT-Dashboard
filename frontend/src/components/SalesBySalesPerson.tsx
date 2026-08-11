@@ -35,7 +35,10 @@ import {
   SalesPersonSummary,
   summarizeSalesBySalesPerson,
 } from '../utils/salesBySalesPerson';
-import { fetchSalesDetailRecords } from '../api/apicoreSalesReports';
+import {
+  fetchOutstandingReportRecords,
+  fetchSalesDetailRecords,
+} from '../api/apicoreSalesReports';
 
 type SalesPersonData = SalesPersonSummary;
 type Transaction = SalesBySalesPersonTransaction;
@@ -100,17 +103,24 @@ const SalesBySalesPerson: React.FC = () => {
         throw new Error('Your session has expired. Please sign in again.');
       }
 
-      const salesData = await fetchSalesDetailRecords({
-        clinicId: currentClinic.id,
-        filterType: 'day',
-        startDate: queryStartDate,
-        endDate: queryEndDate,
-        selectedDate: null,
-        accessToken,
-      });
+      const [salesData, outstandingData] = await Promise.all([
+        fetchSalesDetailRecords({
+          clinicId: currentClinic.id,
+          filterType: 'day',
+          startDate: queryStartDate,
+          endDate: queryEndDate,
+          selectedDate: null,
+          accessToken,
+        }),
+        fetchOutstandingReportRecords({
+          clinicId: currentClinic.id,
+          asOfDate: queryEndDate,
+          accessToken,
+        }),
+      ]);
 
       const filteredSalesData = filterReportableSalesTransactions(
-        buildSalesBySalesPersonTransactions(salesData)
+        buildSalesBySalesPersonTransactions(salesData, outstandingData)
       );
 
       setTransactions(filteredSalesData);
@@ -145,6 +155,7 @@ const SalesBySalesPerson: React.FC = () => {
   const totalAmount = salesBySalesPerson.reduce((sum, person) => sum + person.totalAmount, 0);
   const totalPaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.paidSales, 0);
   const totalPartialPaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.partialPaidSales, 0);
+  const totalPartialOutstandingSales = salesBySalesPerson.reduce((sum, person) => sum + person.partialOutstandingSales, 0);
   const totalUnpaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.unpaidSales, 0);
 
   // Function to export Sales Summary to Excel
@@ -159,17 +170,19 @@ const SalesBySalesPerson: React.FC = () => {
         'Sales Person': person.salesPerson,
         'Invoice Count': person.transactionCount,
         'Paid Sales': formatCurrency(person.paidSales, currentClinic),
-        'Partial Paid Sales': formatCurrency(person.partialPaidSales, currentClinic),
+        'Partial Collected': formatCurrency(person.partialPaidSales, currentClinic),
+        'Partial Outstanding': formatCurrency(person.partialOutstandingSales, currentClinic),
         'Unpaid Sales': formatCurrency(person.unpaidSales, currentClinic),
-        'Total Sales': formatCurrency(person.totalAmount, currentClinic)
+        'Gross Sales': formatCurrency(person.totalAmount, currentClinic)
       })),
       {
         'Sales Person': 'Total',
         'Invoice Count': totalTransactions,
         'Paid Sales': formatCurrency(totalPaidSales, currentClinic),
-        'Partial Paid Sales': formatCurrency(totalPartialPaidSales, currentClinic),
+        'Partial Collected': formatCurrency(totalPartialPaidSales, currentClinic),
+        'Partial Outstanding': formatCurrency(totalPartialOutstandingSales, currentClinic),
         'Unpaid Sales': formatCurrency(totalUnpaidSales, currentClinic),
-        'Total Sales': formatCurrency(totalAmount, currentClinic)
+        'Gross Sales': formatCurrency(totalAmount, currentClinic)
       }
     ];
 
@@ -181,9 +194,10 @@ const SalesBySalesPerson: React.FC = () => {
       { wch: 25 }, // Sales Person
       { wch: 15 }, // Invoice Count
       { wch: 20 }, // Paid Sales
-      { wch: 20 }, // Partial Paid Sales
+      { wch: 20 }, // Partial Collected
+      { wch: 20 }, // Partial Outstanding
       { wch: 20 }, // Unpaid Sales
-      { wch: 20 }, // Total Sales
+      { wch: 20 }, // Gross Sales
     ];
     worksheet['!cols'] = colWidths;
 
@@ -214,7 +228,9 @@ const SalesBySalesPerson: React.FC = () => {
       'Package': transaction.ServicePackageName || '-',
       'Payment Method': transaction.PaymentMethod,
       'Status': transaction.PaymentStatus,
-      'Sale Amount': formatCurrency(Number(transaction.SalesAmount), currentClinic)
+      'Gross Sale': formatCurrency(Number(transaction.SalesAmount), currentClinic),
+      'Cash Received': formatCurrency(Number(transaction.AmountPaid), currentClinic),
+      'Outstanding': formatCurrency(Number(transaction.OutstandingAmount), currentClinic)
     }));
 
     // Create worksheet from data
@@ -230,7 +246,9 @@ const SalesBySalesPerson: React.FC = () => {
       { wch: 20 }, // Package
       { wch: 15 }, // Payment Method
       { wch: 10 }, // Status
-      { wch: 15 }, // Amount
+      { wch: 15 }, // Gross Sale
+      { wch: 15 }, // Cash Received
+      { wch: 15 }, // Outstanding
     ];
     worksheet['!cols'] = colWidths;
 
@@ -396,7 +414,7 @@ const SalesBySalesPerson: React.FC = () => {
 
           <Box>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline' }}>
-              Total Sales: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{formatCurrency(totalAmount, currentClinic)}</span>
+              Gross Sales: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{formatCurrency(totalAmount, currentClinic)}</span>
             </Typography>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline', ml: 3 }}>
               Invoices: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalTransactions}</span>
@@ -430,7 +448,7 @@ const SalesBySalesPerson: React.FC = () => {
               <Box>
                 <Typography variant="h6" color="var(--text-primary)">Sales Summary</Typography>
                 <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
-                  Gross invoice sales by order date. Partial-paid and unpaid columns show the full sale value; use Payment Report for cash received.
+                  Gross invoice sales by order date, reconciled as of the report end date. Partial Collected plus Partial Outstanding equals the full value of partial-paid invoices.
                 </Typography>
               </Box>
               <Button
@@ -474,7 +492,13 @@ const SalesBySalesPerson: React.FC = () => {
                       color: 'var(--text-secondary)',
                       fontWeight: 600,
                       borderBottom: '1px solid var(--border)'
-                    }} align="right">Partial Paid</TableCell>
+                    }} align="right">Partial Collected</TableCell>
+                    <TableCell sx={{
+                      bgcolor: 'var(--surface)',
+                      color: 'var(--text-secondary)',
+                      fontWeight: 600,
+                      borderBottom: '1px solid var(--border)'
+                    }} align="right">Partial Outstanding</TableCell>
                     <TableCell sx={{
                       bgcolor: 'var(--surface)',
                       color: 'var(--text-secondary)',
@@ -486,7 +510,7 @@ const SalesBySalesPerson: React.FC = () => {
                       color: 'var(--text-secondary)',
                       fontWeight: 600,
                       borderBottom: '1px solid var(--border)'
-                    }} align="right">Total Sales</TableCell>
+                    }} align="right">Gross Sales</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -521,6 +545,9 @@ const SalesBySalesPerson: React.FC = () => {
                       <TableCell sx={{ color: 'var(--warning)', borderBottom: '1px solid var(--border)' }} align="right">
                         {formatCurrency(salesPerson.partialPaidSales, currentClinic)}
                       </TableCell>
+                      <TableCell sx={{ color: 'var(--warning)', borderBottom: '1px solid var(--border)' }} align="right">
+                        {formatCurrency(salesPerson.partialOutstandingSales, currentClinic)}
+                      </TableCell>
                       <TableCell sx={{ color: 'var(--error)', borderBottom: '1px solid var(--border)' }} align="right">
                         {formatCurrency(salesPerson.unpaidSales, currentClinic)}
                       </TableCell>
@@ -542,6 +569,9 @@ const SalesBySalesPerson: React.FC = () => {
                     </TableCell>
                     <TableCell sx={{ color: 'var(--warning)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
                       {formatCurrency(totalPartialPaidSales, currentClinic)}
+                    </TableCell>
+                    <TableCell sx={{ color: 'var(--warning)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
+                      {formatCurrency(totalPartialOutstandingSales, currentClinic)}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--error)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
                       {formatCurrency(totalUnpaidSales, currentClinic)}
@@ -661,7 +691,19 @@ const SalesBySalesPerson: React.FC = () => {
                         color: 'var(--text-secondary)',
                         fontWeight: 600,
                         borderBottom: '1px solid var(--border)'
-                      }} align="right">Sale Amount</TableCell>
+                      }} align="right">Gross Sale</TableCell>
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
+                        fontWeight: 600,
+                        borderBottom: '1px solid var(--border)'
+                      }} align="right">Cash Received</TableCell>
+                      <TableCell sx={{
+                        bgcolor: 'var(--surface)',
+                        color: 'var(--text-secondary)',
+                        fontWeight: 600,
+                        borderBottom: '1px solid var(--border)'
+                      }} align="right">Outstanding</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -716,6 +758,12 @@ const SalesBySalesPerson: React.FC = () => {
                           </TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
                             {formatCurrency(Number(transaction.SalesAmount), currentClinic)}
+                          </TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
+                            {formatCurrency(Number(transaction.AmountPaid), currentClinic)}
+                          </TableCell>
+                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
+                            {formatCurrency(Number(transaction.OutstandingAmount), currentClinic)}
                           </TableCell>
                         </TableRow>
                       ))}
