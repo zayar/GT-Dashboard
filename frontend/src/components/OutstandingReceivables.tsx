@@ -26,7 +26,8 @@ import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import {
-  fetchOutstandingReportRecords,
+  CreditReceivedRecord,
+  fetchOutstandingReceivablesReport,
   OutstandingAgingBucket,
   OutstandingPaymentStatus,
   OutstandingReportRecord,
@@ -70,6 +71,7 @@ const OutstandingReceivables: React.FC = () => {
   const [asOfDate, setAsOfDate] = useState<Date | null>(new Date());
   const [appliedAsOfDate, setAppliedAsOfDate] = useState<Date>(new Date());
   const [records, setRecords] = useState<OutstandingReportRecord[]>([]);
+  const [creditReceivedRecords, setCreditReceivedRecords] = useState<CreditReceivedRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -94,12 +96,13 @@ const OutstandingReceivables: React.FC = () => {
         throw new Error('Your session has expired. Please sign in again.');
       }
 
-      const result = await fetchOutstandingReportRecords({
+      const result = await fetchOutstandingReceivablesReport({
         clinicId: currentClinic.id,
         asOfDate: appliedAsOfDate,
         accessToken,
       });
-      setRecords(result);
+      setRecords(result.outstandingRecords);
+      setCreditReceivedRecords(result.creditReceivedRecords);
     } catch (fetchError: any) {
       console.error('Error fetching outstanding receivables:', fetchError);
       setError(`Failed to load outstanding receivables: ${fetchError.message || 'Unknown error'}`);
@@ -147,9 +150,13 @@ const OutstandingReceivables: React.FC = () => {
     ...agingSummary.map((entry) => entry.outstandingBalance),
     1,
   );
+  const creditReceivedTotal = creditReceivedRecords.reduce(
+    (total, record) => total + record.PaymentAmount,
+    0,
+  );
 
   const exportToExcel = () => {
-    if (!filteredRecords.length) return;
+    if (!filteredRecords.length && !creditReceivedRecords.length) return;
 
     const workbook = XLSX.utils.book_new();
     const invoiceRows = filteredRecords.map((record) => ({
@@ -169,6 +176,19 @@ const OutstandingReceivables: React.FC = () => {
       'Last Payment Date': record.LastPaymentDate,
       'Payment Methods': record.PaymentMethods,
     }));
+    const creditReceivedRows = creditReceivedRecords.map((record) => ({
+      'Received Date': record.ReceivedDate,
+      'Invoice Date': record.InvoiceDate,
+      Invoice: record.InvoiceNumber,
+      Customer: record.CustomerName,
+      Phone: record.CustomerPhoneNumber,
+      'Member ID': record.MemberId,
+      Salesperson: record.SalePerson,
+      'Payment Method': record.PaymentMethod,
+      'Credit Received': record.PaymentAmount,
+      'Balance After Payment': record.BalanceAfterPayment,
+      'Payment Note': record.PaymentNote,
+    }));
     const addSheet = (name: string, rows: object[], widths: number[]) => {
       const sheet = XLSX.utils.json_to_sheet(rows);
       sheet['!cols'] = widths.map((wch) => ({ wch }));
@@ -176,6 +196,7 @@ const OutstandingReceivables: React.FC = () => {
     };
 
     addSheet('Outstanding Invoices', invoiceRows, [13, 16, 25, 16, 14, 20, 35, 18, 18, 22, 16, 12, 14, 18, 22]);
+    addSheet('Credit Received', creditReceivedRows, [15, 15, 18, 25, 16, 14, 20, 18, 20, 23, 28]);
     addSheet('By Salesperson', salespersonSummary.map((entry) => ({
       Salesperson: entry.label,
       'Invoice Count': entry.invoiceCount,
@@ -236,7 +257,7 @@ const OutstandingReceivables: React.FC = () => {
           Outstanding Receivables
         </Typography>
         <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.75 }}>
-          Invoice balances as of the selected date. Aging is based on the invoice date because contractual due dates are not available.
+          Invoice balances and later credit collections as of the selected date. Aging is based on the invoice date because contractual due dates are not available.
         </Typography>
       </Box>
 
@@ -283,6 +304,77 @@ const OutstandingReceivables: React.FC = () => {
           </Paper>
         ))}
       </Box>
+
+      <Paper sx={{ ...cardStyles, p: 3, mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap', mb: 2 }}>
+          <Box>
+            <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>Credit Received</Typography>
+            <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
+              Payments collected on {format(appliedAsOfDate, 'MMM d, yyyy')} against invoices from an earlier date.
+            </Typography>
+          </Box>
+          <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+            <Typography variant="h5" sx={{ color: 'var(--success)', fontWeight: 700 }}>
+              {formatCurrency(creditReceivedTotal, currentClinic)}
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>
+              {creditReceivedRecords.length.toLocaleString('en-US')} payment{creditReceivedRecords.length === 1 ? '' : 's'}
+            </Typography>
+          </Box>
+        </Box>
+
+        <TableContainer sx={{ border: '1px solid var(--border)', maxHeight: 380 }}>
+          <Table size="small" stickyHeader>
+            <TableHead><TableRow>
+              <TableCell sx={headerCellStyles}>Received Date</TableCell>
+              <TableCell sx={headerCellStyles}>Invoice Date</TableCell>
+              <TableCell sx={headerCellStyles}>Invoice</TableCell>
+              <TableCell sx={headerCellStyles}>Customer</TableCell>
+              <TableCell sx={headerCellStyles}>Salesperson</TableCell>
+              <TableCell sx={headerCellStyles}>Method</TableCell>
+              <TableCell sx={headerCellStyles} align="right">Credit Received</TableCell>
+              <TableCell sx={headerCellStyles} align="right">Balance After Payment</TableCell>
+              <TableCell sx={headerCellStyles}>Invoice Status</TableCell>
+            </TableRow></TableHead>
+            <TableBody>
+              {creditReceivedRecords.map((record) => (
+                <TableRow key={record.ReceiptId} hover>
+                  <TableCell sx={bodyCellStyles}>{record.ReceivedDate}</TableCell>
+                  <TableCell sx={bodyCellStyles}>{record.InvoiceDate}</TableCell>
+                  <TableCell sx={{ ...bodyCellStyles, color: 'var(--text-primary)', fontWeight: 600 }}>{record.InvoiceNumber}</TableCell>
+                  <TableCell
+                    sx={{ ...bodyCellStyles, color: 'var(--primary)', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                    onClick={() => navigate(`/customers/${encodeURIComponent(record.CustomerPhoneNumber || record.CustomerName)}`)}
+                  >
+                    {record.CustomerName || '-'}
+                  </TableCell>
+                  <TableCell sx={bodyCellStyles}>{record.SalePerson}</TableCell>
+                  <TableCell sx={bodyCellStyles}>{record.PaymentMethod}</TableCell>
+                  <TableCell sx={{ ...bodyCellStyles, color: 'var(--success)', fontWeight: 700 }} align="right">
+                    {formatCurrency(record.PaymentAmount, currentClinic)}
+                  </TableCell>
+                  <TableCell sx={bodyCellStyles} align="right">
+                    {formatCurrency(record.BalanceAfterPayment, currentClinic)}
+                  </TableCell>
+                  <TableCell sx={bodyCellStyles}>
+                    <Chip
+                      label={record.BalanceAfterPayment > 0 ? 'STILL OUTSTANDING' : 'PAID'}
+                      color={record.BalanceAfterPayment > 0 ? 'warning' : 'success'}
+                      size="small"
+                      variant="outlined"
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!creditReceivedRecords.length && (
+                <TableRow><TableCell colSpan={9} align="center" sx={{ ...bodyCellStyles, py: 4 }}>
+                  No credit was received against earlier invoices on this date.
+                </TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <Paper sx={{ ...cardStyles, p: 3 }}>
@@ -363,7 +455,12 @@ const OutstandingReceivables: React.FC = () => {
               {filteredRecords.length.toLocaleString('en-US')} invoices · {formatCurrency(totals.outstandingBalance, currentClinic)} outstanding
             </Typography>
           </Box>
-          <Button variant="contained" onClick={exportToExcel} disabled={!filteredRecords.length} sx={{ textTransform: 'none' }}>
+          <Button
+            variant="contained"
+            onClick={exportToExcel}
+            disabled={!filteredRecords.length && !creditReceivedRecords.length}
+            sx={{ textTransform: 'none' }}
+          >
             Export to Excel
           </Button>
         </Box>

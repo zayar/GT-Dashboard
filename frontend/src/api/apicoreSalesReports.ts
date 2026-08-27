@@ -14,6 +14,7 @@ export interface SalesDetailRecord {
   CustomerPhoneNumber: string;
   MemberId: string;
   SalePerson: string;
+  PractitionerName: string;
   ServiceName: string | null;
   ServicePackageName: string | null;
   WalletTopUp: string | number | null;
@@ -71,6 +72,27 @@ export interface OutstandingReportRecord {
   LastPaymentDate: string;
 }
 
+export interface CreditReceivedRecord {
+  ReceiptId: string;
+  ReceivedDate: string;
+  InvoiceDate: string;
+  InvoiceNumber: string;
+  CustomerName: string;
+  CustomerPhoneNumber: string;
+  MemberId: string;
+  SalePerson: string;
+  PaymentMethod: string;
+  PaymentAmount: number;
+  PaymentNote: string;
+  InvoiceTotal: number;
+  BalanceAfterPayment: number;
+}
+
+export interface OutstandingReceivablesReport {
+  outstandingRecords: OutstandingReportRecord[];
+  creditReceivedRecords: CreditReceivedRecord[];
+}
+
 interface RawOrderPayment {
   id: string;
   payment_amount: number | string;
@@ -88,6 +110,10 @@ interface RawOrderItem {
   total?: number | string | null;
   metadata?: string | null;
   service?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  practitioner?: {
     name?: string | null;
   } | null;
   service_package?: {
@@ -96,6 +122,21 @@ interface RawOrderItem {
   product_stock_item?: {
     name?: string | null;
   } | null;
+}
+
+interface RawOrderCheckIn {
+  id: string;
+  service_id?: string | null;
+  status?: string | null;
+  practitioner?: {
+    name?: string | null;
+  } | null;
+  practitioners?: Array<{
+    status?: string | null;
+    practitioner?: {
+      name?: string | null;
+    } | null;
+  }> | null;
 }
 
 interface RawReportOrder {
@@ -131,6 +172,7 @@ interface RawReportOrder {
   } | null;
   payments?: RawOrderPayment[] | null;
   order_items?: RawOrderItem[] | null;
+  checkins?: RawOrderCheckIn[] | null;
 }
 
 interface OrdersResponse {
@@ -156,6 +198,7 @@ const GET_SALES_PAYMENT_ORDERS = `
     $take: Int
     $skip: Int
     $clinicMembersWhere2: ClinicMemberWhereInput
+    $includePractitioners: Boolean!
   ) {
     orders(where: $where, orderBy: $orderBy, take: $take, skip: $skip) {
       id
@@ -204,6 +247,10 @@ const GET_SALES_PAYMENT_ORDERS = `
         total
         metadata
         service {
+          id
+          name
+        }
+        practitioner @include(if: $includePractitioners) {
           name
         }
         service_package {
@@ -211,6 +258,20 @@ const GET_SALES_PAYMENT_ORDERS = `
         }
         product_stock_item {
           name
+        }
+      }
+      checkins @include(if: $includePractitioners) {
+        id
+        service_id
+        status
+        practitioner {
+          name
+        }
+        practitioners {
+          status
+          practitioner {
+            name
+          }
         }
       }
     }
@@ -347,6 +408,7 @@ async function fetchAllOrders(input: {
   clinicId: string;
   where: Record<string, unknown>;
   accessToken: string;
+  includePractitioners?: boolean;
 }) {
   const orders: RawReportOrder[] = [];
   let skip = 0;
@@ -366,6 +428,7 @@ async function fetchAllOrders(input: {
             equals: input.clinicId,
           },
         },
+        includePractitioners: input.includePractitioners ?? false,
       },
     });
 
@@ -502,6 +565,42 @@ function itemName(item: RawOrderItem) {
   return null;
 }
 
+function practitionerNamesForSalesItem(
+  order: RawReportOrder,
+  item: RawOrderItem | null,
+) {
+  if (!item || !order.order_id?.trim().toUpperCase().startsWith('CO-')) {
+    return '';
+  }
+
+  const names = new Set<string>();
+  const addName = (name: string | null | undefined) => {
+    const normalizedName = name?.trim();
+    if (normalizedName) names.add(normalizedName);
+  };
+
+  addName(item.practitioner?.name);
+
+  if (item.service?.id) {
+    (order.checkins ?? [])
+      .filter((checkin) => (
+        checkin.service_id === item.service?.id
+        && checkin.status?.trim().toUpperCase() !== 'CANCEL'
+      ))
+      .forEach((checkin) => {
+        addName(checkin.practitioner?.name);
+        (checkin.practitioners ?? [])
+          .filter((assignment) => (
+            !assignment.status
+            || assignment.status.trim().toUpperCase() === 'ACTIVE'
+          ))
+          .forEach((assignment) => addName(assignment.practitioner?.name));
+      });
+  }
+
+  return Array.from(names).join(', ');
+}
+
 function reportablePayments(order: RawReportOrder) {
   const seen = new Set<string>();
 
@@ -556,6 +655,7 @@ export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailReco
           CustomerPhoneNumber: customerPhoneNumber(order),
           MemberId: memberId(order),
           SalePerson: sellerName(order),
+          PractitionerName: practitionerNamesForSalesItem(order, item),
           ServiceName: serviceName,
           ServicePackageName: item?.service_package?.name ?? null,
           WalletTopUp: walletTopUp(order),
@@ -721,14 +821,78 @@ export function mapOutstandingReportRecords(
   ));
 }
 
+export function mapCreditReceivedRecords(
+  orders: RawReportOrder[],
+  receivedOnDate: Date,
+): CreditReceivedRecord[] {
+  const selectedReceiptDate = formatWallClockDate(receivedOnDate);
+
+  return orders.flatMap((order) => {
+    const invoiceDate = formatMyanmarDate(order.created_at);
+    const invoiceTotal = parseNumber(order.net_total);
+
+    if (
+      order.status !== 'ACTIVE'
+      || invoiceDate > selectedReceiptDate
+      || invoiceTotal <= 0
+      || !isReportableMethod(order.payment_method)
+    ) {
+      return [];
+    }
+
+    let amountPaid = 0;
+
+    return [...reportablePayments(order)]
+      .filter((payment) => !Number.isNaN(new Date(payment.payment_date).getTime()))
+      .sort((left, right) => (
+        left.payment_date.localeCompare(right.payment_date)
+        || left.id.localeCompare(right.id)
+      ))
+      .flatMap((payment) => {
+        const paymentAmount = parseNumber(payment.payment_amount);
+        amountPaid = Math.min(invoiceTotal, amountPaid + paymentAmount);
+        const receivedDate = formatMyanmarDate(payment.payment_date);
+
+        // A credit receipt is a payment collected on a later calendar day than
+        // the invoice. Same-day checkout payments remain in the Payment Report.
+        if (receivedDate !== selectedReceiptDate || receivedDate <= invoiceDate) {
+          return [];
+        }
+
+        return [{
+          ReceiptId: payment.id,
+          ReceivedDate: receivedDate,
+          InvoiceDate: invoiceDate,
+          InvoiceNumber: order.order_id ?? '',
+          CustomerName: customerName(order),
+          CustomerPhoneNumber: customerPhoneNumber(order),
+          MemberId: memberId(order),
+          SalePerson: sellerName(order) || 'Unknown',
+          PaymentMethod: normalizedMethod(payment.payment_method),
+          PaymentAmount: paymentAmount,
+          PaymentNote: payment.payment_note?.trim() ?? '',
+          InvoiceTotal: invoiceTotal,
+          BalanceAfterPayment: Math.max(0, invoiceTotal - amountPaid),
+        }];
+      });
+  }).sort((left, right) => (
+    right.ReceivedDate.localeCompare(left.ReceivedDate)
+    || right.InvoiceDate.localeCompare(left.InvoiceDate)
+    || right.InvoiceNumber.localeCompare(left.InvoiceNumber)
+    || right.ReceiptId.localeCompare(left.ReceiptId)
+  ));
+}
+
 export async function fetchSalesDetailRecords(input: ReportDateInput & {
   clinicId: string;
   accessToken: string;
+  includePractitioners?: boolean;
 }) {
   const range = resolveReportDateRange(input);
   const orders = await fetchAllOrders({
     clinicId: input.clinicId,
     accessToken: input.accessToken,
+    includePractitioners: input.includePractitioners ?? false,
     where: buildSalesOrderWhere({
       clinicId: input.clinicId,
       ...range,
@@ -755,16 +919,33 @@ export async function fetchPaymentReportRecords(input: ReportDateInput & {
   return mapPaymentReportRecords(orders, range.startDate, range.endDate);
 }
 
-export async function fetchOutstandingReportRecords(input: {
+interface OutstandingReportInput {
   clinicId: string;
   asOfDate: Date;
   accessToken: string;
-}) {
-  const orders = await fetchAllOrders({
+}
+
+async function fetchOutstandingReportOrders(input: OutstandingReportInput) {
+  return fetchAllOrders({
     clinicId: input.clinicId,
     accessToken: input.accessToken,
     where: buildOutstandingOrderWhere(input),
   });
+}
+
+export async function fetchOutstandingReportRecords(input: OutstandingReportInput) {
+  const orders = await fetchOutstandingReportOrders(input);
 
   return mapOutstandingReportRecords(orders, input.asOfDate);
+}
+
+export async function fetchOutstandingReceivablesReport(
+  input: OutstandingReportInput,
+): Promise<OutstandingReceivablesReport> {
+  const orders = await fetchOutstandingReportOrders(input);
+
+  return {
+    outstandingRecords: mapOutstandingReportRecords(orders, input.asOfDate),
+    creditReceivedRecords: mapCreditReceivedRecords(orders, input.asOfDate),
+  };
 }

@@ -100,6 +100,7 @@ const PaymentDetails: React.FC = () => {
         (record.CustomerName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.MemberId?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.SalePerson?.toLowerCase().includes(normalizedSearchTerm) || false) ||
+        (record.PractitionerName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServiceName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServicePackageName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.Note?.toLowerCase().includes(normalizedSearchTerm) || false) ||
@@ -121,6 +122,7 @@ const PaymentDetails: React.FC = () => {
     if (viewMode === 'summary') {
       const invoiceSummary: Record<string, PaymentRecord> = {};
       const servicesMap: Record<string, string[]> = {};
+      const practitionersMap: Record<string, Set<string>> = {};
 
       // First pass: collect unique invoices and their services
       data.forEach(record => {
@@ -130,6 +132,7 @@ const PaymentDetails: React.FC = () => {
         if (!invoiceSummary[invoiceNum]) {
           invoiceSummary[invoiceNum] = { ...record };
           servicesMap[invoiceNum] = [];
+          practitionersMap[invoiceNum] = new Set<string>();
         }
 
         // Add service to the services list
@@ -140,6 +143,12 @@ const PaymentDetails: React.FC = () => {
         if (record.ServicePackageName) {
           servicesMap[invoiceNum].push(record.ServicePackageName);
         }
+
+        record.PractitionerName
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean)
+          .forEach((name) => practitionersMap[invoiceNum].add(name));
       });
 
       // Second pass: Create summary records with concatenated services
@@ -149,6 +158,7 @@ const PaymentDetails: React.FC = () => {
 
         return {
           ...record,
+          PractitionerName: Array.from(practitionersMap[invoiceNum]).join(', '),
           ServiceName: services.length > 0 ? services.join(', ') : null,
           ServicePackageName: null, // In summary view, we combine these
         };
@@ -166,6 +176,7 @@ const PaymentDetails: React.FC = () => {
         CustomerName: record.CustomerName,
         MemberId: record.MemberId,
         SalePerson: record.SalePerson,
+        PractitionerName: record.PractitionerName,
         ServiceName: record.ServiceName, // Always show service name for each item
         ServicePackageName: record.ServicePackageName,
         WalletTopUp: record.WalletTopUp,
@@ -221,6 +232,7 @@ const PaymentDetails: React.FC = () => {
         startDate,
         endDate,
         selectedDate,
+        includePractitioners: true,
         accessToken,
       });
 
@@ -340,6 +352,7 @@ const PaymentDetails: React.FC = () => {
         'Customer Name': record.CustomerName,
         'Member ID': record.MemberId || '',
         'Sale Person': record.SalePerson || '',
+        'Practitioner': record.PractitionerName || '',
         'Service Name': record.ServiceName || '',
         'Service Package': record.ServicePackageName || '',
         'Wallet': walletValue,
@@ -373,6 +386,7 @@ const PaymentDetails: React.FC = () => {
       { wch: 25 },  // Customer Name
       { wch: 15 },  // Member ID
       { wch: 20 },  // Sale Person
+      { wch: 30 },  // Practitioner
       { wch: 25 },  // Service Name
       { wch: 25 },  // Service Package
       { wch: 10 },  // Wallet
@@ -947,6 +961,7 @@ const PaymentDetails: React.FC = () => {
           CustomerName: 'Customer Name',
           MemberId: 'Member ID',
           SalePerson: 'Sale Person',
+          PractitionerName: 'Practitioner',
           ServiceName: 'Service Name',
           ServicePackageName: 'Service Package',
           WalletTopUp: 'Wallet',

@@ -16,6 +16,7 @@ const sale = (invoice: string, amount: number): SalesDetailRecord => ({
   CustomerPhoneNumber: '09111111111',
   MemberId: 'M-1',
   SalePerson: 'Seller',
+  PractitionerName: '',
   ServiceName: 'Service',
   ServicePackageName: null,
   WalletTopUp: '',

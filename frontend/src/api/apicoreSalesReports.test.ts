@@ -3,6 +3,7 @@ import {
   buildPaymentOrderWhere,
   buildOutstandingOrderWhere,
   buildSalesOrderWhere,
+  mapCreditReceivedRecords,
   mapOutstandingReportRecords,
   mapPaymentReportRecords,
   mapSalesDetailRecords,
@@ -155,6 +156,7 @@ describe('APICORE sales and payment reports', () => {
       CustomerPhoneNumber: '09123456789',
       MemberId: 'CLINIC-7',
       SalePerson: 'Seller Name',
+      PractitionerName: '',
       ServiceName: 'Facial',
       PaymentMethod: 'KPAY',
       PaymentAmount: 120000,
@@ -167,6 +169,49 @@ describe('APICORE sales and payment reports', () => {
       PaymentAmount: 80000,
       Note: 'Birthday Gift Voucher',
     });
+  });
+
+  it('shows all assigned practitioners at service-item grain for CO vouchers only', () => {
+    const practitionerOrder = {
+      ...order,
+      order_id: 'CO-3435211',
+      payments: [order.payments[0]],
+      order_items: [{
+        ...order.order_items[0],
+        service: { id: 'service-ear-repair', name: 'Ear Lobe Repair (2 nos)' },
+        practitioner: { name: 'Dr Zaw' },
+      }],
+      checkins: [
+        {
+          id: 'matching-checkin',
+          service_id: 'service-ear-repair',
+          status: 'CHECKOUT',
+          practitioner: { name: 'Dr Zaw' },
+          practitioners: [
+            { status: 'ACTIVE', practitioner: { name: 'Dr Zaw' } },
+            { status: 'ACTIVE', practitioner: { name: 'Hnin Wai Lwin' } },
+            { status: 'CANCEL', practitioner: { name: 'Former Practitioner' } },
+          ],
+        },
+        {
+          id: 'other-service-checkin',
+          service_id: 'different-service',
+          status: 'CHECKOUT',
+          practitioner: { name: 'Other Practitioner' },
+          practitioners: [],
+        },
+      ],
+    };
+
+    expect(mapSalesDetailRecords([practitionerOrder] as any)[0]).toMatchObject({
+      InvoiceNumber: 'CO-3435211',
+      ServiceName: 'Ear Lobe Repair (2 nos)',
+      PractitionerName: 'Dr Zaw, Hnin Wai Lwin',
+    });
+    expect(mapSalesDetailRecords([{
+      ...practitionerOrder,
+      order_id: 'SO-3435211',
+    }] as any)[0].PractitionerName).toBe('');
   });
 
   it('does not expose malformed or non-text order notes in Sales Details', () => {
@@ -397,5 +442,73 @@ describe('APICORE sales and payment reports', () => {
         AgingBucket: '90+',
       }),
     ]));
+  });
+
+  it('links later credit receipts to their original invoice and remaining balance', () => {
+    const partialOrder = {
+      ...order,
+      id: 'partial-credit-order',
+      order_id: 'SO-CREDIT-1',
+      created_at: '2026-08-01T03:00:00.000Z',
+      net_total: '750000',
+      payment_status: 'PARTIAL_PAID',
+      payments: [
+        {
+          id: 'initial-payment',
+          payment_amount: '400000',
+          payment_method: 'CASH',
+          payment_note: null,
+          payment_date: '2026-08-01T03:30:00.000Z',
+        },
+        {
+          id: 'credit-receipt',
+          payment_amount: '200000',
+          payment_method: 'KPAY',
+          payment_note: 'Old balance payment',
+          payment_date: '2026-08-04T04:00:00.000Z',
+        },
+      ],
+    };
+    const fullyPaidOrder = {
+      ...order,
+      id: 'settled-credit-order',
+      order_id: 'SO-CREDIT-2',
+      created_at: '2026-08-02T03:00:00.000Z',
+      net_total: '200000',
+      payment_status: 'PAID',
+      payments: [{
+        id: 'settlement-receipt',
+        payment_amount: '200000',
+        payment_method: 'CASH',
+        payment_note: null,
+        payment_date: '2026-08-04T05:00:00.000Z',
+      }],
+    };
+
+    const rows = mapCreditReceivedRecords(
+      [partialOrder, fullyPaidOrder] as any,
+      new Date(2026, 7, 4),
+    );
+
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        ReceiptId: 'credit-receipt',
+        ReceivedDate: '2026-08-04',
+        InvoiceDate: '2026-08-01',
+        InvoiceNumber: 'SO-CREDIT-1',
+        PaymentMethod: 'KPAY',
+        PaymentAmount: 200000,
+        PaymentNote: 'Old balance payment',
+        InvoiceTotal: 750000,
+        BalanceAfterPayment: 150000,
+      }),
+      expect.objectContaining({
+        ReceiptId: 'settlement-receipt',
+        InvoiceNumber: 'SO-CREDIT-2',
+        PaymentAmount: 200000,
+        BalanceAfterPayment: 0,
+      }),
+    ]));
+    expect(rows.map((row) => row.ReceiptId)).not.toContain('initial-payment');
   });
 });

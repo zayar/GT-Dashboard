@@ -41,6 +41,7 @@ const COLUMN_WIDTHS: { [key: string]: string } = {
   InvoiceNumber: '110px',
   MemberId: '90px',
   SalePerson: '110px',
+  PractitionerName: '180px',
   ServicePackageName: '130px',
   WalletTopUp: '80px',
   ItemQuantity: '50px',
