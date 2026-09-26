@@ -1,7 +1,13 @@
-export interface CustomerPaymentSummaryRecord {
+export interface CustomerPaymentRecord {
   invoiceNumber?: string | null;
+  date?: string | null;
   method?: string | null;
-  amount?: number | string | null;
+  invoiceTotal?: number | string | null;
+  paymentAmount?: number | string | null;
+  status?: string | null;
+  ServiceName?: string | null;
+  ServicePackageName?: string | null;
+  SellerName?: string | null;
 }
 
 export interface PaymentMethodSummary {
@@ -11,86 +17,153 @@ export interface PaymentMethodSummary {
 }
 
 export interface CustomerPaymentSummary {
-  totalSpent: number;
-  invoiceCount: number;
+  mmkSpent: number;
+  passSpent: number;
+  topUpSpent: number;
+  mmkInvoiceCount: number;
+  passInvoiceCount: number;
+  unallocatedInvoiceCount: number;
   paymentMethods: PaymentMethodSummary[];
 }
 
-export type InvoiceDisplayRow<T> = T & {
-  isFirstInvoiceRow: boolean;
-  displayAmount: T extends { amount?: infer A } ? A | null : number | string | null;
+export type CustomerPaymentDisplayRow<T> = T & {
+  method: string;
+  invoiceTotal: number;
+  displayAmount: number | null;
+  topUpAmount: number | null;
+  isTopUp: boolean;
 };
 
-const normalizeInvoiceKey = (invoiceNumber: CustomerPaymentSummaryRecord['invoiceNumber']): string | null => {
-  const key = String(invoiceNumber || '').trim();
-  return key.length > 0 ? key : null;
+const amountValue = (value: number | string | null | undefined): number => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
 };
 
-const normalizeAmount = (amount: CustomerPaymentSummaryRecord['amount']): number => {
-  const value = Number(amount || 0);
-  return Number.isFinite(value) ? value : 0;
+const paymentMethod = (method: string | null | undefined): string =>
+  method?.trim().toUpperCase() || 'UNKNOWN';
+
+const isPaid = (status: string | null | undefined, paymentAmount: number | string | null | undefined): boolean => {
+  const normalized = status?.trim().toUpperCase();
+  return normalized === 'PAID' || normalized === 'PARTIAL_PAID' || (!normalized && amountValue(paymentAmount) > 0);
 };
 
-export const calculateCustomerPaymentSummary = (
-  payments: CustomerPaymentSummaryRecord[]
-): CustomerPaymentSummary => {
-  const invoices = new Map<string, { method: string; amount: number }>();
+export const isTopUpInvoice = (invoiceNumber: string | null | undefined): boolean =>
+  /^TO-/i.test(invoiceNumber?.trim() || '');
 
-  payments.forEach((payment, index) => {
-    const invoiceKey = normalizeInvoiceKey(payment.invoiceNumber) || `__missing_invoice_${index}`;
+/** MainPaymentView repeats invoice totals across service lines. Retain those
+ * lines while counting each distinct method/amount combination once. */
+export function buildCustomerPaymentBreakdown<T extends CustomerPaymentRecord>(payments: T[]) {
+  const groups = new Map<string, {
+    method: string;
+    invoiceNumber: string;
+    invoiceTotal: number;
+    paymentAmounts: Set<number>;
+    hasPaymentAmount: boolean;
+    isTopUp: boolean;
+  }>();
+  const invoiceHasPayment = new Set<string>();
+  const validRows = payments.filter((payment) =>
+    isPaid(payment.status, payment.paymentAmount) && (amountValue(payment.invoiceTotal) > 0 || amountValue(payment.paymentAmount) > 0)
+  );
 
-    if (invoices.has(invoiceKey)) {
+  validRows.forEach((payment, index) => {
+    const invoiceNumber = payment.invoiceNumber?.trim() || `Unknown invoice ${index + 1}`;
+    const method = paymentMethod(payment.method);
+    const key = `${invoiceNumber}\u0000${method}`;
+    const group = groups.get(key) || {
+      method,
+      invoiceNumber,
+      invoiceTotal: 0,
+      paymentAmounts: new Set<number>(),
+      hasPaymentAmount: false,
+      isTopUp: isTopUpInvoice(invoiceNumber),
+    };
+    group.invoiceTotal = Math.max(group.invoiceTotal, amountValue(payment.invoiceTotal));
+    const paid = amountValue(payment.paymentAmount);
+    if (paid > 0) {
+      group.paymentAmounts.add(paid);
+      group.hasPaymentAmount = true;
+      invoiceHasPayment.add(invoiceNumber);
+    }
+    groups.set(key, group);
+  });
+
+  const groupsPerInvoice = new Map<string, number>();
+  groups.forEach((group) => groupsPerInvoice.set(group.invoiceNumber, (groupsPerInvoice.get(group.invoiceNumber) || 0) + 1));
+  const unallocatedInvoices = new Set<string>();
+  const firstGroupByInvoice = new Set<string>();
+  const groupAmounts = new Map<string, number>();
+  groups.forEach((group, key) => {
+    if (group.hasPaymentAmount) {
+      groupAmounts.set(key, Array.from(group.paymentAmounts).reduce((sum, amount) => sum + amount, 0));
+    } else if (!invoiceHasPayment.has(group.invoiceNumber)
+      && (groupsPerInvoice.get(group.invoiceNumber) || 0) === 1
+      && group.method !== 'SPLIT' && group.method !== 'MIXED'
+      && !firstGroupByInvoice.has(group.invoiceNumber)) {
+      // Legacy invoices can lack payment rows. Use their invoice total once.
+      groupAmounts.set(key, group.invoiceTotal);
+      firstGroupByInvoice.add(group.invoiceNumber);
+    } else {
+      groupAmounts.set(key, 0);
+      if (!invoiceHasPayment.has(group.invoiceNumber)) unallocatedInvoices.add(group.invoiceNumber);
+    }
+  });
+
+  const summary: CustomerPaymentSummary = {
+    mmkSpent: 0,
+    passSpent: 0,
+    topUpSpent: 0,
+    mmkInvoiceCount: 0,
+    passInvoiceCount: 0,
+    unallocatedInvoiceCount: unallocatedInvoices.size,
+    paymentMethods: [],
+  };
+  const mmkInvoices = new Set<string>();
+  const passInvoices = new Set<string>();
+  const methodGroups = new Map<string, PaymentMethodSummary>();
+
+  groups.forEach((group, key) => {
+    const amount = groupAmounts.get(key) || 0;
+    if (amount <= 0) return;
+    if (group.method === 'PASS') {
+      summary.passSpent += amount;
+      passInvoices.add(group.invoiceNumber);
       return;
     }
-
-    invoices.set(invoiceKey, {
-      method: payment.method || 'Unknown',
-      amount: normalizeAmount(payment.amount),
-    });
+    summary.mmkSpent += amount;
+    if (group.isTopUp) summary.topUpSpent += amount;
+    mmkInvoices.add(group.invoiceNumber);
+    const methodSummary = methodGroups.get(group.method) || { method: group.method, count: 0, total: 0 };
+    methodSummary.count += 1;
+    methodSummary.total += amount;
+    methodGroups.set(group.method, methodSummary);
   });
+  summary.mmkInvoiceCount = mmkInvoices.size;
+  summary.passInvoiceCount = passInvoices.size;
+  summary.paymentMethods = Array.from(methodGroups.values());
 
-  const methodGroups: Record<string, PaymentMethodSummary> = {};
-  let totalSpent = 0;
-
-  invoices.forEach(({ method, amount }) => {
-    if (!methodGroups[method]) {
-      methodGroups[method] = { method, count: 0, total: 0 };
-    }
-
-    methodGroups[method].count += 1;
-    methodGroups[method].total += amount;
-
-    if (method !== 'PASS') {
-      totalSpent += amount;
-    }
-  });
-
-  return {
-    totalSpent,
-    invoiceCount: invoices.size,
-    paymentMethods: Object.values(methodGroups),
-  };
-};
-
-export const markFirstInvoiceRows = <T extends { invoiceNumber?: string | null }>(
-  payments: T[]
-): InvoiceDisplayRow<T>[] => {
-  const seenInvoices = new Set<string>();
-
-  return payments.map((payment) => {
-    const invoiceKey = normalizeInvoiceKey(payment.invoiceNumber);
-
-    if (!invoiceKey) {
-      return { ...payment, isFirstInvoiceRow: true, displayAmount: payment.amount ?? null };
-    }
-
-    const isFirstInvoiceRow = !seenInvoices.has(invoiceKey);
-    seenInvoices.add(invoiceKey);
-
-    return {
+  const seenGroups = new Set<string>();
+  const mmkRows: CustomerPaymentDisplayRow<T>[] = [];
+  const passRows: CustomerPaymentDisplayRow<T>[] = [];
+  validRows.forEach((payment, index) => {
+    const invoiceNumber = payment.invoiceNumber?.trim() || `Unknown invoice ${index + 1}`;
+    const method = paymentMethod(payment.method);
+    const key = `${invoiceNumber}\u0000${method}`;
+    const group = groups.get(key)!;
+    const amount = groupAmounts.get(key) || 0;
+    const first = !seenGroups.has(key);
+    seenGroups.add(key);
+    const displayAmount = first && amount > 0 ? amount : null;
+    const row = {
       ...payment,
-      isFirstInvoiceRow,
-      displayAmount: isFirstInvoiceRow ? payment.amount ?? null : null,
+      method,
+      invoiceTotal: group.invoiceTotal,
+      displayAmount,
+      topUpAmount: group.isTopUp && method !== 'PASS' ? displayAmount : null,
+      isTopUp: group.isTopUp,
     };
+    (method === 'PASS' ? passRows : mmkRows).push(row);
   });
-};
+
+  return { mmkRows, passRows, summary };
+}

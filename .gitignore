@@ -38,6 +38,9 @@ coverage/
 
 # Misc
 .cache/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 .DS_Store
 Thumbs.db
 backend/gtportal-2252c-firebase.json

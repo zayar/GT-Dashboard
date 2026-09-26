@@ -40,6 +40,8 @@ interface Customer {
   address: string;
   createdDate: string;
   totalSpend: number;
+  totalInvoiceValue: number;
+  totalInvoices: number;
   totalVisits: number;
   totalPackageCount: number;
   remainingCount: number;
@@ -129,38 +131,62 @@ const CustomersTable: React.FC = () => {
         : '';
 
       const query = `
-      WITH CustomerPayments AS (
+      WITH CustomerInvoices AS (
         SELECT
           CustomerName,
           CustomerPhoneNumber,
-          MemberId,
+          ANY_VALUE(MemberId) AS MemberId,
+          OrderId,
           InvoiceNumber,
-          MAX(CAST(NetTotal AS FLOAT64)) AS InvoiceNetTotal
+          MAX(SAFE_CAST(NetTotal AS FLOAT64)) AS InvoiceNetTotal,
+          ANY_VALUE(UPPER(TRIM(PaymentMethod))) AS OrderPaymentMethod
         FROM
           great_time.MainPaymentView
         WHERE
           CustomerName IS NOT NULL
           AND CustomerPhoneNumber IS NOT NULL
-          AND PaymentMethod != 'PASS'
           AND InvoiceNumber IS NOT NULL
-          AND CAST(NetTotal AS FLOAT64) > 0
+          AND PaymentStatus IN ('PAID', 'PARTIAL_PAID')
+          AND SAFE_CAST(NetTotal AS FLOAT64) > 0
           AND LOWER(ClinicCode) = LOWER('${clinicCode}')
         GROUP BY
           CustomerName,
           CustomerPhoneNumber,
-          MemberId,
+          OrderId,
           InvoiceNumber
       ),
-      CustomerSpend AS (
+      CustomerInvoiceSummary AS (
         SELECT
           CustomerName,
           CustomerPhoneNumber,
-          ANY_VALUE(MemberId) AS MemberId,
-          SUM(InvoiceNetTotal) AS TotalSpend
+          COUNT(DISTINCT InvoiceNumber) AS TotalInvoices,
+          SUM(InvoiceNetTotal) AS TotalInvoiceValue
+        FROM CustomerInvoices
+        GROUP BY CustomerName, CustomerPhoneNumber
+      ),
+      CustomerSpend AS (
+        SELECT
+          i.CustomerName,
+          i.CustomerPhoneNumber,
+          ANY_VALUE(i.MemberId) AS MemberId,
+          SUM(CASE
+            WHEN p.id IS NOT NULL
+              AND COALESCE(NULLIF(UPPER(TRIM(p.payment_method)), ''), i.OrderPaymentMethod, 'UNKNOWN') != 'PASS'
+              THEN SAFE_CAST(p.payment_amount AS FLOAT64)
+            WHEN p.id IS NULL AND i.OrderPaymentMethod NOT IN ('PASS', 'SPLIT', 'MIXED')
+              THEN i.InvoiceNetTotal
+            ELSE 0
+          END) AS TotalSpend
         FROM
-          CustomerPayments
+          CustomerInvoices i
+        LEFT JOIN
+          great_time.order_payments p
+        ON
+          p.order_id = i.OrderId
+          AND p.is_increasement = 1
+          AND SAFE_CAST(p.payment_amount AS FLOAT64) > 0
         GROUP BY
-          CustomerName, CustomerPhoneNumber
+          i.CustomerName, i.CustomerPhoneNumber
       ),
       MemberProfiles AS (
         SELECT
@@ -263,6 +289,8 @@ const CustomersTable: React.FC = () => {
         COALESCE(p.Address, 'N/A') AS address,
         COALESCE(p.CreatedDate, 'N/A') AS createdDate,
         COALESCE(s.TotalSpend, 0) AS totalSpend,
+        COALESCE(v.TotalInvoiceValue, 0) AS totalInvoiceValue,
+        COALESCE(v.TotalInvoices, 0) AS totalInvoices,
         i.TotalVisits AS totalVisits,
         COALESCE(ps.TotalPackageCount, 0) AS totalPackageCount,
         COALESCE(ps.RemainingCount, 0) AS remainingCount,
@@ -275,6 +303,10 @@ const CustomersTable: React.FC = () => {
         CustomerSpend s
       ON
         i.CustomerName = s.CustomerName AND i.CustomerPhoneNumber = s.CustomerPhoneNumber
+      LEFT JOIN
+        CustomerInvoiceSummary v
+      ON
+        i.CustomerName = v.CustomerName AND i.CustomerPhoneNumber = v.CustomerPhoneNumber
       LEFT JOIN
         MemberProfiles p
       ON
@@ -317,6 +349,8 @@ const CustomersTable: React.FC = () => {
         address: customer.address || 'N/A',
         createdDate: customer.createdDate || 'N/A',
         totalSpend: parseNumericValue(customer.totalSpend),
+        totalInvoiceValue: parseNumericValue(customer.totalInvoiceValue),
+        totalInvoices: parseNumericValue(customer.totalInvoices),
         totalVisits: parseNumericValue(customer.totalVisits),
         totalPackageCount: parseNumericValue(customer.totalPackageCount),
         remainingCount: parseNumericValue(customer.remainingCount),
@@ -426,6 +460,8 @@ const CustomersTable: React.FC = () => {
       customer.gender,
       customer.address,
       customer.totalSpend,
+      customer.totalInvoiceValue,
+      customer.totalInvoices,
       customer.totalVisits,
       customer.totalPackageCount,
       customer.remainingCount,
@@ -435,7 +471,7 @@ const CustomersTable: React.FC = () => {
       formatCustomerCreatedDate(customer.createdDate),
     ]);
     const csv = [
-      ['Member ID', 'Name', 'Phone number', 'Age', 'Gender', 'Address', 'Total spend', 'Total visit', 'Total package count', 'Remaining count', 'Last visit', 'Last service', 'Doctor / Therapist', 'Created date'],
+      ['Member ID', 'Name', 'Phone number', 'Age', 'Gender', 'Address', 'Total spend', 'Total invoice value', 'Total invoices', 'Total visit', 'Total package count', 'Remaining count', 'Last visit', 'Last service', 'Doctor / Therapist', 'Created date'],
       ...rows,
     ].map((row) => row.map(escapeCsv).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
@@ -456,7 +492,7 @@ const CustomersTable: React.FC = () => {
     >
       <DirectoryPageHeader
         title="Customers"
-        subtitle="Review customer value, recent activity, and service relationships."
+        subtitle="Total Spend excludes PASS reuse. Invoice Value includes all paid purchases, including PASS."
         count={customers.length}
         countLabel={debouncedSearchTerm ? 'matches' : 'loaded'}
         actions={
@@ -554,7 +590,7 @@ const CustomersTable: React.FC = () => {
                 sx={{
                   bgcolor: 'var(--surface-secondary)',
                   width: '100%',
-                  minWidth: 2350,
+                  minWidth: 2700,
                   tableLayout: 'auto'
                 }}
               >
@@ -672,6 +708,54 @@ const CustomersTable: React.FC = () => {
                         }}
                       >
                         TOTAL SPEND
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: 'var(--surface-secondary)',
+                        color: 'var(--text-secondary)',
+                        fontWeight: 600,
+                        borderBottom: '1px solid var(--border)',
+                        minWidth: 200,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <TableSortLabel
+                        active={orderBy === 'totalInvoiceValue'}
+                        direction={orderBy === 'totalInvoiceValue' ? order : 'asc'}
+                        onClick={() => handleRequestSort('totalInvoiceValue')}
+                        title="Sum of paid invoice totals, including PASS purchases."
+                        sx={{
+                          color: 'var(--text-secondary) !important',
+                          '&.Mui-active': { color: 'var(--primary) !important' },
+                          '& .MuiTableSortLabel-icon': { color: 'var(--primary) !important' }
+                        }}
+                      >
+                        INVOICE VALUE
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: 'var(--surface-secondary)',
+                        color: 'var(--text-secondary)',
+                        fontWeight: 600,
+                        borderBottom: '1px solid var(--border)',
+                        minWidth: 150,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <TableSortLabel
+                        active={orderBy === 'totalInvoices'}
+                        direction={orderBy === 'totalInvoices' ? order : 'asc'}
+                        onClick={() => handleRequestSort('totalInvoices')}
+                        title="Includes PASS invoices; Total Spend excludes PASS payments."
+                        sx={{
+                          color: 'var(--text-secondary) !important',
+                          '&.Mui-active': { color: 'var(--primary) !important' },
+                          '& .MuiTableSortLabel-icon': { color: 'var(--primary) !important' }
+                        }}
+                      >
+                        TOTAL INVOICES
                       </TableSortLabel>
                     </TableCell>
                     <TableCell
@@ -932,6 +1016,24 @@ const CustomersTable: React.FC = () => {
                         }}
                       >
                         {formatCurrency(customer.totalSpend, currentClinic)}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          bgcolor: 'var(--surface-secondary)',
+                          borderBottom: '1px solid var(--border)',
+                          color: 'var(--text-secondary)'
+                        }}
+                      >
+                        {formatCurrency(customer.totalInvoiceValue, currentClinic)}
+                      </TableCell>
+                      <TableCell
+                        sx={{
+                          bgcolor: 'var(--surface-secondary)',
+                          borderBottom: '1px solid var(--border)',
+                          color: 'var(--text-secondary)'
+                        }}
+                      >
+                        {customer.totalInvoices.toLocaleString('en-US')}
                       </TableCell>
                       <TableCell
                         sx={{

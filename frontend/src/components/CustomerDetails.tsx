@@ -2,13 +2,14 @@ import React, { useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
-import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, IconButton, Select, MenuItem, Pagination, Button, Chip, FormControl, InputLabel, Tooltip } from '@mui/material';
+import { Box, Paper, Typography, Avatar, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, Select, MenuItem, Pagination, Button, Chip, FormControl, InputLabel, Tooltip } from '@mui/material';
 import axios from 'axios';
 import { SelectChangeEvent } from '@mui/material';
-import { useClinic } from '../contexts/ClinicContext';
-import { formatCurrency } from '../utils/currency';
+import { useClinic, type Clinic } from '../contexts/ClinicContext';
+import { formatCurrency, getCurrency } from '../utils/currency';
 import { calculateAge, formatDateOfBirth } from '../utils/customerDemographics';
-import { calculateCustomerPaymentSummary, markFirstInvoiceRows } from '../utils/paymentSummary';
+import { buildCustomerPaymentBreakdown, type CustomerPaymentDisplayRow, type CustomerPaymentRecord } from '../utils/paymentSummary';
+import { buildPassTopUpOrdersQuery, buildPassWalletReconciliationQuery, summarizePassWallet, type PassTopUpOrder, type PassWalletMovement } from '../utils/passWalletReconciliation';
 import Customer360Panel from './customer360/Customer360Panel';
 
 // Add interface for Wallet Transaction
@@ -44,11 +45,53 @@ interface LifetimeServiceUsageData {
   lastUsed: { [service: string]: string };
 }
 
+const CustomerPaymentTable: React.FC<{
+  rows: CustomerPaymentDisplayRow<CustomerPaymentRecord>[];
+  clinic: Clinic | null;
+  pass: boolean;
+}> = ({ rows, clinic, pass }) => (
+  <TableContainer component={Paper} elevation={0} sx={{ bgcolor: 'var(--surface)', border: '1px solid var(--border)', overflowX: 'auto' }}>
+    <Table size="small" sx={{ minWidth: pass ? 900 : 1040 }}>
+      <TableHead>
+        <TableRow sx={{ bgcolor: 'var(--surface-secondary)' }}>
+          {['Date', 'Invoice', 'Invoice Total', 'Service', 'Package', 'Payment Method', 'Sales Person', ...(!pass ? ['Top-up Amount'] : []), pass ? 'PASS Used' : `${getCurrency(clinic)} Paid`].map((label) => (
+            <TableCell key={label} align={['Invoice Total', 'Top-up Amount', 'PASS Used', `${getCurrency(clinic)} Paid`].includes(label) ? 'right' : 'left'} sx={{ color: 'var(--text-secondary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {label}
+            </TableCell>
+          ))}
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {rows.map((payment, index) => (
+          <TableRow key={`${payment.invoiceNumber}-${payment.method}-${index}`} sx={{ '&:nth-of-type(odd)': { bgcolor: 'var(--background)' }, '&:hover': { bgcolor: 'var(--surface-secondary)' } }}>
+            <TableCell sx={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{payment.date || '-'}</TableCell>
+            <TableCell sx={{ color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{payment.invoiceNumber || '-'}</TableCell>
+            <TableCell align="right" sx={{ color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{formatCurrency(payment.invoiceTotal, clinic)}</TableCell>
+            <TableCell sx={{ color: 'var(--text-primary)' }}>{payment.isTopUp ? 'PASS top-up' : payment.ServiceName || '-'}</TableCell>
+            <TableCell sx={{ color: 'var(--text-primary)' }}>{payment.ServicePackageName || '-'}</TableCell>
+            <TableCell sx={{ color: 'var(--text-secondary)' }}>{payment.method}</TableCell>
+            <TableCell sx={{ color: 'var(--text-secondary)' }}>{payment.SellerName || '-'}</TableCell>
+            {!pass && (
+              <TableCell align="right" sx={{ color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                {payment.topUpAmount !== null ? formatCurrency(payment.topUpAmount, clinic) : '—'}
+              </TableCell>
+            )}
+            <TableCell align="right" sx={{ color: 'var(--text-primary)', fontWeight: payment.displayAmount !== null ? 600 : 400, whiteSpace: 'nowrap' }}>
+              {payment.displayAmount !== null ? formatCurrency(payment.displayAmount, clinic) : '—'}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </TableContainer>
+);
+
 const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { phoneNumber } = useParams<{ phoneNumber: string }>();
   const { currentClinic } = useClinic();
+  const currencyLabel = getCurrency(currentClinic);
   const [loading, setLoading] = React.useState(true);
   const [customerData, setCustomerData] = React.useState<any>(null);
   const [error, setError] = React.useState('');
@@ -64,10 +107,15 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   const [retryMessage, setRetryMessage] = React.useState<string>('');
 
   // Add new state for payment history
-  const [paymentHistory, setPaymentHistory] = React.useState<any[]>([]);
+  const [paymentHistory, setPaymentHistory] = React.useState<CustomerPaymentRecord[]>([]);
   const [paymentLoading, setPaymentLoading] = React.useState(true);
   const [paymentError, setPaymentError] = React.useState('');
   const [paymentFetched, setPaymentFetched] = React.useState(false);
+  const paymentRequestIdRef = React.useRef(0);
+  const [passWalletMovements, setPassWalletMovements] = React.useState<PassWalletMovement[]>([]);
+  const [passTopUpOrders, setPassTopUpOrders] = React.useState<PassTopUpOrder[]>([]);
+  const [passWalletLoading, setPassWalletLoading] = React.useState(true);
+  const [passWalletError, setPassWalletError] = React.useState('');
 
   // Add state for Sales by Sales Person report
   const [selectedYear, setSelectedYear] = React.useState<number>(() => {
@@ -75,15 +123,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   });
   // Add a ref to prevent fetch during cleanup
   const preventFetch = React.useRef(false);
-  const [paymentSummary, setPaymentSummary] = React.useState<{
-    totalSpent: number;
-    invoiceCount: number;
-    paymentMethods: { method: string; count: number; total: number }[];
-  }>({
-    totalSpent: 0,
-    invoiceCount: 0,
-    paymentMethods: [],
-  });
 
   // Add state for service usage data (separated from customer data)
   const [serviceUsageData, setServiceUsageData] = React.useState<{
@@ -130,7 +169,11 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     if (yearChanged) {
       setSelectedYear(year);
       setPage(0);
+      paymentRequestIdRef.current += 1;
       setPaymentFetched(false);
+      setPaymentHistory([]);
+      setPaymentLoading(true);
+      setPaymentError('');
       setServiceUsageData({ services: [], months: [], data: {} });
     } else if (forceServiceRefresh) {
       setServiceUsageData({ services: [], months: [], data: {} });
@@ -426,7 +469,11 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
   // Fetch customer data when params change - this data doesn't depend on the year
   useEffect(() => {
     // Reset payment fetched state when phone number changes
+    paymentRequestIdRef.current += 1;
     setPaymentFetched(false);
+    setPaymentHistory([]);
+    setPaymentLoading(true);
+    setPaymentError('');
     preventFetch.current = false;
 
     if (phoneNumber && currentClinic) {
@@ -479,11 +526,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
 
           // Initialize empty payment history as fallback
           setPaymentHistory([]);
-          setPaymentSummary({
-            totalSpent: 0,
-            invoiceCount: 0,
-            paymentMethods: []
-          });
         });
       } catch (error) {
         console.error('Error preparing payment history fetch:', error);
@@ -492,18 +534,82 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
 
         // Initialize empty payment history as fallback
         setPaymentHistory([]);
-        setPaymentSummary({
-          totalSpent: 0,
-          invoiceCount: 0,
-          paymentMethods: []
-        });
       }
     }
   }, [phoneNumber, paymentFetched, customerData, selectedYear, currentClinic]); // Keep selectedYear dependency for payment history
 
-  const paymentHistoryRows = useMemo(() => {
-    return markFirstInvoiceRows(paymentHistory);
-  }, [paymentHistory]);
+  const paymentBreakdown = useMemo(() => buildCustomerPaymentBreakdown(paymentHistory), [paymentHistory]);
+  const paymentSummary = paymentBreakdown.summary;
+  const passWalletSummary = useMemo(
+    () => summarizePassWallet(passWalletMovements, passTopUpOrders),
+    [passWalletMovements, passTopUpOrders],
+  );
+
+  useEffect(() => {
+    const clinicPassId = currentClinic?.pass_id;
+    if (!phoneNumber || !clinicPassId) {
+      setPassWalletLoading(false);
+      setPassWalletError('PASS wallet is not linked for this clinic.');
+      return;
+    }
+
+    let cancelled = false;
+    const fetchPassWallet = async () => {
+      setPassWalletLoading(true);
+      setPassWalletError('');
+      setPassWalletMovements([]);
+      setPassTopUpOrders([]);
+      try {
+        const query = buildPassWalletReconciliationQuery(
+          decodeURIComponent(phoneNumber || ''), clinicPassId, selectedYear,
+        );
+        const searchQuery = new URLSearchParams({ projectId: 'piti-pass', location: 'us-central1' });
+        const response = await axios.post(
+          `${import.meta.env.VITE_API_URL}/query2?${searchQuery}`,
+          { query },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+            },
+            timeout: 30000,
+          },
+        );
+        if (!response.data?.success) throw new Error(response.data?.error || 'Could not load PASS wallet activity');
+        const movements = (response.data.data || []) as PassWalletMovement[];
+        const topUpInvoices = movements
+          .filter(movement => movement.kind === 'IN' && movement.invoiceNumber)
+          .map(movement => movement.invoiceNumber as string);
+        const ordersQuery = buildPassTopUpOrdersQuery(topUpInvoices);
+        let orders: PassTopUpOrder[] = [];
+        if (ordersQuery) {
+          const ordersResponse = await axios.post(
+            `${import.meta.env.VITE_API_URL}/query`,
+            { query: ordersQuery },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+              },
+              timeout: 15000,
+            },
+          );
+          if (!ordersResponse.data?.success) throw new Error(ordersResponse.data?.error || 'Could not load top-up invoices');
+          orders = ordersResponse.data.data || [];
+        }
+        if (!cancelled) {
+          setPassWalletMovements(movements);
+          setPassTopUpOrders(orders);
+        }
+      } catch (error: any) {
+        if (!cancelled) setPassWalletError(error?.response?.data?.error || error?.message || 'Could not reconcile the PASS wallet.');
+      } finally {
+        if (!cancelled) setPassWalletLoading(false);
+      }
+    };
+    fetchPassWallet();
+    return () => { cancelled = true; };
+  }, [phoneNumber, currentClinic?.pass_id, selectedYear]);
 
   // Add this function to calculate heatmap color based on value
   const getHeatmapColor = (value: number, maxValue: number) => {
@@ -626,8 +732,8 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
     return { label: 'Lapsed', detail: `${daysSince} days since visit`, tone: 'var(--error)' };
   }, [customerData?.last_appointment]);
 
-  const averageInvoiceValue = paymentSummary.invoiceCount > 0
-    ? paymentSummary.totalSpent / paymentSummary.invoiceCount
+  const averageInvoiceValue = paymentSummary.mmkInvoiceCount > 0
+    ? paymentSummary.mmkSpent / paymentSummary.mmkInvoiceCount
     : 0;
 
   // Add a function to fetch customer payment history
@@ -638,6 +744,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       return;
     }
 
+    const requestId = ++paymentRequestIdRef.current;
     try {
       setPaymentLoading(true);
 
@@ -647,11 +754,12 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = () => {
       };
       const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
 
-      // Payment History query with year filtering
+      // MainPaymentView repeats payment amounts for each service line. Read the
+      // unique order_payments records and then attach their totals to those lines.
       const query = `
--- Get payment data
-WITH CustomerPayments AS (
-  SELECT
+WITH CustomerInvoiceLines AS (
+  SELECT DISTINCT
+    OrderId,
     OrderCreatedDate,
     InvoiceNumber,
     PaymentMethod,
@@ -662,40 +770,36 @@ WITH CustomerPayments AS (
     SellerName
   FROM great_time.MainPaymentView
   WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-    AND EXTRACT(YEAR FROM OrderCreatedDate) = ${selectedYear} -- Filter by selected year
+    AND LOWER(ClinicCode) = LOWER('${sanitizeForSQL(currentClinic.code)}')
+    AND EXTRACT(YEAR FROM OrderCreatedDate) = ${selectedYear}
+), InvoicePayments AS (
+  SELECT
+    order_id,
+    UPPER(TRIM(payment_method)) AS method,
+    SUM(SAFE_CAST(payment_amount AS FLOAT64)) AS paymentAmount
+  FROM great_time.order_payments
+  WHERE is_increasement = 1
+    AND SAFE_CAST(payment_amount AS FLOAT64) > 0
+    AND order_id IN (SELECT DISTINCT OrderId FROM CustomerInvoiceLines)
+  GROUP BY order_id, method
 )
-
--- Select payment history and summary separately
 SELECT
-  InvoiceNumber AS invoiceNumber,
-  FORMAT_TIMESTAMP('%Y-%m-%d', OrderCreatedDate) AS date,
-  PaymentMethod AS method,
-  ServiceName,
-  ServicePackageName,
-  SellerName,
-  CAST(NetTotal AS INT64) AS amount,
-  PaymentStatus AS status
-FROM CustomerPayments
-ORDER BY OrderCreatedDate DESC;
-
--- Run a separate query for summary data
--- SELECT
---   COUNT(DISTINCT InvoiceNumber) AS invoiceCount,
---   SUM(NetTotal) AS totalSpent
--- FROM CustomerPayments
--- WHERE PaymentStatus = 'PAID';
-
--- SELECT
---   PaymentMethod AS method,
---   COUNT(*) AS count,
---   SUM(NetTotal) AS total
--- FROM CustomerPayments
--- WHERE PaymentStatus = 'PAID'
--- GROUP BY PaymentMethod;
+  lines.InvoiceNumber AS invoiceNumber,
+  FORMAT_TIMESTAMP('%Y-%m-%d', lines.OrderCreatedDate) AS date,
+  COALESCE(payments.method, UPPER(TRIM(lines.PaymentMethod)), 'UNKNOWN') AS method,
+  lines.ServiceName,
+  lines.ServicePackageName,
+  lines.SellerName,
+  SAFE_CAST(lines.NetTotal AS FLOAT64) AS invoiceTotal,
+  payments.paymentAmount AS paymentAmount,
+  lines.PaymentStatus AS status
+FROM CustomerInvoiceLines lines
+LEFT JOIN InvoicePayments payments ON payments.order_id = lines.OrderId
+ORDER BY lines.OrderCreatedDate DESC, lines.InvoiceNumber;
       `;
 
       try {
+        setPaymentError('');
         console.log('Fetching payment history for customer:', escapedPhoneNumber, 'for year:', selectedYear);
         const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
           {
@@ -715,31 +819,15 @@ ORDER BY OrderCreatedDate DESC;
         }
 
         const paymentData = response.data.data || [];
+        if (requestId !== paymentRequestIdRef.current) return;
         console.log('Payment history fetched successfully, records:', paymentData.length);
 
-        // Filter out records with 0 MMK value
-        const filteredPaymentData = paymentData.filter((payment: any) =>
-          payment.amount && payment.amount > 0
-        );
-
-        console.log(`Filtered out ${paymentData.length - filteredPaymentData.length} zero-value records`);
-        setPaymentHistory(filteredPaymentData);
-
-        // Calculate payment summary manually since we simplified the query
-        if (filteredPaymentData.length > 0) {
-          setPaymentSummary(calculateCustomerPaymentSummary(filteredPaymentData));
-        } else {
-          console.log('No payment history found for customer');
-          setPaymentSummary({
-            totalSpent: 0,
-            invoiceCount: 0,
-            paymentMethods: [],
-          });
-        }
+        setPaymentHistory(paymentData);
 
         setPaymentFetched(true); // Mark payment data as fetched
         setPaymentLoading(false);
       } catch (axiosError: any) {
+        if (requestId !== paymentRequestIdRef.current) return;
         // Handle rate limiting (429)
         if (axiosError.response && axiosError.response.status === 429) {
           // We won't retry payment history automatically
@@ -769,6 +857,7 @@ ORDER BY OrderCreatedDate DESC;
         }
       }
     } catch (error: any) {
+      if (requestId !== paymentRequestIdRef.current) return;
       console.error('Error fetching payment history:', error);
       setPaymentError(error instanceof Error ? error.message : 'An unknown error occurred');
       setPaymentLoading(false);
@@ -1490,15 +1579,21 @@ SELECT
         >
           {[
             {
-              label: `Spend in ${selectedYear}`,
-              value: paymentLoading ? 'Loading…' : paymentError ? 'Unavailable' : formatCurrency(paymentSummary.totalSpent, currentClinic),
-              helper: `${paymentSummary.invoiceCount.toLocaleString()} paid invoice${paymentSummary.invoiceCount === 1 ? '' : 's'}`,
+              label: `${currencyLabel} spent in ${selectedYear}`,
+              value: paymentLoading ? 'Loading…' : paymentError ? 'Unavailable' : formatCurrency(paymentSummary.mmkSpent, currentClinic),
+              helper: `${paymentSummary.mmkInvoiceCount.toLocaleString()} paid invoice${paymentSummary.mmkInvoiceCount === 1 ? '' : 's'}, including top-ups`,
               accent: 'var(--primary)',
             },
             {
-              label: 'Average invoice',
+              label: `PASS used in ${selectedYear}`,
+              value: paymentLoading ? 'Loading…' : paymentError ? 'Unavailable' : formatCurrency(paymentSummary.passSpent, currentClinic),
+              helper: `${paymentSummary.passInvoiceCount.toLocaleString()} PASS purchase${paymentSummary.passInvoiceCount === 1 ? '' : 's'} · wallet value, not new income`,
+              accent: 'var(--warning)',
+            },
+            {
+              label: 'Average paid per invoice',
               value: paymentLoading ? 'Loading…' : paymentError ? 'Unavailable' : formatCurrency(averageInvoiceValue, currentClinic),
-              helper: `Paid invoices in ${selectedYear}`,
+              helper: `Non-PASS invoices in ${selectedYear}`,
               accent: 'var(--primary)',
             },
             {
@@ -1550,6 +1645,20 @@ SELECT
             </Paper>
           ))}
         </Box>
+
+        {!passWalletLoading && !passWalletError && passWalletSummary.used > 0 && (
+          <Paper elevation={0} sx={{ px: 2, py: 1.5, mb: 3, border: '1px solid var(--border)', bgcolor: 'var(--surface)' }}>
+            <Typography variant="body2" color="var(--text-primary)">
+              <strong>PASS balance:</strong> {formatCurrency(passWalletSummary.openingBalance, currentClinic)} carried into {selectedYear}
+              {' + '}{formatCurrency(passWalletSummary.received, currentClinic)} received
+              {' − '}{formatCurrency(passWalletSummary.used, currentClinic)} used
+              {' = '}{formatCurrency(passWalletSummary.closingBalance, currentClinic)} after activity.
+              {passWalletSummary.creditedByTopUps > 0 && passWalletSummary.missingTopUpOrders === 0 && (
+                <> TO top-ups credited {formatCurrency(passWalletSummary.creditedByTopUps, currentClinic)} of PASS value for {formatCurrency(passWalletSummary.paidForTopUps, currentClinic)} paid.</>
+              )}
+            </Typography>
+          </Paper>
+        )}
 
         {/* Two column layout for services and bookings */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -2079,7 +2188,7 @@ SELECT
               Payment History · {selectedYear}
             </Typography>
             <Typography sx={{ mt: 0.5, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-              Paid invoice value and payment mix for the selected analysis year.
+              By invoice date. {currencyLabel} spent includes services, packages and TO top-ups. PASS purchases are shown separately so they are not counted as new income.
             </Typography>
           </Box>
 
@@ -2091,210 +2200,137 @@ SELECT
           )}
 
           {paymentError && (
-            <Box
-              sx={{
-                p: 2,
-                bgcolor: 'var(--surface-secondary)',
-                borderRadius: 2,
-                border: '1px solid #7f1d1d',
-                mb: 2
-              }}
-            >
-              <Typography color="#ef4444">
-                {paymentError}
-              </Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                sx={{
-                  mt: 1,
-                  color: 'var(--primary)',
-                  borderColor: 'var(--primary)',
-                  '&:hover': {
-                    borderColor: '#60a5fa',
-                    bgcolor: 'rgba(59, 130, 246, 0.1)'
-                  }
-                }}
-                onClick={() => {
-                  setPaymentFetched(false);
-                  setPaymentError('');
-                }}
-              >
+            <Box sx={{ p: 2, bgcolor: 'var(--surface-secondary)', borderRadius: 2, border: '1px solid #7f1d1d', mb: 2 }}>
+              <Typography color="#ef4444">{paymentError}</Typography>
+              <Button variant="outlined" size="small" sx={{ mt: 1 }} onClick={() => setPaymentFetched(false)}>
                 Retry Loading Payment History
               </Button>
             </Box>
           )}
 
-          {!paymentLoading && !paymentError && paymentHistory.length === 0 && (
-            <Box
-              sx={{
-                p: 3,
-                bgcolor: 'var(--surface)',
-                borderRadius: 2,
-                textAlign: 'center',
-                mb: 2,
-                border: '1px solid var(--border)'
-              }}
-            >
-              <Typography variant="body1" color="var(--text-secondary)">
-                No payment history available for this customer.
-              </Typography>
-            </Box>
-          )}
-
-          {!paymentLoading && !paymentError && paymentHistory.length > 0 && (
+          {!paymentLoading && !paymentError && (
             <>
-              {/* Payment Summary */}
-              {paymentSummary && (
-                <Grid container spacing={2} sx={{ mb: 3 }}>
-                  <Grid item xs={12} sm={4}>
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                {[
+                  { label: `Total ${currencyLabel} spent`, value: formatCurrency(paymentSummary.mmkSpent, currentClinic), detail: `${paymentSummary.mmkInvoiceCount} non-PASS invoices` },
+                  { label: 'Total PASS used', value: formatCurrency(paymentSummary.passSpent, currentClinic), detail: `${paymentSummary.passInvoiceCount} PASS invoices · wallet value` },
+                  { label: `Top-ups included in ${currencyLabel}`, value: formatCurrency(paymentSummary.topUpSpent, currentClinic), detail: 'TO invoices only' },
+                ].map((metric) => (
+                  <Grid item xs={12} sm={4} key={metric.label}>
                     <Paper elevation={0} sx={{ p: 2, bgcolor: 'var(--surface)', height: '100%', border: '1px solid var(--border)' }}>
-                      <Typography variant="subtitle2" color="var(--text-secondary)">
-                        Total Spent
-                      </Typography>
-                      <Typography variant="h6" fontWeight="bold" color="var(--text-primary)">
-                        {formatCurrency(paymentSummary.totalSpent, currentClinic)}
-                      </Typography>
+                      <Typography variant="subtitle2" color="var(--text-secondary)">{metric.label}</Typography>
+                      <Typography variant="h6" fontWeight="bold" color="var(--text-primary)">{metric.value}</Typography>
+                      <Typography variant="caption" color="var(--text-secondary)">{metric.detail}</Typography>
                     </Paper>
                   </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={0} sx={{ p: 2, bgcolor: 'var(--surface)', height: '100%', border: '1px solid var(--border)' }}>
-                      <Typography variant="subtitle2" color="var(--text-secondary)">
-                        Invoices
-                      </Typography>
-                      <Typography variant="h6" fontWeight="bold" color="var(--text-primary)">
-                        {paymentSummary.invoiceCount}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={0} sx={{ p: 2, bgcolor: 'var(--surface)', height: '100%', border: '1px solid var(--border)' }}>
-                      <Typography variant="subtitle2" color="var(--text-secondary)">
-                        Payment Methods
-                      </Typography>
-                      <Box>
-                        {paymentSummary.paymentMethods.map((pm) => (
-                          <Chip
-                            key={pm.method}
-                            label={`${pm.method} (${pm.count})`}
-                            size="small"
-                            sx={{
-                              mr: 0.5,
-                              mb: 0.5,
-                              bgcolor: 'var(--border)',
-                              color: 'var(--text-secondary)',
-                              '& .MuiChip-label': {
-                                color: 'var(--text-secondary)'
-              }
-            }}
-          />
-                        ))}
-        </Box>
-      </Paper>
-                  </Grid>
-                </Grid>
+                ))}
+              </Grid>
+
+              {paymentSummary.unallocatedInvoiceCount > 0 && (
+                <Typography sx={{ mb: 2, color: 'var(--warning)', fontSize: '0.82rem' }}>
+                  {paymentSummary.unallocatedInvoiceCount} mixed-payment invoice{paymentSummary.unallocatedInvoiceCount === 1 ? '' : 's'} lacked payment amounts. The invoice total is visible below, but its cash/PASS split is excluded from the spend totals.
+                </Typography>
               )}
 
-              {/* Payment Table */}
-              <Box sx={{ overflowX: 'auto' }}>
-                <TableContainer component={Paper} elevation={0} sx={{
-                  bgcolor: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  '&::-webkit-scrollbar': {
-                    width: '8px',
-                    height: '8px',
-                  },
-                  '&::-webkit-scrollbar-track': {
-                    backgroundColor: 'var(--surface-secondary)',
-                  },
-                  '&::-webkit-scrollbar-thumb': {
-                    backgroundColor: 'var(--border)',
-                    borderRadius: '4px',
-                  },
-                  '&::-webkit-scrollbar-thumb:hover': {
-                    backgroundColor: 'var(--text-muted)',
-                  },
-                }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }}>Date</TableCell>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }}>Invoice</TableCell>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }}>Service</TableCell>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }}>Package</TableCell>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }}>Payment Method</TableCell>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }}>Sales Person</TableCell>
-                        <TableCell sx={{
-                          bgcolor: 'var(--surface)',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 600,
-                          borderBottom: '1px solid var(--border)'
-                        }} align="right">Amount</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {paymentHistoryRows.map((payment, index) => (
-                        <TableRow key={`${payment.invoiceNumber}-${index}`} sx={{
-                          '&:hover': {
-                            bgcolor: 'var(--surface-secondary)',
-                          },
-                          bgcolor: 'var(--surface-secondary)',
-                          '&:nth-of-type(odd)': {
-                            bgcolor: 'var(--background)',
-                          },
-                          borderBottom: '1px solid var(--border)'
-                        }}>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.date}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.invoiceNumber}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.ServiceName}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.ServicePackageName || '-'}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.method}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{payment.SellerName || '-'}</TableCell>
-                          <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                            {payment.displayAmount !== null ? (
-                              formatCurrency(Number(payment.displayAmount), currentClinic)
-                            ) : (
-                              <span style={{ color: 'var(--text-secondary)' }}>-</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+              <Box sx={{ mb: 4 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1.5 }}>
+                  <Box>
+                    <Typography variant="h6" fontWeight={700} color="var(--text-primary)">{currencyLabel} Payments &amp; Top-ups</Typography>
+                    <Typography variant="body2" color="var(--text-secondary)">
+                      Services, packages and PASS top-ups paid without PASS.
+                    </Typography>
+                  </Box>
+                  <Box>
+                    {paymentSummary.paymentMethods.map((pm) => (
+                      <Chip key={pm.method} label={`${pm.method} (${pm.count})`} size="small" sx={{ mr: 0.5, mb: 0.5, bgcolor: 'var(--border)', color: 'var(--text-secondary)' }} />
+                    ))}
+                  </Box>
+                </Box>
+                {paymentBreakdown.mmkRows.length > 0 ? (
+                  <CustomerPaymentTable rows={paymentBreakdown.mmkRows} clinic={currentClinic} pass={false} />
+                ) : (
+                  <Paper elevation={0} sx={{ p: 2, border: '1px solid var(--border)', bgcolor: 'var(--surface)' }}>
+                    <Typography color="var(--text-secondary)">No {currencyLabel} payments or top-ups in {selectedYear}.</Typography>
+                  </Paper>
+                )}
+              </Box>
+
+              <Box>
+                <Typography variant="h6" fontWeight={700} color="var(--text-primary)">PASS Spending</Typography>
+                <Typography variant="body2" color="var(--text-secondary)" sx={{ mb: 1.5 }}>
+                  Services and packages bought with PASS value. This includes value received through discounts or transfers and is excluded from Total {currencyLabel} spent.
+                </Typography>
+                {paymentBreakdown.passRows.length > 0 ? (
+                  <CustomerPaymentTable rows={paymentBreakdown.passRows} clinic={currentClinic} pass />
+                ) : (
+                  <Paper elevation={0} sx={{ p: 2, border: '1px solid var(--border)', bgcolor: 'var(--surface)' }}>
+                    <Typography color="var(--text-secondary)">No PASS purchases in {selectedYear}.</Typography>
+                  </Paper>
+                )}
               </Box>
             </>
           )}
+
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="h6" fontWeight={700} color="var(--text-primary)">PASS Wallet Balance Flow · {selectedYear}</Typography>
+            <Typography variant="body2" color="var(--text-secondary)" sx={{ mb: 1.5 }}>
+              Wallet movements explain how PASS purchases are funded. Credits and debits use wallet transaction dates; the payment tables above use invoice dates.
+            </Typography>
+            {passWalletLoading ? (
+              <Box display="flex" alignItems="center" gap={1} p={2}><CircularProgress size={20} /><Typography color="var(--text-secondary)">Loading PASS wallet activity…</Typography></Box>
+            ) : passWalletError ? (
+              <Paper elevation={0} sx={{ p: 2, border: '1px solid var(--border)', bgcolor: 'var(--surface)' }}>
+                <Typography color="var(--text-secondary)">PASS wallet reconciliation unavailable: {passWalletError}</Typography>
+              </Paper>
+            ) : (
+              <>
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  {[
+                    { label: 'Balance at start of year', value: passWalletSummary.openingBalance },
+                    { label: 'PASS value received', value: passWalletSummary.received },
+                    { label: 'PASS value used', value: passWalletSummary.used },
+                    { label: 'Balance after activity', value: passWalletSummary.closingBalance },
+                  ].map(metric => (
+                    <Grid item xs={12} sm={6} md={3} key={metric.label}>
+                      <Paper elevation={0} sx={{ p: 2, height: '100%', border: '1px solid var(--border)', bgcolor: 'var(--surface)' }}>
+                        <Typography variant="subtitle2" color="var(--text-secondary)">{metric.label}</Typography>
+                        <Typography variant="h6" fontWeight={700} color="var(--text-primary)">{formatCurrency(metric.value, currentClinic)}</Typography>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+                <Typography variant="body2" color="var(--text-secondary)" sx={{ mb: 1.5 }}>
+                  TO invoices credited {formatCurrency(passWalletSummary.creditedByTopUps, currentClinic)} of PASS value.
+                  {passWalletSummary.missingTopUpOrders === 0 && (
+                    <> Cash charged on those invoices was {formatCurrency(passWalletSummary.paidForTopUps, currentClinic)}; the {formatCurrency(passWalletSummary.creditedByTopUps - passWalletSummary.paidForTopUps, currentClinic)} difference came from invoice discounts or bonus value.</>
+                  )}
+                  {passWalletSummary.otherCredits > 0 && <> Other wallet transfers added {formatCurrency(passWalletSummary.otherCredits, currentClinic)}.</>}
+                </Typography>
+                {passWalletSummary.credits.length > 0 && (
+                  <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid var(--border)', overflowX: 'auto' }}>
+                    <Table size="small" sx={{ minWidth: 670 }}>
+                      <TableHead><TableRow sx={{ bgcolor: 'var(--surface-secondary)' }}>
+                        {['Date', 'PASS credit source', 'PASS value received', `${currencyLabel} paid`, 'Extra PASS value'].map(label => (
+                          <TableCell key={label} align={label === 'Date' || label === 'PASS credit source' ? 'left' : 'right'} sx={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</TableCell>
+                        ))}
+                      </TableRow></TableHead>
+                      <TableBody>
+                        {[...passWalletSummary.credits].reverse().map((credit, index) => (
+                          <TableRow key={`${credit.date}-${credit.invoiceNumber || 'transfer'}-${index}`}>
+                            <TableCell>{credit.date}</TableCell>
+                            <TableCell>{credit.invoiceNumber || 'Wallet transfer'}</TableCell>
+                            <TableCell align="right">{formatCurrency(credit.amount, currentClinic)}</TableCell>
+                            <TableCell align="right">{credit.cashPaid !== null ? formatCurrency(credit.cashPaid, currentClinic) : '—'}</TableCell>
+                            <TableCell align="right">{credit.cashPaid !== null ? formatCurrency(credit.amount - credit.cashPaid, currentClinic) : '—'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </>
+            )}
+          </Box>
         </Box>
 
         <Customer360Panel
