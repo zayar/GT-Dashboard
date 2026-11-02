@@ -11,6 +11,7 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency } from '../utils/currency';
 import * as XLSX from 'xlsx';
+import { buildServiceProfileQuery, escapeSqlString } from '../utils/directoryQueries';
 
 interface ServiceDetailsProps {}
 
@@ -476,12 +477,12 @@ const ServiceDetails: React.FC<ServiceDetailsProps> = React.memo(() => {
 
       try {
         setLoading(true);
+        setError('');
         const decodedServiceName = decodeURIComponent(name);
 
-        // Escape single quotes in service name by doubling them to prevent SQL injection
-        const escapedServiceName = decodedServiceName.replace(/'/g, "''");
-        const escapedClinicCode = currentClinic.code.replace(/'/g, "''");
-        const escapedClinicId = currentClinic.id.replace(/'/g, "''");
+        const escapedServiceName = escapeSqlString(decodedServiceName);
+        const escapedClinicCode = escapeSqlString(currentClinic.code);
+        const escapedClinicId = escapeSqlString(currentClinic.id);
         const monthlyLifecycleCtes = buildMonthlyLifecycleCtes(
           escapedServiceName,
           escapedClinicCode,
@@ -489,33 +490,7 @@ const ServiceDetails: React.FC<ServiceDetailsProps> = React.memo(() => {
           selectedYear
         );
 
-        // First, fetch service profile
-        const profileQuery = `
-WITH ServiceStats AS (
-  SELECT
-    ServiceName,
-    MAX(ServiceImage) AS ServiceImage,
-    COUNT(DISTINCT BookingID) as total_bookings,
-    COUNT(DISTINCT CustomerName) as total_customers,
-    CAST(SUM(CAST(Price AS FLOAT64)) AS INT64) as total_revenue
-  FROM great_time.MainDataView
-  WHERE ServiceName = '${escapedServiceName}'
-  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-  GROUP BY ServiceName
-)
-SELECT
-  ServiceName as name,
-  ServiceStats.ServiceImage as image,
-  COALESCE(MAX(ServiceDescription), 'No description available') as description,
-  total_bookings,
-  total_customers,
-  total_revenue,
-  FORMAT_TIMESTAMP('%d %b, %Y %I:%M %p', MAX(CheckInTime)) AS last_booking_date
-FROM great_time.MainDataView
-JOIN ServiceStats USING (ServiceName)
-WHERE ServiceName = '${escapedServiceName}'
-AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-GROUP BY ServiceName, ServiceStats.ServiceImage, total_bookings, total_customers, total_revenue;`;
+        const profileQuery = buildServiceProfileQuery(currentClinic, decodeURIComponent(name));
 
         const profileResponse = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
           { query: profileQuery },
@@ -542,7 +517,7 @@ WITH MonthlySales AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
   AND EXTRACT(YEAR FROM CheckInTime) = ${selectedYear}
-  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+  AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
   GROUP BY month
   ORDER BY month
 ),
@@ -558,8 +533,8 @@ BoughtTogether AS (
     ON b1.BookingID = b2.BookingID
     AND b1.ServiceName = '${escapedServiceName}'
     AND b2.ServiceName != '${escapedServiceName}'
-    AND LOWER(b1.ClinicCode) = LOWER('${currentClinic.code}')
-    AND LOWER(b2.ClinicCode) = LOWER('${currentClinic.code}')
+    AND LOWER(b1.ClinicCode) = LOWER('${escapedClinicCode}')
+    AND LOWER(b2.ClinicCode) = LOWER('${escapedClinicCode}')
   GROUP BY b2.ServiceName
   ORDER BY bought_together_count DESC
   LIMIT 10
@@ -572,7 +547,7 @@ Therapists AS (
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
     AND PractitionerName IS NOT NULL
-    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+    AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
   GROUP BY PractitionerName
   ORDER BY service_count DESC
 ),
@@ -586,7 +561,7 @@ Customers AS (
       COUNT(*) AS purchase_count
     FROM great_time.MainDataView
     WHERE ServiceName = '${escapedServiceName}'
-      AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+      AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
     GROUP BY name, phone
   ),
   -- Get the latest package/remaining counts per customer for this service
@@ -601,7 +576,7 @@ Customers AS (
       ) ORDER BY CheckInTime DESC LIMIT 1)[OFFSET(0)] AS latest
     FROM great_time.MainDataView
     WHERE ServiceName = '${escapedServiceName}'
-      AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+      AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
     GROUP BY name, phone
   )
   SELECT
@@ -624,7 +599,7 @@ ServiceRecords AS (
     FORMAT_DATE('%Y-%m', DATE(CheckInTime)) as month
   FROM great_time.MainDataView
   WHERE ServiceName = '${escapedServiceName}'
-  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
+  AND LOWER(ClinicCode) = LOWER('${escapedClinicCode}')
   ORDER BY CheckInTime DESC
   LIMIT 500
 )
@@ -708,9 +683,9 @@ SELECT
         setYearDataLoading(true);
         setYearDataError('');
         const decodedServiceName = decodeURIComponent(name);
-        const escapedServiceName = decodedServiceName.replace(/'/g, "''");
-        const escapedClinicCode = currentClinic.code.replace(/'/g, "''");
-        const escapedClinicId = currentClinic.id.replace(/'/g, "''");
+        const escapedServiceName = escapeSqlString(decodedServiceName);
+        const escapedClinicCode = escapeSqlString(currentClinic.code);
+        const escapedClinicId = escapeSqlString(currentClinic.id);
         const monthlyLifecycleCtes = buildMonthlyLifecycleCtes(
           escapedServiceName,
           escapedClinicCode,

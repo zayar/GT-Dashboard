@@ -2,6 +2,7 @@ import {
   postApicoreGraphql,
   toMyanmarUtcIso,
 } from './apicoreReports';
+import { readOrderItemDiscount } from '../utils/orderItemDiscount';
 
 const REPORT_BATCH_SIZE = 300;
 const MAX_REPORT_ORDERS = 50_000;
@@ -27,6 +28,7 @@ export interface SalesDetailRecord {
   InvoiceNetTotal: number;
   ItemQuantity: number | null;
   ItemPrice: number | null;
+  ItemDiscount: number | null;
   ItemTotal: number | null;
   SubTotal: number | null;
   Total: number | null;
@@ -501,11 +503,14 @@ function customerName(order: RawReportOrder) {
     || '';
 }
 
-function memberId(order: RawReportOrder) {
+function assignedMemberId(order: RawReportOrder) {
   return order.member?.clinic_members?.[0]?.member_id?.trim()
     || order.member?.member_id?.trim()
-    || order.member_id
     || '';
+}
+
+function memberId(order: RawReportOrder) {
+  return assignedMemberId(order) || order.member_id || '';
 }
 
 function customerPhoneNumber(order: RawReportOrder) {
@@ -653,7 +658,7 @@ export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailReco
           InvoiceNumber: order.order_id ?? '',
           CustomerName: customerName(order),
           CustomerPhoneNumber: customerPhoneNumber(order),
-          MemberId: memberId(order),
+          MemberId: assignedMemberId(order),
           SalePerson: sellerName(order),
           PractitionerName: practitionerNamesForSalesItem(order, item),
           ServiceName: serviceName,
@@ -668,6 +673,7 @@ export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailReco
           InvoiceNetTotal: parseNumber(order.net_total),
           ItemQuantity: item?.quantity ?? null,
           ItemPrice: item ? parseNumber(item.price) : null,
+          ItemDiscount: item ? readOrderItemDiscount(item.metadata) : null,
           ItemTotal: item ? parseNumber(item.total) : null,
           SubTotal: parseNumber(order.total),
           Total: parseNumber(order.total),

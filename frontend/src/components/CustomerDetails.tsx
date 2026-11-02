@@ -11,6 +11,8 @@ import { calculateAge, formatDateOfBirth } from '../utils/customerDemographics';
 import { buildCustomerPaymentBreakdown, type CustomerPaymentDisplayRow, type CustomerPaymentRecord } from '../utils/paymentSummary';
 import { buildPassTopUpOrdersQuery, buildPassWalletReconciliationQuery, summarizePassWallet, type PassTopUpOrder, type PassWalletMovement } from '../utils/passWalletReconciliation';
 import Customer360Panel from './customer360/Customer360Panel';
+import { buildCustomerProfileQuery } from '../utils/directoryQueries';
+import { parseBigQueryArray } from '../utils/bigQueryResults';
 
 // Add interface for Wallet Transaction
 interface WalletTransaction {
@@ -1001,33 +1003,7 @@ ORDER BY lines.OrderCreatedDate DESC, lines.InvoiceNumber;
       const escapedPhoneNumber = sanitizeForSQL(decodedPhoneNumber);
       console.log('Fetching data for phone number:', decodedPhoneNumber);
 
-      // First, fetch customer profile with phone number filter - simplified query
-        const profileQuery = `
-WITH AllAppointments AS (
-  SELECT DISTINCT
-    BookingID,
-    CheckInTime
-  FROM great_time.MainDataView
-  WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-    AND CheckInTime IS NOT NULL
-    AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-)
-SELECT
-  CustomerName AS name,
-  CustomerPhoneNumber AS phone,
-  ARRAY_AGG(
-    NULLIF(CAST(DateOfBirth AS STRING), '') IGNORE NULLS
-    ORDER BY CheckInTime DESC
-    LIMIT 1
-  )[SAFE_OFFSET(0)] AS dateOfBirth,
-  CAST(SUM(CAST(Price AS FLOAT64)) AS INT64) AS total_purchase_amount,
-  COUNT(DISTINCT ServiceName) AS total_services,
-  FORMAT_TIMESTAMP('%d %b, %Y %I:%M %p', MAX(CheckInTime)) AS last_appointment,
-  (SELECT COUNT(*) FROM AllAppointments) AS total_appointments
-FROM great_time.MainDataView
-WHERE REPLACE(CustomerPhoneNumber, '+959', '') = REPLACE('${escapedPhoneNumber}', '+959', '')
-  AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-GROUP BY CustomerName, CustomerPhoneNumber;`;
+      const profileQuery = buildCustomerProfileQuery(currentClinic, decodedPhoneNumber);
 
       console.log('Executing profile query:', profileQuery);
 
@@ -1156,24 +1132,24 @@ SELECT
         console.log('Customer detailed data fetched successfully');
 
         // Parse JSON strings from BigQuery results
-        let monthlySales = [];
-        let purchasedServices = [];
-        let recentBookings = [];
+        let monthlySales: unknown[] = [];
+        let purchasedServices: unknown[] = [];
+        let recentBookings: any[] = [];
 
         try {
-          monthlySales = responseData.monthlySales ? JSON.parse(responseData.monthlySales) : [];
+          monthlySales = parseBigQueryArray(responseData.monthlySales);
         } catch (e) {
           console.error('Error parsing monthlySales:', e);
         }
 
         try {
-          purchasedServices = responseData.purchasedServices ? JSON.parse(responseData.purchasedServices) : [];
+          purchasedServices = parseBigQueryArray(responseData.purchasedServices);
         } catch (e) {
           console.error('Error parsing purchasedServices:', e);
         }
 
         try {
-          recentBookings = responseData.recentBookings ? JSON.parse(responseData.recentBookings) : [];
+          recentBookings = parseBigQueryArray<any>(responseData.recentBookings);
           console.log("Parsed recentBookings data:", recentBookings);
 
           // Transform bookingId property to match expected structure in UI

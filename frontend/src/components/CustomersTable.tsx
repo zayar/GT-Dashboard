@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -27,6 +27,7 @@ import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency } from '../utils/currency';
 import { calculateAge } from '../utils/customerDemographics';
 import DirectoryPageHeader from './DirectoryPageHeader';
+import { buildCustomerDirectoryQuery } from '../utils/directoryQueries';
 
 export { calculateAge } from '../utils/customerDemographics';
 
@@ -48,10 +49,6 @@ interface Customer {
   lastVisited: string;
   lastService: string;
   therapist: string;
-}
-
-function escapeSqlString(value: string) {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, "''");
 }
 
 function parseNumericValue(value: unknown) {
@@ -103,223 +100,26 @@ const CustomersTable: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
   const debouncedSearchTerm = useDebounce(searchTerm, 500); // 500ms debounce delay
+  const requestId = useRef(0);
 
   useEffect(() => {
     if (currentClinic) {
+      setPage(1);
+      setCustomers([]);
       fetchCustomers();
     }
+    return () => { requestId.current += 1; };
   }, [currentClinic, debouncedSearchTerm]);
 
   const fetchCustomers = useCallback(async () => {
     if (!currentClinic) return;
+    const currentRequestId = ++requestId.current;
 
     try {
       setLoading(true);
       setError('');
 
-      const clinicCode = escapeSqlString(currentClinic.code);
-      const clinicId = escapeSqlString(currentClinic.id);
-      const escapedSearchTerm = escapeSqlString(debouncedSearchTerm.toLowerCase());
-
-      // Search condition
-      const searchCondition = debouncedSearchTerm
-        ? `AND (
-            LOWER(i.CustomerName) LIKE '%${escapedSearchTerm}%'
-            OR LOWER(i.CustomerPhoneNumber) LIKE '%${escapedSearchTerm}%'
-            OR LOWER(COALESCE(p.MemberId, s.MemberId, '')) LIKE '%${escapedSearchTerm}%'
-          )`
-        : '';
-
-      const query = `
-      WITH CustomerInvoices AS (
-        SELECT
-          CustomerName,
-          CustomerPhoneNumber,
-          ANY_VALUE(MemberId) AS MemberId,
-          OrderId,
-          InvoiceNumber,
-          MAX(SAFE_CAST(NetTotal AS FLOAT64)) AS InvoiceNetTotal,
-          ANY_VALUE(UPPER(TRIM(PaymentMethod))) AS OrderPaymentMethod
-        FROM
-          great_time.MainPaymentView
-        WHERE
-          CustomerName IS NOT NULL
-          AND CustomerPhoneNumber IS NOT NULL
-          AND InvoiceNumber IS NOT NULL
-          AND PaymentStatus IN ('PAID', 'PARTIAL_PAID')
-          AND SAFE_CAST(NetTotal AS FLOAT64) > 0
-          AND LOWER(ClinicCode) = LOWER('${clinicCode}')
-        GROUP BY
-          CustomerName,
-          CustomerPhoneNumber,
-          OrderId,
-          InvoiceNumber
-      ),
-      CustomerInvoiceSummary AS (
-        SELECT
-          CustomerName,
-          CustomerPhoneNumber,
-          COUNT(DISTINCT InvoiceNumber) AS TotalInvoices,
-          SUM(InvoiceNetTotal) AS TotalInvoiceValue
-        FROM CustomerInvoices
-        GROUP BY CustomerName, CustomerPhoneNumber
-      ),
-      CustomerSpend AS (
-        SELECT
-          i.CustomerName,
-          i.CustomerPhoneNumber,
-          ANY_VALUE(i.MemberId) AS MemberId,
-          SUM(CASE
-            WHEN p.id IS NOT NULL
-              AND COALESCE(NULLIF(UPPER(TRIM(p.payment_method)), ''), i.OrderPaymentMethod, 'UNKNOWN') != 'PASS'
-              THEN SAFE_CAST(p.payment_amount AS FLOAT64)
-            WHEN p.id IS NULL AND i.OrderPaymentMethod NOT IN ('PASS', 'SPLIT', 'MIXED')
-              THEN i.InvoiceNetTotal
-            ELSE 0
-          END) AS TotalSpend
-        FROM
-          CustomerInvoices i
-        LEFT JOIN
-          great_time.order_payments p
-        ON
-          p.order_id = i.OrderId
-          AND p.is_increasement = 1
-          AND SAFE_CAST(p.payment_amount AS FLOAT64) > 0
-        GROUP BY
-          i.CustomerName, i.CustomerPhoneNumber
-      ),
-      MemberProfiles AS (
-        SELECT
-          RIGHT(REGEXP_REPLACE(COALESCE(cm.phonenumber, m.phonenumber, ''), r'[^0-9]', ''), 9) AS PhoneKey,
-          COALESCE(NULLIF(cm.member_id, ''), NULLIF(m.member_id, '')) AS MemberId,
-          NULLIF(
-            JSON_VALUE(SAFE.PARSE_JSON(COALESCE(NULLIF(cm.metadata, ''), m.metadata)), '$.gender'),
-            ''
-          ) AS Gender,
-          NULLIF(
-            JSON_VALUE(SAFE.PARSE_JSON(COALESCE(NULLIF(cm.metadata, ''), m.metadata)), '$.address'),
-            ''
-          ) AS Address,
-          FORMAT_TIMESTAMP(
-            '%Y-%m-%d',
-            TIMESTAMP(cm.created_at),
-            'Asia/Yangon'
-          ) AS CreatedDate
-        FROM
-          great_time.clinic_members cm
-        LEFT JOIN
-          great_time.members m
-        ON
-          m.phonenumber = cm.phonenumber
-        WHERE
-          cm.clinic_id = '${clinicId}'
-        QUALIFY ROW_NUMBER() OVER (
-          PARTITION BY RIGHT(REGEXP_REPLACE(COALESCE(cm.phonenumber, m.phonenumber, ''), r'[^0-9]', ''), 9)
-          ORDER BY COALESCE(cm.updated_at, cm.created_at) DESC
-        ) = 1
-      ),
-      PackageStates AS (
-        SELECT
-          q.CustomerName,
-          q.CustomerPhoneNumber,
-          TRIM(q.ServiceName) AS ServiceName,
-          GREATEST(COALESCE(SAFE_CAST(q.PackageCount AS INT64), 0), 0) AS PackageCount,
-          GREATEST(COALESCE(SAFE_CAST(q.RemainingPackageCount AS INT64), 0), 0) AS RemainingPackageCount
-        FROM
-          great_time.MainDataView q
-        WHERE
-          q.CustomerName IS NOT NULL
-          AND q.CustomerPhoneNumber IS NOT NULL
-          AND q.ServiceName IS NOT NULL
-          AND (q.PackageCount IS NOT NULL OR q.RemainingPackageCount IS NOT NULL)
-          AND LOWER(q.ClinicCode) = LOWER('${clinicCode}')
-        QUALIFY ROW_NUMBER() OVER (
-          PARTITION BY q.CustomerName, q.CustomerPhoneNumber, TRIM(q.ServiceName)
-          ORDER BY q.CheckInTime DESC, q.CheckOutTime DESC
-        ) = 1
-      ),
-      PackageSummary AS (
-        SELECT
-          CustomerName,
-          CustomerPhoneNumber,
-          SUM(PackageCount) AS TotalPackageCount,
-          SUM(RemainingPackageCount) AS RemainingCount
-        FROM
-          PackageStates
-        GROUP BY
-          CustomerName, CustomerPhoneNumber
-      ),
-      CustomerInfo AS (
-        SELECT
-          q.CustomerName,
-          q.CustomerPhoneNumber,
-          ARRAY_AGG(
-            NULLIF(CAST(q.DateOfBirth AS STRING), '') IGNORE NULLS
-            ORDER BY COALESCE(q.CheckOutTime, q.CheckInTime) DESC
-            LIMIT 1
-          )[SAFE_OFFSET(0)] AS DateOfBirth,
-          COUNT(DISTINCT q.BookingID) AS TotalVisits,
-          FORMAT_TIMESTAMP('%d %b, %Y', MAX(COALESCE(q.CheckOutTime, q.CheckInTime))) AS LastVisited,
-          ARRAY_AGG(
-            NULLIF(q.ServiceName, '') IGNORE NULLS
-            ORDER BY COALESCE(q.CheckOutTime, q.CheckInTime) DESC
-            LIMIT 1
-          )[SAFE_OFFSET(0)] AS LastService,
-          ARRAY_AGG(
-            NULLIF(q.PractitionerName, '') IGNORE NULLS
-            ORDER BY COALESCE(q.CheckOutTime, q.CheckInTime) DESC
-            LIMIT 1
-          )[SAFE_OFFSET(0)] AS Therapist
-        FROM
-          great_time.MainDataView q
-        WHERE
-          q.CustomerName IS NOT NULL
-          AND q.CustomerPhoneNumber IS NOT NULL
-          AND q.CheckInTime IS NOT NULL
-          AND LOWER(q.ClinicCode) = LOWER('${clinicCode}')
-        GROUP BY
-          q.CustomerName, q.CustomerPhoneNumber
-      )
-      SELECT
-        COALESCE(p.MemberId, s.MemberId, 'N/A') AS memberId,
-        i.CustomerName AS name,
-        i.CustomerPhoneNumber AS phoneNumber,
-        i.DateOfBirth AS dob,
-        COALESCE(p.Gender, 'N/A') AS gender,
-        COALESCE(p.Address, 'N/A') AS address,
-        COALESCE(p.CreatedDate, 'N/A') AS createdDate,
-        COALESCE(s.TotalSpend, 0) AS totalSpend,
-        COALESCE(v.TotalInvoiceValue, 0) AS totalInvoiceValue,
-        COALESCE(v.TotalInvoices, 0) AS totalInvoices,
-        i.TotalVisits AS totalVisits,
-        COALESCE(ps.TotalPackageCount, 0) AS totalPackageCount,
-        COALESCE(ps.RemainingCount, 0) AS remainingCount,
-        i.LastVisited AS lastVisited,
-        i.LastService AS lastService,
-        i.Therapist AS therapist
-      FROM
-        CustomerInfo i
-      LEFT JOIN
-        CustomerSpend s
-      ON
-        i.CustomerName = s.CustomerName AND i.CustomerPhoneNumber = s.CustomerPhoneNumber
-      LEFT JOIN
-        CustomerInvoiceSummary v
-      ON
-        i.CustomerName = v.CustomerName AND i.CustomerPhoneNumber = v.CustomerPhoneNumber
-      LEFT JOIN
-        MemberProfiles p
-      ON
-        RIGHT(REGEXP_REPLACE(i.CustomerPhoneNumber, r'[^0-9]', ''), 9) = p.PhoneKey
-      LEFT JOIN
-        PackageSummary ps
-      ON
-        i.CustomerName = ps.CustomerName AND i.CustomerPhoneNumber = ps.CustomerPhoneNumber
-      WHERE 1=1 ${searchCondition}
-      ORDER BY
-        s.TotalSpend DESC NULLS LAST
-      LIMIT 100
-      `;
+      const query = buildCustomerDirectoryQuery(currentClinic, debouncedSearchTerm);
 
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
         { query },
@@ -328,9 +128,11 @@ const CustomersTable: React.FC = () => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
           },
-          timeout: 15000
+          timeout: 30000
         }
       );
+
+      if (currentRequestId !== requestId.current) return;
 
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch customers');
@@ -340,7 +142,7 @@ const CustomersTable: React.FC = () => {
 
       // Map the response data to Customer interface
       const formattedCustomers = data.map((customer: any, index: number) => ({
-        id: index.toString(),
+        id: customer.id || index.toString(),
         name: customer.name || 'Unknown',
         phoneNumber: customer.phoneNumber || 'N/A',
         memberId: customer.memberId || 'N/A',
@@ -362,6 +164,7 @@ const CustomersTable: React.FC = () => {
       setCustomers(formattedCustomers);
       setLoading(false);
     } catch (err: any) {
+      if (currentRequestId !== requestId.current) return;
       console.error('Error fetching customers:', err);
       let errorMessage = 'An error occurred while fetching customer data';
 

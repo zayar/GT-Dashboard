@@ -29,6 +29,7 @@ const sale = (invoice: string, amount: number): SalesDetailRecord => ({
   InvoiceNetTotal: amount,
   ItemQuantity: 1,
   ItemPrice: amount,
+  ItemDiscount: 0,
   ItemTotal: amount,
   SubTotal: amount,
   Total: amount,

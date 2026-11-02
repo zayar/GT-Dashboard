@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Table,
@@ -21,6 +21,7 @@ import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useClinic } from '../contexts/ClinicContext';
 import DirectoryPageHeader from './DirectoryPageHeader';
+import { buildServiceDirectoryQuery } from '../utils/directoryQueries';
 
 interface Service {
   id?: string;
@@ -42,33 +43,16 @@ const ServicesTable: React.FC = () => {
   const rowsPerPage = 10;
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
+  const requestId = useRef(0);
 
   const fetchServices = async () => {
     if (!currentClinic) return;
+    const currentRequestId = ++requestId.current;
 
     setLoading(true);
     setError(null);
     try {
-      // Use SQL query to get services from MainDataView
-      const query = `
-        SELECT
-          ServiceName AS name,
-          ServiceDescription AS description,
-          CAST(ServiceDuration AS STRING) AS duration,
-          CAST(AVG(Price) AS FLOAT64) AS price,
-          COUNT(*) AS count,
-          MAX(ServiceImage) AS image
-        FROM
-          great_time.MainDataView
-        WHERE
-          ServiceName IS NOT NULL
-          AND ClinicCode = '${currentClinic.code}'
-        GROUP BY
-          ServiceName, ServiceDescription, ServiceDuration
-        ORDER BY
-          count DESC
-        LIMIT 100
-      `;
+      const query = buildServiceDirectoryQuery(currentClinic);
 
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/query`,
         { query },
@@ -80,10 +64,15 @@ const ServicesTable: React.FC = () => {
         }
       );
 
+      if (currentRequestId !== requestId.current) return;
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || response.data?.error || 'Failed to fetch services');
+      }
+
       if (response.data && response.data.data && response.data.data.length > 0) {
         // Map API response to Service interface
         const formattedServices = response.data.data.map((service: any, index: number) => ({
-          id: index.toString(),
+          id: service.id || index.toString(),
           name: service.name || 'Unknown Service',
           description: service.description || 'No description available',
           duration: service.duration || 'N/A',
@@ -97,6 +86,7 @@ const ServicesTable: React.FC = () => {
         console.log('No service data returned:', response.data);
       }
     } catch (err: any) {
+      if (currentRequestId !== requestId.current) return;
       console.error('Error fetching services:', err);
       let errorMessage = 'Failed to fetch services. Please try again.';
 
@@ -118,14 +108,17 @@ const ServicesTable: React.FC = () => {
 
       setError(errorMessage);
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestId.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     if (currentClinic) {
+      setPage(1);
+      setServices([]);
       fetchServices();
     }
+    return () => { requestId.current += 1; };
   }, [currentClinic]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {

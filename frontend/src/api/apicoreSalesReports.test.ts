@@ -214,6 +214,55 @@ describe('APICORE sales and payment reports', () => {
     }] as any)[0].PractitionerName).toBe('');
   });
 
+  it('uses recorded line discounts without multiplying by quantity or inferring price changes', () => {
+    const rows = mapSalesDetailRecords([{
+      ...order,
+      order_items: [
+        { ...order.order_items[0], quantity: 3, price: '35000', total: '100000', metadata: '{"discount":"5000"}' },
+        { ...order.order_items[0], original_price: '50000', price: '45000', total: '40000', metadata: null },
+        { ...order.order_items[0], metadata: '{not-json' },
+        { ...order.order_items[0], metadata: '{"discount":-2000}' },
+        { ...order.order_items[0], metadata: '{"discount":"invalid"}' },
+        { ...order.order_items[0], metadata: '{"markup":2000}' },
+        { ...order.order_items[0], metadata: '{"discount":1500.5}' },
+      ],
+    }] as any);
+
+    expect(rows.map(row => row.ItemDiscount)).toEqual([5000, 0, 0, 0, 0, 0, 1500.5]);
+    expect(rows[0].ItemTotal).toBe(100000);
+    expect(rows[0].Discount).toBe(20000);
+    expect(rows[0].InvoiceNetTotal).toBe(200000);
+  });
+
+  it('leaves item discounts blank on extra payment rows and invoices with no items', () => {
+    const rows = mapSalesDetailRecords([{
+      ...order,
+      order_items: [{ ...order.order_items[0], metadata: '{"discount":5000}' }],
+    }, {
+      ...order,
+      order_id: 'TO-002',
+      order_items: [],
+    }] as any);
+
+    expect(rows.map(row => row.ItemDiscount)).toEqual([5000, null, null, null]);
+  });
+
+  it('shows assigned member IDs and leaves missing IDs blank instead of using the internal key', () => {
+    const memberWithoutCodes = {
+      ...order.member,
+      member_id: '  ',
+      clinic_members: [{ ...order.member.clinic_members[0], member_id: null }],
+    };
+    const rows = mapSalesDetailRecords([
+      order,
+      { ...order, member: { ...memberWithoutCodes, member_id: ' GLOBAL-9 ' } },
+      { ...order, member: memberWithoutCodes },
+      { ...order, member: null },
+    ] as any);
+
+    expect(rows.map(row => row.MemberId)).toEqual(['CLINIC-7', 'CLINIC-7', 'GLOBAL-9', 'GLOBAL-9', '', '', '', '']);
+  });
+
   it('does not expose malformed or non-text order notes in Sales Details', () => {
     const malformedMetadataOrder = {
       ...order,

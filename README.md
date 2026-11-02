@@ -191,3 +191,7 @@ The MySQL Connector is integrated into the main application. You can access it f
 - This tool transmits connection credentials in request bodies
 - Use only on secure networks
 - Consider implementing additional authentication for production use
+## BI directory data sources
+
+Customer and service directories include clinic-owned master records even before
+there is treatment activity. See [directory behavior, investigation and validation](docs/bi-member-catalog-directories.md).

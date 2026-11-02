@@ -4,6 +4,7 @@ import {
   ORDER_CANCEL_STATUS,
   type CheckInOutStatusFilter,
 } from '../utils/checkInOutReport';
+import { readOrderItemDiscount } from '../utils/orderItemDiscount';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
 const APICORE_GRAPHQL_URL = (
@@ -652,12 +653,7 @@ function getOrderItemDiscount(
     return null;
   }
 
-  // APICORE stores a real line discount in order-item metadata. Differences
-  // between original_price, sold price, and total can also be manual price
-  // changes, so inferring a discount from those fields creates false values.
-  const discount = parseNumber(parseItemMetadata(item.metadata).discount) ?? 0;
-
-  return discount > 0 ? discount : 0;
+  return readOrderItemDiscount(item.metadata);
 }
 
 function getOrderItemOriginalAmount(item: RawOrderItem | undefined) {

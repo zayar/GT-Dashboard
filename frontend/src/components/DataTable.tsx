@@ -46,6 +46,7 @@ const COLUMN_WIDTHS: { [key: string]: string } = {
   WalletTopUp: '80px',
   ItemQuantity: '50px',
   ItemPrice: '90px',
+  ItemDiscount: '110px',
   ItemTotal: '100px',
   SubTotal: '100px',
   Total: '100px',
