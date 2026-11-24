@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import {
   Paper,
   Typography,
@@ -40,7 +40,9 @@ import {
   filterCheckInOutRecords,
   type CheckInOutRecord,
 } from '../api/apicoreReports';
-import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
+import { branchKey, readBranchRows, type BranchRow } from '../utils/reportBranches';
+import { useReportSection } from '../hooks/useReportSection';
+import { formatCurrencyAmount } from '../utils/currency';
 import {
   CheckInOutDateRange,
   CheckInOutStatusFilter,
@@ -53,13 +55,10 @@ import {
   MYANMAR_TIME_LABEL,
   ORDER_CANCEL_STATUS,
 } from '../utils/checkInOutReport';
-import { getCurrency } from '../utils/currency';
+const EMPTY_RECORDS: BranchRow<CheckInOutRecord>[] = [];
 
 const CheckInCheckOutPage: React.FC = () => {
-  const [records, setRecords] = useState<CheckInOutRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const { currentClinic } = useClinic();
+  const { reportBranches } = useClinic();
   const { getAccessToken } = useAuth();
 
   // Filter states
@@ -71,8 +70,6 @@ const CheckInCheckOutPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const latestRequestIdRef = useRef(0);
   const deferredSearchTerm = useDeferredValue(searchTerm.trim());
 
   const theme = useTheme();
@@ -80,71 +77,17 @@ const CheckInCheckOutPage: React.FC = () => {
 
   const isCustomDateRange = dateRange === 'custom';
 
-  const fetchData = useCallback(async () => {
-    if (!currentClinic) {
-      setError("No clinic selected");
-      return;
-    }
-
-    const requestId = latestRequestIdRef.current + 1;
-    latestRequestIdRef.current = requestId;
-    const isLatestRequest = () => latestRequestIdRef.current === requestId;
-
-    setLoading(true);
-    setError(null);
-
-    const dateBounds = getCheckInOutDateRangeBounds({
-      dateRange,
-      reportDate: endDate,
-      customStartDate,
-      customEndDate,
-    });
-
-    if (!dateBounds) {
-      setError(isCustomDateRange ? "Invalid custom date range selected." : "Invalid date range selected.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
-
-      const nextRecords = await fetchCheckInOutRecords({
-        clinicId: currentClinic.id,
-        startDate: dateBounds.startDate,
-        endDate: dateBounds.endDate,
-        accessToken,
-      });
-
-      if (!isLatestRequest()) {
-        return;
-      }
-
-      setRecords(nextRecords);
-      setLastUpdated(new Date());
-    } catch (err: unknown) {
-      if (!isLatestRequest()) {
-        return;
-      }
-
-      console.error('Fetch error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch check-in/out records');
-      setRecords([]);
-    } finally {
-      if (isLatestRequest()) {
-        setLoading(false);
-      }
-    }
-  }, [currentClinic, customEndDate, customStartDate, dateRange, endDate, getAccessToken, isCustomDateRange]);
-
-  useEffect(() => {
-    if (currentClinic) {
-      fetchData();
-    }
-  }, [fetchData, currentClinic]); // Added currentClinic to dependencies
+  const load = useCallback(async (signal: AbortSignal) => {
+    const bounds = getCheckInOutDateRangeBounds({ dateRange, reportDate: endDate, customStartDate, customEndDate });
+    if (!bounds) throw new Error('Select a valid date range.');
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
+    const rows = await readBranchRows(reportBranches, signal, (clinic, requestSignal) =>
+      fetchCheckInOutRecords({ clinicId: clinic.id, ...bounds, accessToken, signal: requestSignal }));
+    return rows.sort((a, b) => (b.CheckInTime ?? '').localeCompare(a.CheckInTime ?? ''));
+  }, [reportBranches, customEndDate, customStartDate, dateRange, endDate, getAccessToken]);
+  const { data, loading, error, updatedAt: lastUpdated, retry: fetchData } = useReportSection(reportBranches.length ? load : null, 0, null);
+  const records = data ?? EMPTY_RECORDS;
 
   // Memoized filtered records based on search term
   const filteredRecords = useMemo(() => {
@@ -177,7 +120,7 @@ const CheckInCheckOutPage: React.FC = () => {
     const displayedOrderIds = new Set<string>();
 
     return filteredRecords.map(record => {
-      const orderId = record.OrderId?.trim();
+      const orderId = record.OrderId && branchKey(record.BranchId, record.OrderId.trim());
       const shouldShowDiscount = !orderId || !displayedOrderIds.has(orderId);
 
       if (orderId && shouldShowDiscount) {
@@ -195,7 +138,7 @@ const CheckInCheckOutPage: React.FC = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [dateRange, endDate, customStartDate, customEndDate, statusFilter, deferredSearchTerm, rowsPerPage]);
+  }, [reportBranches, dateRange, endDate, customStartDate, customEndDate, statusFilter, deferredSearchTerm, rowsPerPage]);
 
   const lastPage = Math.max(0, Math.ceil(recordsForDisplay.length / rowsPerPage) - 1);
   const effectivePage = Math.min(page, lastPage);
@@ -210,7 +153,7 @@ const CheckInCheckOutPage: React.FC = () => {
     const sellerAssignedOrderIds = new Set<string>();
 
     filteredRecords.forEach((record, index) => {
-      const orderKey = record.OrderId?.trim() || `record-${index}`;
+      const orderKey = branchKey(record.BranchId, record.OrderId?.trim() || `record-${index}`);
       orderIds.add(orderKey);
       if (record.PaymentStatus?.toUpperCase() === 'PAID') paidOrderIds.add(orderKey);
       if (record.SellerName?.trim()) sellerAssignedOrderIds.add(orderKey);
@@ -222,12 +165,6 @@ const CheckInCheckOutPage: React.FC = () => {
       sellerAssignedOrders: sellerAssignedOrderIds.size
     };
   }, [filteredRecords]);
-
-  // Function to format currency
-  const formatCurrency = (amount: number | null) => {
-    if (amount === null || isNaN(amount)) return formatCurrencyUtil(0, currentClinic);
-    return formatCurrencyUtil(amount, currentClinic);
-  };
 
   const formatCSVAmount = (amount: number | null) => {
     if (amount === null || amount === undefined) return '';
@@ -244,24 +181,17 @@ const CheckInCheckOutPage: React.FC = () => {
     amount ? formatCSVAmount(amount) : ''
   );
 
-  const formatServiceAmount = (amount: number | null) => (
-    amount ? formatCurrency(amount) : '-'
-  );
-
-  const formatPhoneNumber = useCallback(
-    (phoneNumber: string | null | undefined) => (
-      formatCheckInOutPhoneNumber(phoneNumber, getCurrency(currentClinic))
-    ),
-    [currentClinic]
+  const formatServiceAmount = (amount: number | null, currency: string) => (
+    amount ? formatCurrencyAmount(amount, currency) : '-'
   );
 
   // Function to handle CSV export
   const handleExportCSV = () => {
     if (!recordsForDisplay.length) return;
 
-    const headers = ['Order ID', 'Check-In Time (Myanmar Time)', 'Check-Out Time (Myanmar Time)', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Original Amount', 'Item Discount', 'Selling Amount', 'Order Discount', 'Total Amount', 'Note'];
+    const headers = ['Order ID', 'Branch', 'Currency', 'Check-In Time (Myanmar Time)', 'Check-Out Time (Myanmar Time)', 'Service', 'Therapist', 'Helper', 'Customer', 'Seller Name', 'Phone', 'Payment Method', 'Status', 'Original Amount', 'Item Discount', 'Selling Amount', 'Order Discount', 'Total Amount', 'Note'];
     const rows = recordsForDisplay.map(record => [
-      record.OrderId ?? '-',
+      record.OrderId ?? '-', record.Branch, record.Currency,
       formatGraphqlDateTimeInMyanmar(record.CheckInTime),
       formatGraphqlDateTimeInMyanmar(record.CheckOutTime),
       record.Servicename ?? '-',
@@ -269,7 +199,7 @@ const CheckInCheckOutPage: React.FC = () => {
       record.HelperName ?? '-',
       record.CustomerName ?? '-',
       record.SellerName ?? '-',
-      formatPhoneNumberForSpreadsheet(formatPhoneNumber(record.CustomerPhoneNumber)),
+      formatPhoneNumberForSpreadsheet(formatCheckInOutPhoneNumber(record.CustomerPhoneNumber, record.Currency)),
       record.PaymentMethod ?? '-',
       record.PaymentStatus ?? '-',
       formatCSVServiceAmount(record.OriginalAmount),
@@ -467,6 +397,7 @@ const CheckInCheckOutPage: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ position: 'sticky', left: 0, zIndex: 4, minWidth: 100, borderRight: `1px solid ${theme.palette.divider}` }}>Order ID</TableCell>
+                <TableCell>Branch</TableCell>
                 <TableCell>Check-In Time (MMT)</TableCell>
                 <TableCell>Check-Out Time (MMT)</TableCell>
                 <TableCell>Service</TableCell>
@@ -488,13 +419,13 @@ const CheckInCheckOutPage: React.FC = () => {
             <TableBody>
               {loading && records.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={17} align="center">
+                  <TableCell colSpan={18} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>Loading records…</Typography>
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={17} align="center">
+                  <TableCell colSpan={18} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>
                       {error ? 'Check-in/out data is unavailable.' : 'No records match the current filters.'}
                     </Typography>
@@ -503,7 +434,7 @@ const CheckInCheckOutPage: React.FC = () => {
               ) : (
                 paginatedRecords.map((record, index) => (
                   <TableRow
-                    key={`${record.id}-${index}`}
+                    key={`${record.BranchId}-${record.id}-${index}`}
                     hover
                     sx={{
                       '&:last-child td, &:last-child th': { borderBottom: 0 },
@@ -513,6 +444,7 @@ const CheckInCheckOutPage: React.FC = () => {
                     <TableCell sx={{ position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper', borderRight: `1px solid ${theme.palette.divider}`, fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {record.OrderId ?? '-'}
                     </TableCell>
+                    <TableCell>{record.Branch}</TableCell>
                     <TableCell>{formatGraphqlDateTimeInMyanmar(record.CheckInTime)}</TableCell>
                     <TableCell>{formatGraphqlDateTimeInMyanmar(record.CheckOutTime)}</TableCell>
                     <TableCell>{record.Servicename}</TableCell>
@@ -539,7 +471,7 @@ const CheckInCheckOutPage: React.FC = () => {
                           variant="body2"
                           sx={{ color: 'inherit', textDecoration: 'none', whiteSpace: 'nowrap', '&:hover': { color: 'primary.main', textDecoration: 'underline' } }}
                         >
-                          {formatPhoneNumber(record.CustomerPhoneNumber)}
+                          {formatCheckInOutPhoneNumber(record.CustomerPhoneNumber, record.Currency)}
                         </Typography>
                       ) : '-'}
                     </TableCell>
@@ -553,19 +485,19 @@ const CheckInCheckOutPage: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
-                      {formatServiceAmount(record.OriginalAmount)}
+                      {formatServiceAmount(record.OriginalAmount, record.Currency)}
                     </TableCell>
                     <TableCell align="right">
-                      {record.ItemDiscount ? formatCurrency(record.ItemDiscount) : ''}
+                      {record.ItemDiscount ? formatCurrencyAmount(record.ItemDiscount, record.Currency) : ''}
                     </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
-                      {formatServiceAmount(record.Total)}
+                      {formatServiceAmount(record.Total, record.Currency)}
                     </TableCell>
                     <TableCell align="right">
-                      {record.DisplayOrderDiscount === null ? '' : formatCurrency(record.DisplayOrderDiscount)}
+                      {record.DisplayOrderDiscount === null ? '' : formatCurrencyAmount(record.DisplayOrderDiscount, record.Currency)}
                     </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
-                      {record.DisplayActualInvoice === null ? '' : formatCurrency(record.DisplayActualInvoice)}
+                      {record.DisplayActualInvoice === null ? '' : formatCurrencyAmount(record.DisplayActualInvoice, record.Currency)}
                     </TableCell>
                     <TableCell sx={{ minWidth: 180 }}>{record.Note ?? ''}</TableCell>
                   </TableRow>

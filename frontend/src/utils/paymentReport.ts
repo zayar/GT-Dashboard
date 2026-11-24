@@ -1,3 +1,5 @@
+import { groupByBranch, type ReportBranch } from './reportBranches';
+
 export interface PaymentReportRecord {
   PaymentMethod: string;
   PaymentAmount: number | string | null;
@@ -55,3 +57,10 @@ export const filterPaymentsByMethod = <T extends PaymentReportRecord>(
   const normalizedSelections = new Set(selectedMethods.map(normalizePaymentMethod));
   return records.filter(record => normalizedSelections.has(normalizePaymentMethod(record.PaymentMethod)));
 };
+
+export function summarizeBranchPayments(records: (PaymentReportRecord & ReportBranch)[]) {
+  return groupByBranch(records).flatMap(group => {
+    const { BranchId, Branch, Currency } = group[0];
+    return summarizePaymentMethods(group).map(method => ({ ...method, BranchId, Branch, Currency }));
+  });
+}

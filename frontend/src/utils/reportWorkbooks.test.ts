@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
 import type { AppointmentRecord } from '../api/apicoreReports';
 import { mapPaymentReportRecords } from '../api/apicoreSalesReports';
+import { labelBranchRows } from './reportBranches';
 import { filterPaymentsByMethod } from './paymentReport';
 import { buildAppointmentWorkbook, buildPaymentWorkbook } from './reportWorkbooks';
 
@@ -9,6 +10,7 @@ function reopen(book: XLSX.WorkBook) {
   return XLSX.read(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true });
 }
 
+const branch = { id: 'a', code: 'A', name: 'Branch A', active: 1, logo: '' };
 const appointment: AppointmentRecord = {
   bookingid: 'internal-booking-key', ClinicCode: 'A', ClinicID: 'clinic-a', ClinicName: 'A',
   FromTime: '2026-11-05T07:00:00Z', ToTime: '2026-11-05T08:00:00Z', ServiceName: 'Facial',
@@ -51,7 +53,7 @@ describe('Excel report downloads', () => {
     const rows = mapPaymentReportRecords([order], new Date(2026, 10, 5), new Date(2026, 10, 5, 23, 59, 59));
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ CustomerPhoneNumber: '+959123', MemberId: '', ProductName: 'Aloe Vera Cream, Archived, serum' });
-    const book = reopen(buildPaymentWorkbook(filterPaymentsByMethod(rows, ['CASH']), 'MMK'));
+    const book = reopen(buildPaymentWorkbook(labelBranchRows(branch, filterPaymentsByMethod(rows, ['CASH'])), 'MMK'));
     expect(book.SheetNames).toEqual(['Payment Summary', 'Detailed Transactions']);
     const [detail] = XLSX.utils.sheet_to_json<Record<string, unknown>>(book.Sheets['Detailed Transactions'], { defval: '' });
     expect(detail).toMatchObject({
@@ -61,10 +63,11 @@ describe('Excel report downloads', () => {
     });
     expect(JSON.stringify(detail)).not.toMatch(/Â·|internal-member-key/);
     expect(XLSX.utils.sheet_to_json(book.Sheets['Payment Summary'], { header: 1 })).toEqual([
-      ['Payment Method', 'Transaction Count', 'Total Amount (MMK)'], ['CASH', 1, 75.5], ['Grand Total', 1, 75.5],
+      ['Payment Method', 'Transaction Count', 'Total Amount (MMK)', 'Branch', 'Currency'],
+      ['CASH', 1, 75.5, 'Branch A', 'MMK'], ['Grand Total', 1, 75.5, '', 'MMK'],
     ]);
     const assigned = mapPaymentReportRecords([{ ...order, member: { ...order.member, clinic_members: [{ member_id: '၀၀၂' }] } }],
       new Date(2026, 10, 5), new Date(2026, 10, 5, 23, 59, 59));
-    expect(reopen(buildPaymentWorkbook(assigned, 'MMK')).Sheets['Detailed Transactions'].D2).toMatchObject({ t: 's', v: '၀၀၂' });
+    expect(reopen(buildPaymentWorkbook(labelBranchRows(branch, assigned), 'MMK')).Sheets['Detailed Transactions'].D2).toMatchObject({ t: 's', v: '၀၀၂' });
   });
 });

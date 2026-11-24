@@ -431,6 +431,7 @@ async function fetchAllCheckIns(input: {
   startDate: Date;
   endDate: Date;
   accessToken: string;
+  signal?: AbortSignal;
 }) {
   const records: RawCheckInRow[] = [];
   let skip = 0;
@@ -439,6 +440,7 @@ async function fetchAllCheckIns(input: {
   while (skip < totalCount && records.length < MAX_REPORT_ROWS) {
     const data = await postApicoreGraphql<CheckInsResponse>({
       query: GET_CHECKIN_OUT_DATA,
+      signal: input.signal,
       accessToken: input.accessToken,
       variables: buildCheckInOutVariables({
         clinicId: input.clinicId,
@@ -469,6 +471,7 @@ async function fetchAllCheckIns(input: {
 async function fetchOrderItems(input: {
   orderIds: string[];
   accessToken: string;
+  signal?: AbortSignal;
 }) {
   const items: RawOrderItem[] = [];
 
@@ -476,6 +479,7 @@ async function fetchOrderItems(input: {
     const orderIds = input.orderIds.slice(index, index + ORDER_ITEM_BATCH_SIZE);
     const data = await postApicoreGraphql<OrderItemsResponse>({
       query: GET_CHECKIN_ORDER_ITEMS,
+      signal: input.signal,
       accessToken: input.accessToken,
       variables: buildCheckInOrderItemVariables(orderIds),
     });
@@ -734,8 +738,8 @@ export function mapCheckInOutRecords(
   });
 }
 
-export function filterCheckInOutRecords(
-  records: CheckInOutRecord[],
+export function filterCheckInOutRecords<T extends CheckInOutRecord>(
+  records: T[],
   statusFilter: CheckInOutStatusFilter,
 ) {
   if (statusFilter === 'all') {
@@ -773,6 +777,7 @@ export async function fetchCheckInOutRecords(input: {
   startDate: Date;
   endDate: Date;
   accessToken: string;
+  signal?: AbortSignal;
 }): Promise<CheckInOutRecord[]> {
   const checkIns = await fetchAllCheckIns(input);
   const orderIds = Array.from(new Set(
@@ -784,6 +789,7 @@ export async function fetchCheckInOutRecords(input: {
   const orderItems = orderIds.length
     ? await fetchOrderItems({
         orderIds,
+        signal: input.signal,
         accessToken: input.accessToken,
       })
     : [];

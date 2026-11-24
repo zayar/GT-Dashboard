@@ -17,6 +17,16 @@ const sales = mapSalesDetailRecords(orders);
 const payments = mapPaymentReportRecords(orders, new Date(2026, 10, 5), new Date(2026, 10, 5, 23, 59, 59));
 
 describe('customer links in BI reports', () => {
+  it('opens the originating branch when two customers share a phone and invoice number', () => {
+    const payment = payments.find(row => row.CustomerPhoneNumber === '+9591234')!;
+    const records = ['north', 'south'].map(id => ({ ...payment, BranchId: id, Branch: id }));
+    const html = renderToStaticMarkup(<StaticRouter location="/banking-details">
+      <DataTable data={records} customerReturnLabel="Payment Report" columnAliases={{ CustomerName: 'Customer Name', Branch: 'Branch' }} />
+    </StaticRouter>);
+    expect(html).toContain('href="/customers/%2B9591234?branch=north"');
+    expect(html).toContain('href="/customers/%2B9591234?branch=south"');
+  });
+
   it.each([
     ['Sales Details', buildSalesDetailDisplayRows(sales, 'detailed')],
     ['Sales Details', buildSalesDetailDisplayRows(sales, 'summary')],

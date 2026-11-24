@@ -4,10 +4,10 @@ import Dashboard from './Dashboard';
 import DailyReport from './DailyReport';
 
 const sources = vi.hoisted(() => ({ accounting: vi.fn(), warehouse: vi.fn() }));
-vi.mock('../hooks/useBiAccounting', () => ({ useBiActivity: sources.accounting }));
+vi.mock('../hooks/useBiAccounting', () => ({ useBiActivity: sources.accounting, useBranchActivity: sources.accounting }));
 vi.mock('../hooks/useReportSection', () => ({ useReportSection: sources.warehouse }));
 vi.mock('../contexts/ClinicContext', () => ({
-  useClinic: () => ({ currentClinic: { id: 'a', code: 'A', name: 'Clinic A' }, loadingClinics: false }),
+  useClinic: () => ({ currentClinic: { id: 'a', code: 'A', name: 'Clinic A' }, reportBranches: [{ id: 'a', code: 'A', name: 'Clinic A' }], loadingClinics: false }),
 }));
 vi.mock('react-apexcharts', () => ({ default: () => null }));
 vi.mock('react-chartjs-2', () => ({ Line: () => null }));
@@ -17,7 +17,7 @@ const pending = { loading: true, data: null, error: null };
 const ready = (data: unknown) => ({ loading: false, data, error: null });
 const accounting = { grossSales: 36500, invoiceCount: 2, paymentsReceived: 22000, paymentCount: 3 };
 const activity = { customers: 27, services: 8, appointmentsPerCustomer: 1.25 };
-const visit = { CustomerName: 'Fixture visitor', CustomerPhoneNumber: '123', CustomerId: 'm1',
+const visit = { BranchId: 'a', Branch: 'Clinic A', Currency: 'MMK', CustomerName: 'Fixture visitor', CustomerPhoneNumber: '123', CustomerId: 'm1',
   ServiceName: 'Fixture service', PractitionerName: 'Practitioner', IsNewCustomer: 'Yes' };
 
 describe('BI overview sections', () => {
@@ -55,8 +55,23 @@ describe('BI overview sections', () => {
     expect(html).not.toContain('0 invoices');
   });
 
+  it('keeps customers with the same phone in different branch rows in both activity reports', () => {
+    sources.warehouse.mockReturnValue(ready([
+      { ...visit, BranchId: 'a', Branch: 'North', TotalPaymentAmount: 6000, Currency: 'MMK' },
+      { ...visit, BranchId: 'b', Branch: 'South', TotalPaymentAmount: 12.5, Currency: 'USD' },
+    ]));
+    for (const rangeEnabled of [false, true]) {
+      const html = render(<DailyReport rangeEnabled={rangeEnabled} />);
+      expect(html.match(/Fixture visitor/g)).toHaveLength(2);
+      expect(html).toContain('North');
+      expect(html).toContain('South');
+      expect(html).toContain('6,000.00 MMK');
+      expect(html).toContain('12.50 USD');
+    }
+  });
+
   it('keeps daily sales visible while visits are loading or unavailable', () => {
-    sources.accounting.mockReturnValue(ready(accounting));
+    sources.accounting.mockReturnValue(ready([{ ...accounting, Currency: 'MMK' }]));
     expect(render(<DailyReport />)).toContain('22,000');
     sources.warehouse.mockReturnValue({ loading: false, data: null, error: 'Warehouse offline' });
     const html = render(<DailyReport />);

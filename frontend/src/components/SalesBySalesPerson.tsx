@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -27,11 +27,12 @@ import { useClinic } from '../contexts/ClinicContext';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
-import { formatCurrency } from '../utils/currency';
+import { useReportSection } from '../hooks/useReportSection';
+import { branchDetailPath, branchKey, formatReportTotal, labelBranchRows, readBranchReports } from '../utils/reportBranches';
+import { formatCurrencyAmount, getCurrency } from '../utils/currency';
 import {
   buildSalesBySalesPersonTransactions,
   filterReportableSalesTransactions,
-  SalesBySalesPersonTransaction,
   SalesPersonSummary,
   summarizeSalesBySalesPerson,
 } from '../utils/salesBySalesPerson';
@@ -40,19 +41,13 @@ import {
   fetchSalesDetailRecords,
 } from '../api/apicoreSalesReports';
 
-type SalesPersonData = SalesPersonSummary;
-type Transaction = SalesBySalesPersonTransaction;
 
 const SalesBySalesPerson: React.FC = () => {
   const navigate = useNavigate();
-  const { currentClinic } = useClinic();
+  const { currentClinic, reportBranches } = useClinic();
   const { getAccessToken } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [timePeriod, setTimePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('weekly');
-  const [salesBySalesPerson, setSalesBySalesPerson] = useState<SalesPersonData[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
+  const [selectedSeller, setSelectedSeller] = useState('');
   const [transactionsPage, setTransactionsPage] = useState(0);
   const [transactionsRowsPerPage, setTransactionsRowsPerPage] = useState(10);
   const [startDate, setStartDate] = useState<Date | null>(
@@ -60,82 +55,58 @@ const SalesBySalesPerson: React.FC = () => {
   );
   const [endDate, setEndDate] = useState<Date | null>(new Date());
 
-  // Function to fetch sales data
-  const fetchSalesData = useCallback(async () => {
-    if (!currentClinic) {
-      setError('Please select a clinic first.');
-      setLoading(false);
-      return;
+  const load = useCallback(async (signal: AbortSignal) => {
+    // Create date ranges based on selected time period
+    let queryStartDate = new Date();
+    let queryEndDate = new Date();
+
+    switch (timePeriod) {
+      case 'daily':
+        // Today
+        queryStartDate.setHours(0, 0, 0, 0);
+        break;
+      case 'weekly':
+        // Last 7 days
+        queryStartDate.setDate(queryStartDate.getDate() - 7);
+        break;
+      case 'monthly':
+        // Last 30 days
+        queryStartDate.setDate(queryStartDate.getDate() - 30);
+        break;
+      case 'custom':
+        // Use custom date range
+        if (startDate && endDate) {
+          queryStartDate = new Date(startDate);
+          queryEndDate = new Date(endDate);
+          queryEndDate.setHours(23, 59, 59, 999); // End of the day
+        }
+        break;
     }
-    try {
-      setLoading(true);
-      setError('');
 
-      // Create date ranges based on selected time period
-      let queryStartDate = new Date();
-      let queryEndDate = new Date();
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      throw new Error('Your session has expired. Please sign in again.');
+    }
 
-      switch (timePeriod) {
-        case 'daily':
-          // Today
-          queryStartDate.setHours(0, 0, 0, 0);
-          break;
-        case 'weekly':
-          // Last 7 days
-          queryStartDate.setDate(queryStartDate.getDate() - 7);
-          break;
-        case 'monthly':
-          // Last 30 days
-          queryStartDate.setDate(queryStartDate.getDate() - 30);
-          break;
-        case 'custom':
-          // Use custom date range
-          if (startDate && endDate) {
-            queryStartDate = new Date(startDate);
-            queryEndDate = new Date(endDate);
-            queryEndDate.setHours(23, 59, 59, 999); // End of the day
-          }
-          break;
-      }
-
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
-
-      const [salesData, outstandingData] = await Promise.all([
-        fetchSalesDetailRecords({
-          clinicId: currentClinic.id,
-          filterType: 'day',
-          startDate: queryStartDate,
-          endDate: queryEndDate,
-          selectedDate: null,
-          accessToken,
-        }),
-        fetchOutstandingReportRecords({
-          clinicId: currentClinic.id,
-          asOfDate: queryEndDate,
-          accessToken,
-        }),
+    return readBranchReports(reportBranches, signal, async (clinic, requestSignal) => {
+      const [sales, outstanding] = await Promise.all([
+        fetchSalesDetailRecords({ clinicId: clinic.id, filterType: 'day', startDate: queryStartDate,
+          endDate: queryEndDate, selectedDate: null, accessToken, signal: requestSignal }),
+        fetchOutstandingReportRecords({ clinicId: clinic.id, asOfDate: queryEndDate, accessToken, signal: requestSignal }),
       ]);
+      const invoices = filterReportableSalesTransactions(buildSalesBySalesPersonTransactions(sales, outstanding));
+      return { invoices: labelBranchRows(clinic, invoices), sellers: labelBranchRows(clinic, summarizeSalesBySalesPerson(invoices)) };
+    });
+  }, [timePeriod, startDate, endDate, reportBranches, getAccessToken]);
 
-      const filteredSalesData = filterReportableSalesTransactions(
-        buildSalesBySalesPersonTransactions(salesData, outstandingData)
-      );
-
-      setTransactions(filteredSalesData);
-      setFilteredTransactions(filteredSalesData);
-
-      // Process data for sales by sales person summary
-      setSalesBySalesPerson(summarizeSalesBySalesPerson(filteredSalesData));
-
-      setLoading(false);
-    } catch (error: any) {
-      console.error('Error fetching sales data:', error);
-      setError(`Failed to load sales data: ${error.message || 'Unknown error'}`);
-      setLoading(false);
-    }
-  }, [timePeriod, startDate, endDate, currentClinic, getAccessToken]);
+  const { data, loading, error, retry: fetchSalesData } = useReportSection(reportBranches.length ? load : null, 0, null);
+  const transactions = useMemo(() => (data ?? []).flatMap(branch => branch.invoices)
+    .sort((a, b) => b.Date.localeCompare(a.Date)), [data]);
+  const salesBySalesPerson = useMemo(() => (data ?? []).flatMap(branch => branch.sellers), [data]);
+  const filteredTransactions = useMemo(() => selectedSeller
+    ? transactions.filter(row => branchKey(row.BranchId, row.SellerName || 'Unknown') === selectedSeller)
+    : transactions, [selectedSeller, transactions]);
+  useEffect(() => { setSelectedSeller(''); setTransactionsPage(0); }, [load]);
 
   // Handle time period change
   const handleTimePeriodChange = (event: SelectChangeEvent<'daily' | 'weekly' | 'monthly' | 'custom'>) => {
@@ -143,20 +114,9 @@ const SalesBySalesPerson: React.FC = () => {
     setTransactionsPage(0); // Reset page on filter change
   };
 
-  // Initial data fetch
-  useEffect(() => {
-    if (currentClinic) {
-    fetchSalesData();
-    }
-  }, [fetchSalesData, currentClinic]);
-
-  // Calculate totals
-  const totalTransactions = salesBySalesPerson.reduce((sum, person) => sum + person.transactionCount, 0);
-  const totalAmount = salesBySalesPerson.reduce((sum, person) => sum + person.totalAmount, 0);
-  const totalPaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.paidSales, 0);
-  const totalPartialPaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.partialPaidSales, 0);
-  const totalPartialOutstandingSales = salesBySalesPerson.reduce((sum, person) => sum + person.partialOutstandingSales, 0);
-  const totalUnpaidSales = salesBySalesPerson.reduce((sum, person) => sum + person.unpaidSales, 0);
+  const totalTransactions = transactions.length;
+  const total = (field: Exclude<keyof SalesPersonSummary, 'salesPerson'>) =>
+    formatReportTotal(salesBySalesPerson, row => row[field], getCurrency(currentClinic));
 
   // Function to export Sales Summary to Excel
   const exportSalesToExcel = () => {
@@ -168,22 +128,24 @@ const SalesBySalesPerson: React.FC = () => {
     const rows = [
       ...salesBySalesPerson.map(person => ({
         'Sales Person': person.salesPerson,
+        Branch: person.Branch, Currency: person.Currency,
         'Invoice Count': person.transactionCount,
-        'Paid Sales': formatCurrency(person.paidSales, currentClinic),
-        'Partial Collected': formatCurrency(person.partialPaidSales, currentClinic),
-        'Partial Outstanding': formatCurrency(person.partialOutstandingSales, currentClinic),
-        'Unpaid Sales': formatCurrency(person.unpaidSales, currentClinic),
-        'Gross Sales': formatCurrency(person.totalAmount, currentClinic)
+        'Paid Sales': person.paidSales,
+        'Partial Collected': person.partialPaidSales,
+        'Partial Outstanding': person.partialOutstandingSales,
+        'Unpaid Sales': person.unpaidSales,
+        'Gross Sales': person.totalAmount
       })),
-      {
-        'Sales Person': 'Total',
-        'Invoice Count': totalTransactions,
-        'Paid Sales': formatCurrency(totalPaidSales, currentClinic),
-        'Partial Collected': formatCurrency(totalPartialPaidSales, currentClinic),
-        'Partial Outstanding': formatCurrency(totalPartialOutstandingSales, currentClinic),
-        'Unpaid Sales': formatCurrency(totalUnpaidSales, currentClinic),
-        'Gross Sales': formatCurrency(totalAmount, currentClinic)
-      }
+      ...Array.from(new Set(salesBySalesPerson.map(person => person.Currency))).map(currency => {
+        const sellers = salesBySalesPerson.filter(person => person.Currency === currency);
+        const sum = (field: Exclude<keyof SalesPersonSummary, 'salesPerson'>) =>
+          sellers.reduce((value, person) => value + person[field], 0);
+        return {
+          'Sales Person': 'Total', Branch: '', Currency: currency, 'Invoice Count': sum('transactionCount'),
+          'Paid Sales': sum('paidSales'), 'Partial Collected': sum('partialPaidSales'),
+          'Partial Outstanding': sum('partialOutstandingSales'), 'Unpaid Sales': sum('unpaidSales'), 'Gross Sales': sum('totalAmount'),
+        };
+      }),
     ];
 
     // Create worksheet from data
@@ -192,6 +154,8 @@ const SalesBySalesPerson: React.FC = () => {
     // Set column widths
     const colWidths = [
       { wch: 25 }, // Sales Person
+      { wch: 25 }, // Branch
+      { wch: 12 }, // Currency
       { wch: 15 }, // Invoice Count
       { wch: 20 }, // Paid Sales
       { wch: 20 }, // Partial Collected
@@ -222,15 +186,16 @@ const SalesBySalesPerson: React.FC = () => {
     const rows = filteredTransactions.map(transaction => ({
       'Date': transaction.Date,
       'Sales Person': transaction.SellerName || '-',
+      Branch: transaction.Branch, Currency: transaction.Currency,
       'Invoice': transaction.InvoiceNumber,
       'Customer Name': transaction.CustomerName,
       'Service': transaction.ServiceName,
       'Package': transaction.ServicePackageName || '-',
       'Payment Method': transaction.PaymentMethod,
       'Status': transaction.PaymentStatus,
-      'Gross Sale': formatCurrency(Number(transaction.SalesAmount), currentClinic),
-      'Cash Received': formatCurrency(Number(transaction.AmountPaid), currentClinic),
-      'Outstanding': formatCurrency(Number(transaction.OutstandingAmount), currentClinic)
+      'Gross Sale': Number(transaction.SalesAmount),
+      'Cash Received': Number(transaction.AmountPaid),
+      'Outstanding': Number(transaction.OutstandingAmount)
     }));
 
     // Create worksheet from data
@@ -240,6 +205,8 @@ const SalesBySalesPerson: React.FC = () => {
     const colWidths = [
       { wch: 12 }, // Date
       { wch: 20 }, // Sales Person
+      { wch: 25 }, // Branch
+      { wch: 12 }, // Currency
       { wch: 15 }, // Invoice
       { wch: 25 }, // Customer Name
       { wch: 25 }, // Service
@@ -414,7 +381,7 @@ const SalesBySalesPerson: React.FC = () => {
 
           <Box>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline' }}>
-              Gross Sales: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{formatCurrency(totalAmount, currentClinic)}</span>
+              Gross Sales: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{total('totalAmount')}</span>
             </Typography>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', display: 'inline', ml: 3 }}>
               Invoices: <span style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalTransactions}</span>
@@ -475,6 +442,7 @@ const SalesBySalesPerson: React.FC = () => {
                       fontWeight: 600,
                       borderBottom: '1px solid var(--border)'
                     }}>Sales Person</TableCell>
+                    <TableCell>Branch</TableCell>
                     <TableCell sx={{
                       bgcolor: 'var(--surface)',
                       color: 'var(--text-secondary)',
@@ -514,8 +482,8 @@ const SalesBySalesPerson: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {salesBySalesPerson.map((salesPerson, index) => (
-                    <TableRow key={index} sx={{
+                  {salesBySalesPerson.map(salesPerson => (
+                    <TableRow key={branchKey(salesPerson.BranchId, salesPerson.salesPerson)} sx={{
                       '&:hover': {
                         bgcolor: 'var(--surface-secondary)',
                       },
@@ -526,33 +494,30 @@ const SalesBySalesPerson: React.FC = () => {
                       borderBottom: '1px solid var(--border)',
                       cursor: 'pointer'
                     }} onClick={() => {
-                      // Filter transactions to just this sales person
-                      const filtered = transactions.filter(t =>
-                        (t.SellerName || 'Unknown') === salesPerson.salesPerson
-                      );
-                      setFilteredTransactions(filtered);
+                      setSelectedSeller(branchKey(salesPerson.BranchId, salesPerson.salesPerson));
                       setTransactionsPage(0);
                     }}>
                       <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                         {salesPerson.salesPerson}
                       </TableCell>
+                      <TableCell>{salesPerson.Branch}</TableCell>
                       <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="center">
                         {salesPerson.transactionCount}
                       </TableCell>
                       <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                        {formatCurrency(salesPerson.paidSales, currentClinic)}
+                        {formatCurrencyAmount(salesPerson.paidSales, salesPerson.Currency)}
                       </TableCell>
                       <TableCell sx={{ color: 'var(--warning)', borderBottom: '1px solid var(--border)' }} align="right">
-                        {formatCurrency(salesPerson.partialPaidSales, currentClinic)}
+                        {formatCurrencyAmount(salesPerson.partialPaidSales, salesPerson.Currency)}
                       </TableCell>
                       <TableCell sx={{ color: 'var(--warning)', borderBottom: '1px solid var(--border)' }} align="right">
-                        {formatCurrency(salesPerson.partialOutstandingSales, currentClinic)}
+                        {formatCurrencyAmount(salesPerson.partialOutstandingSales, salesPerson.Currency)}
                       </TableCell>
                       <TableCell sx={{ color: 'var(--error)', borderBottom: '1px solid var(--border)' }} align="right">
-                        {formatCurrency(salesPerson.unpaidSales, currentClinic)}
+                        {formatCurrencyAmount(salesPerson.unpaidSales, salesPerson.Currency)}
                       </TableCell>
                       <TableCell sx={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', fontWeight: 600 }} align="right">
-                        {formatCurrency(salesPerson.totalAmount, currentClinic)}
+                        {formatCurrencyAmount(salesPerson.totalAmount, salesPerson.Currency)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -561,23 +526,24 @@ const SalesBySalesPerson: React.FC = () => {
                     <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }}>
                       Total
                     </TableCell>
+                    <TableCell />
                     <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="center">
                       {totalTransactions}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
-                      {formatCurrency(totalPaidSales, currentClinic)}
+                      {total('paidSales')}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--warning)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
-                      {formatCurrency(totalPartialPaidSales, currentClinic)}
+                      {total('partialPaidSales')}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--warning)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
-                      {formatCurrency(totalPartialOutstandingSales, currentClinic)}
+                      {total('partialOutstandingSales')}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--error)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
-                      {formatCurrency(totalUnpaidSales, currentClinic)}
+                      {total('unpaidSales')}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 'bold', borderBottom: '1px solid var(--border)' }} align="right">
-                      {formatCurrency(totalAmount, currentClinic)}
+                      {total('totalAmount')}
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -594,7 +560,7 @@ const SalesBySalesPerson: React.FC = () => {
                 <button
                   className="text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded"
                   onClick={() => {
-                    setFilteredTransactions(transactions);
+                    setSelectedSeller('');
                     setTransactionsPage(0);
                   }}
                 >
@@ -650,6 +616,7 @@ const SalesBySalesPerson: React.FC = () => {
                         fontWeight: 600,
                         borderBottom: '1px solid var(--border)'
                       }}>Sales Person</TableCell>
+                    <TableCell>Branch</TableCell>
                       <TableCell sx={{
                         bgcolor: 'var(--surface)',
                         color: 'var(--text-secondary)',
@@ -713,7 +680,7 @@ const SalesBySalesPerson: React.FC = () => {
                         transactionsPage * transactionsRowsPerPage + transactionsRowsPerPage
                       )
                       .map((transaction, index) => (
-                        <TableRow key={`${transaction.InvoiceNumber}-${index}`} sx={{
+                        <TableRow key={`${transaction.BranchId}-${transaction.InvoiceNumber}-${index}`} sx={{
                           '&:hover': {
                             bgcolor: 'var(--surface-secondary)',
                           },
@@ -725,6 +692,7 @@ const SalesBySalesPerson: React.FC = () => {
                         }}>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.Date}</TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.SellerName || '-'}</TableCell>
+                          <TableCell>{transaction.Branch}</TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{transaction.InvoiceNumber}</TableCell>
                           <TableCell
                             sx={{
@@ -735,7 +703,7 @@ const SalesBySalesPerson: React.FC = () => {
                                 textDecoration: 'underline'
                               }
                             }}
-                            onClick={() => navigate(`/customers/${encodeURIComponent(transaction.CustomerPhoneNumber || transaction.CustomerName)}`)}
+                            onClick={() => transaction.CustomerPhoneNumber && navigate(branchDetailPath(`/customers/${encodeURIComponent(transaction.CustomerPhoneNumber)}`, transaction.BranchId))}
                           >
                             {transaction.CustomerName}
                           </TableCell>
@@ -757,13 +725,13 @@ const SalesBySalesPerson: React.FC = () => {
                             />
                           </TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                            {formatCurrency(Number(transaction.SalesAmount), currentClinic)}
+                            {formatCurrencyAmount(Number(transaction.SalesAmount), transaction.Currency)}
                           </TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                            {formatCurrency(Number(transaction.AmountPaid), currentClinic)}
+                            {formatCurrencyAmount(Number(transaction.AmountPaid), transaction.Currency)}
                           </TableCell>
                           <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }} align="right">
-                            {formatCurrency(Number(transaction.OutstandingAmount), currentClinic)}
+                            {formatCurrencyAmount(Number(transaction.OutstandingAmount), transaction.Currency)}
                           </TableCell>
                         </TableRow>
                       ))}

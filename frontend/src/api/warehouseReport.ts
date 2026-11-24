@@ -1,7 +1,7 @@
-export async function fetchWarehouseRows<T>(query: string, signal: AbortSignal): Promise<T[]> {
+export async function fetchWarehouseRows<T>(query: string, signal: AbortSignal, bearerToken?: string): Promise<T[]> {
   const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(bearerToken ? { Authorization: 'Bearer ' + bearerToken } : {}) },
     body: JSON.stringify({ query }),
     signal,
   });

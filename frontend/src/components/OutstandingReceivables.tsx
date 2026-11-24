@@ -26,7 +26,6 @@ import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import {
-  CreditReceivedRecord,
   fetchOutstandingReceivablesReport,
   OutstandingAgingBucket,
   OutstandingPaymentStatus,
@@ -34,13 +33,16 @@ import {
 } from '../api/apicoreSalesReports';
 import { useAuth } from '../contexts/AuthContext';
 import { useClinic } from '../contexts/ClinicContext';
-import { formatCurrency } from '../utils/currency';
+import { useReportSection } from '../hooks/useReportSection';
+import { branchKey, branchDetailPath, formatReportTotal, groupByBranch, readBranchReports, labelBranchRows, type BranchRow } from '../utils/reportBranches';
+import { getCurrency, formatCurrencyAmount } from '../utils/currency';
 import {
   buildAgingBreakdown,
   buildOutstandingBreakdown,
   filterOutstandingRecords,
   OUTSTANDING_AGING_BUCKETS,
   summarizeOutstandingRecords,
+  type OutstandingTotals,
 } from '../utils/outstandingReport';
 
 const cardStyles = {
@@ -66,14 +68,10 @@ const bodyCellStyles = {
 
 const OutstandingReceivables: React.FC = () => {
   const navigate = useNavigate();
-  const { currentClinic } = useClinic();
+  const { currentClinic, reportBranches } = useClinic();
   const { getAccessToken } = useAuth();
   const [asOfDate, setAsOfDate] = useState<Date | null>(new Date());
   const [appliedAsOfDate, setAppliedAsOfDate] = useState<Date>(new Date());
-  const [records, setRecords] = useState<OutstandingReportRecord[]>([]);
-  const [creditReceivedRecords, setCreditReceivedRecords] = useState<CreditReceivedRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [salesPerson, setSalesPerson] = useState('ALL');
   const [paymentStatus, setPaymentStatus] = useState<'ALL' | OutstandingPaymentStatus>('ALL');
@@ -81,79 +79,54 @@ const OutstandingReceivables: React.FC = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
-  const fetchOutstanding = useCallback(async () => {
-    if (!currentClinic) {
-      setError('Please select a clinic first.');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError('');
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
-
-      const result = await fetchOutstandingReceivablesReport({
-        clinicId: currentClinic.id,
-        asOfDate: appliedAsOfDate,
-        accessToken,
-      });
-      setRecords(result.outstandingRecords);
-      setCreditReceivedRecords(result.creditReceivedRecords);
-    } catch (fetchError: any) {
-      console.error('Error fetching outstanding receivables:', fetchError);
-      setError(`Failed to load outstanding receivables: ${fetchError.message || 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [appliedAsOfDate, currentClinic, getAccessToken]);
-
-  useEffect(() => {
-    fetchOutstanding();
-  }, [fetchOutstanding]);
-
-  const salesPeople = useMemo(() => Array.from(new Set(
-    records.map((record) => record.SalePerson),
-  )).sort(), [records]);
-
+  const load = useCallback(async (signal: AbortSignal) => {
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
+    return readBranchReports(reportBranches, signal, async (clinic, requestSignal) => {
+      const result = await fetchOutstandingReceivablesReport({ clinicId: clinic.id, asOfDate: appliedAsOfDate, accessToken, signal: requestSignal });
+      return { invoices: labelBranchRows(clinic, result.outstandingRecords), receipts: labelBranchRows(clinic, result.creditReceivedRecords) };
+    });
+  }, [appliedAsOfDate, reportBranches, getAccessToken]);
+  const { data, loading, error, retry: fetchOutstanding } = useReportSection(reportBranches.length ? load : null, 0, null);
+  const records = useMemo(() => (data ?? []).flatMap(branch => branch.invoices)
+    .sort((a, b) => b.AgeDays - a.AgeDays || a.Currency.localeCompare(b.Currency)
+      || b.OutstandingBalance - a.OutstandingBalance || b.InvoiceNumber.localeCompare(a.InvoiceNumber)), [data]);
+  const creditReceivedRecords = useMemo(() => (data ?? []).flatMap(branch => branch.receipts), [data]);
+  const salesPeople = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const row of records) options.set(branchKey(row.BranchId, row.SalePerson),
+      reportBranches.length === 1 ? row.SalePerson : `${row.SalePerson} · ${row.Branch}`);
+    return [...options].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [records, reportBranches]);
   const filteredRecords = useMemo(() => filterOutstandingRecords(records, {
-    search,
-    salesPerson,
-    paymentStatus,
-    agingBucket,
-  }), [agingBucket, paymentStatus, records, salesPerson, search]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [search, salesPerson, paymentStatus, agingBucket]);
-
-  const totals = useMemo(
-    () => summarizeOutstandingRecords(filteredRecords),
-    [filteredRecords],
-  );
-  const agingSummary = useMemo(
-    () => buildAgingBreakdown(filteredRecords),
-    [filteredRecords],
-  );
-  const salespersonSummary = useMemo(
-    () => buildOutstandingBreakdown(filteredRecords, (record) => record.SalePerson),
-    [filteredRecords],
-  );
-  const customerSummary = useMemo(
-    () => buildOutstandingBreakdown(filteredRecords, (record) => record.CustomerName),
-    [filteredRecords],
-  );
-  const largestAgingAmount = Math.max(
-    ...agingSummary.map((entry) => entry.outstandingBalance),
-    1,
-  );
-  const creditReceivedTotal = creditReceivedRecords.reduce(
-    (total, record) => total + record.PaymentAmount,
-    0,
-  );
+    search, paymentStatus, agingBucket, salesPerson: 'ALL',
+  }).filter(row => salesPerson === 'ALL' || branchKey(row.BranchId, row.SalePerson) === salesPerson),
+  [agingBucket, paymentStatus, records, salesPerson, search]);
+  useEffect(() => { setSalesPerson('ALL'); }, [reportBranches]);
+  useEffect(() => { setPage(0); }, [search, salesPerson, paymentStatus, agingBucket, reportBranches, appliedAsOfDate]);
+  const summaries = useMemo(() => {
+    const groups = new Map(groupByBranch(filteredRecords).map(group => [group[0].BranchId, group]));
+    return reportBranches.map(clinic => {
+      const rows: BranchRow<OutstandingReportRecord>[] = groups.get(clinic.id) ?? [];
+      return {
+        total: labelBranchRows(clinic, [summarizeOutstandingRecords(rows)])[0],
+        aging: labelBranchRows(clinic, buildAgingBreakdown(rows)),
+        sellers: labelBranchRows(clinic, buildOutstandingBreakdown(rows, record => record.SalePerson)),
+        customers: labelBranchRows(clinic, buildOutstandingBreakdown(rows, record => record.CustomerName)),
+      };
+    });
+  }, [filteredRecords, reportBranches]);
+  const totalsByBranch = summaries.map(branch => branch.total);
+  const total = (field: keyof OutstandingTotals) => formatReportTotal(totalsByBranch, row => row[field], getCurrency(currentClinic));
+  const agingSummary = summaries.flatMap(branch => branch.aging);
+  const largestAging = new Map<string, number>();
+  for (const row of agingSummary) largestAging.set(row.Currency, Math.max(largestAging.get(row.Currency) ?? 1, row.outstandingBalance));
+  const salespersonSummary = summaries.flatMap(branch => branch.sellers);
+  const customerSummary = summaries.flatMap(branch => branch.customers)
+    .sort((a, b) => a.Currency.localeCompare(b.Currency) || b.outstandingBalance - a.outstandingBalance);
+  const topCustomers = Array.from(new Set(customerSummary.map(row => row.Currency)))
+    .flatMap(currency => customerSummary.filter(row => row.Currency === currency).slice(0, 10));
+  const creditReceivedTotal = formatReportTotal(creditReceivedRecords, row => row.PaymentAmount, getCurrency(currentClinic));
 
   const exportToExcel = () => {
     if (!filteredRecords.length && !creditReceivedRecords.length) return;
@@ -161,6 +134,7 @@ const OutstandingReceivables: React.FC = () => {
     const workbook = XLSX.utils.book_new();
     const invoiceRows = filteredRecords.map((record) => ({
       'Order Date': record.OrderDate,
+      Branch: record.Branch, Currency: record.Currency,
       Invoice: record.InvoiceNumber,
       Customer: record.CustomerName,
       Phone: record.CustomerPhoneNumber,
@@ -178,6 +152,7 @@ const OutstandingReceivables: React.FC = () => {
     }));
     const creditReceivedRows = creditReceivedRecords.map((record) => ({
       'Received Date': record.ReceivedDate,
+      Branch: record.Branch, Currency: record.Currency,
       'Invoice Date': record.InvoiceDate,
       Invoice: record.InvoiceNumber,
       Customer: record.CustomerName,
@@ -195,23 +170,26 @@ const OutstandingReceivables: React.FC = () => {
       XLSX.utils.book_append_sheet(workbook, sheet, name);
     };
 
-    addSheet('Outstanding Invoices', invoiceRows, [13, 16, 25, 16, 14, 20, 35, 18, 18, 22, 16, 12, 14, 18, 22]);
-    addSheet('Credit Received', creditReceivedRows, [15, 15, 18, 25, 16, 14, 20, 18, 20, 23, 28]);
+    addSheet('Outstanding Invoices', invoiceRows, [13, 26, 12, 16, 25, 16, 14, 20, 35, 18, 18, 22, 16, 12, 14, 18, 22]);
+    addSheet('Credit Received', creditReceivedRows, [15, 26, 12, 15, 18, 25, 16, 14, 20, 18, 20, 23, 28]);
     addSheet('By Salesperson', salespersonSummary.map((entry) => ({
       Salesperson: entry.label,
+      Branch: entry.Branch, Currency: entry.Currency,
       'Invoice Count': entry.invoiceCount,
       'Outstanding Balance': entry.outstandingBalance,
-    })), [24, 16, 22]);
+    })), [24, 26, 12, 16, 22]);
     addSheet('By Customer', customerSummary.map((entry) => ({
       Customer: entry.label,
+      Branch: entry.Branch, Currency: entry.Currency,
       'Invoice Count': entry.invoiceCount,
       'Outstanding Balance': entry.outstandingBalance,
-    })), [30, 16, 22]);
+    })), [30, 26, 12, 16, 22]);
     addSheet('Aging', agingSummary.map((entry) => ({
       'Aging Bucket': `${entry.label} days`,
+      Branch: entry.Branch, Currency: entry.Currency,
       'Invoice Count': entry.invoiceCount,
       'Outstanding Balance': entry.outstandingBalance,
-    })), [18, 16, 22]);
+    })), [18, 26, 12, 16, 22]);
 
     XLSX.writeFile(
       workbook,
@@ -288,18 +266,16 @@ const OutstandingReceivables: React.FC = () => {
 
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 2, mb: 3 }}>
         {[
-          ['Total Outstanding', totals.outstandingBalance, 'primary'],
-          ['Partial-paid Balance', totals.partialPaidBalance, 'warning'],
-          ['Unpaid Balance', totals.unpaidBalance, 'error'],
-          ['Outstanding Invoices', totals.invoiceCount, 'text-primary'],
-          ['30+ Days Outstanding', totals.agedOver30Balance, 'error'],
+          ['Total Outstanding', total('outstandingBalance'), 'primary'],
+          ['Partial-paid Balance', total('partialPaidBalance'), 'warning'],
+          ['Unpaid Balance', total('unpaidBalance'), 'error'],
+          ['Outstanding Invoices', filteredRecords.length.toLocaleString(), 'text-primary'],
+          ['30+ Days Outstanding', total('agedOver30Balance'), 'error'],
         ].map(([label, value, color]) => (
           <Paper key={String(label)} sx={cardStyles}>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mb: 1 }}>{label}</Typography>
             <Typography variant="h5" sx={{ color: `var(--${color})`, fontWeight: 700 }}>
-              {label === 'Outstanding Invoices'
-                ? Number(value).toLocaleString('en-US')
-                : formatCurrency(Number(value), currentClinic)}
+              {value}
             </Typography>
           </Paper>
         ))}
@@ -315,7 +291,7 @@ const OutstandingReceivables: React.FC = () => {
           </Box>
           <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
             <Typography variant="h5" sx={{ color: 'var(--success)', fontWeight: 700 }}>
-              {formatCurrency(creditReceivedTotal, currentClinic)}
+              {creditReceivedTotal}
             </Typography>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>
               {creditReceivedRecords.length.toLocaleString('en-US')} payment{creditReceivedRecords.length === 1 ? '' : 's'}
@@ -327,6 +303,7 @@ const OutstandingReceivables: React.FC = () => {
           <Table size="small" stickyHeader>
             <TableHead><TableRow>
               <TableCell sx={headerCellStyles}>Received Date</TableCell>
+              <TableCell sx={headerCellStyles}>Branch</TableCell>
               <TableCell sx={headerCellStyles}>Invoice Date</TableCell>
               <TableCell sx={headerCellStyles}>Invoice</TableCell>
               <TableCell sx={headerCellStyles}>Customer</TableCell>
@@ -338,23 +315,24 @@ const OutstandingReceivables: React.FC = () => {
             </TableRow></TableHead>
             <TableBody>
               {creditReceivedRecords.map((record) => (
-                <TableRow key={record.ReceiptId} hover>
+                <TableRow key={branchKey(record.BranchId, record.ReceiptId)} hover>
                   <TableCell sx={bodyCellStyles}>{record.ReceivedDate}</TableCell>
+                  <TableCell sx={bodyCellStyles}>{record.Branch}</TableCell>
                   <TableCell sx={bodyCellStyles}>{record.InvoiceDate}</TableCell>
                   <TableCell sx={{ ...bodyCellStyles, color: 'var(--text-primary)', fontWeight: 600 }}>{record.InvoiceNumber}</TableCell>
                   <TableCell
                     sx={{ ...bodyCellStyles, color: 'var(--primary)', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-                    onClick={() => navigate(`/customers/${encodeURIComponent(record.CustomerPhoneNumber || record.CustomerName)}`)}
+                    onClick={() => record.CustomerPhoneNumber && navigate(branchDetailPath(`/customers/${encodeURIComponent(record.CustomerPhoneNumber)}`, record.BranchId))}
                   >
                     {record.CustomerName || '-'}
                   </TableCell>
                   <TableCell sx={bodyCellStyles}>{record.SalePerson}</TableCell>
                   <TableCell sx={bodyCellStyles}>{record.PaymentMethod}</TableCell>
                   <TableCell sx={{ ...bodyCellStyles, color: 'var(--success)', fontWeight: 700 }} align="right">
-                    {formatCurrency(record.PaymentAmount, currentClinic)}
+                    {formatCurrencyAmount(record.PaymentAmount, record.Currency)}
                   </TableCell>
                   <TableCell sx={bodyCellStyles} align="right">
-                    {formatCurrency(record.BalanceAfterPayment, currentClinic)}
+                    {formatCurrencyAmount(record.BalanceAfterPayment, record.Currency)}
                   </TableCell>
                   <TableCell sx={bodyCellStyles}>
                     <Chip
@@ -367,7 +345,7 @@ const OutstandingReceivables: React.FC = () => {
                 </TableRow>
               ))}
               {!creditReceivedRecords.length && (
-                <TableRow><TableCell colSpan={9} align="center" sx={{ ...bodyCellStyles, py: 4 }}>
+                <TableRow><TableCell colSpan={10} align="center" sx={{ ...bodyCellStyles, py: 4 }}>
                   No credit was received against earlier invoices on this date.
                 </TableCell></TableRow>
               )}
@@ -380,18 +358,18 @@ const OutstandingReceivables: React.FC = () => {
         <Paper sx={{ ...cardStyles, p: 3 }}>
           <Typography variant="h6" sx={{ color: 'var(--text-primary)', mb: 2 }}>Aging Summary</Typography>
           {agingSummary.map((entry) => (
-            <Box key={entry.label} sx={{ mb: 2 }}>
+            <Box key={branchKey(entry.BranchId, entry.label)} sx={{ mb: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 0.5 }}>
                 <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>
-                  {entry.label} days · {entry.invoiceCount} invoices
+                  {entry.Branch} · {entry.label} days · {entry.invoiceCount} invoices
                 </Typography>
                 <Typography variant="body2" sx={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                  {formatCurrency(entry.outstandingBalance, currentClinic)}
+                  {formatCurrencyAmount(entry.outstandingBalance, entry.Currency)}
                 </Typography>
               </Box>
               <LinearProgress
                 variant="determinate"
-                value={(entry.outstandingBalance / largestAgingAmount) * 100}
+                value={(entry.outstandingBalance / (largestAging.get(entry.Currency) ?? 1)) * 100}
                 sx={{ height: 8, borderRadius: 4, bgcolor: 'var(--surface-secondary)' }}
               />
             </Box>
@@ -404,19 +382,21 @@ const OutstandingReceivables: React.FC = () => {
             <Table size="small" stickyHeader>
               <TableHead><TableRow>
                 <TableCell sx={headerCellStyles}>Salesperson</TableCell>
+                <TableCell sx={headerCellStyles}>Branch</TableCell>
                 <TableCell sx={headerCellStyles} align="center">Invoices</TableCell>
                 <TableCell sx={headerCellStyles} align="right">Outstanding</TableCell>
               </TableRow></TableHead>
               <TableBody>{salespersonSummary.map((entry) => (
                 <TableRow
-                  key={entry.label}
+                  key={branchKey(entry.BranchId, entry.label)}
                   hover
-                  onClick={() => setSalesPerson(entry.label)}
+                  onClick={() => setSalesPerson(branchKey(entry.BranchId, entry.label))}
                   sx={{ cursor: 'pointer' }}
                 >
                   <TableCell sx={bodyCellStyles}>{entry.label}</TableCell>
+                  <TableCell sx={bodyCellStyles}>{entry.Branch}</TableCell>
                   <TableCell sx={bodyCellStyles} align="center">{entry.invoiceCount}</TableCell>
-                  <TableCell sx={bodyCellStyles} align="right">{formatCurrency(entry.outstandingBalance, currentClinic)}</TableCell>
+                  <TableCell sx={bodyCellStyles} align="right">{formatCurrencyAmount(entry.outstandingBalance, entry.Currency)}</TableCell>
                 </TableRow>
               ))}</TableBody>
             </Table>
@@ -427,20 +407,22 @@ const OutstandingReceivables: React.FC = () => {
       <Paper sx={{ ...cardStyles, p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, alignItems: 'center', mb: 2 }}>
           <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>Top Outstanding Customers</Typography>
-          <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>Top 10 by balance</Typography>
+          <Typography variant="body2" sx={{ color: 'var(--text-secondary)' }}>Top 10 by balance per currency</Typography>
         </Box>
         <TableContainer>
           <Table size="small">
             <TableHead><TableRow>
               <TableCell sx={headerCellStyles}>Customer</TableCell>
+              <TableCell sx={headerCellStyles}>Branch</TableCell>
               <TableCell sx={headerCellStyles} align="center">Invoices</TableCell>
               <TableCell sx={headerCellStyles} align="right">Outstanding</TableCell>
             </TableRow></TableHead>
-            <TableBody>{customerSummary.slice(0, 10).map((entry) => (
-              <TableRow key={entry.label} hover>
+            <TableBody>{topCustomers.map((entry) => (
+              <TableRow key={branchKey(entry.BranchId, entry.label)} hover>
                 <TableCell sx={bodyCellStyles}>{entry.label}</TableCell>
+                <TableCell sx={bodyCellStyles}>{entry.Branch}</TableCell>
                 <TableCell sx={bodyCellStyles} align="center">{entry.invoiceCount}</TableCell>
-                <TableCell sx={bodyCellStyles} align="right">{formatCurrency(entry.outstandingBalance, currentClinic)}</TableCell>
+                <TableCell sx={bodyCellStyles} align="right">{formatCurrencyAmount(entry.outstandingBalance, entry.Currency)}</TableCell>
               </TableRow>
             ))}</TableBody>
           </Table>
@@ -452,7 +434,7 @@ const OutstandingReceivables: React.FC = () => {
           <Box>
             <Typography variant="h6" sx={{ color: 'var(--text-primary)' }}>Outstanding Invoices</Typography>
             <Typography variant="body2" sx={{ color: 'var(--text-secondary)', mt: 0.5 }}>
-              {filteredRecords.length.toLocaleString('en-US')} invoices · {formatCurrency(totals.outstandingBalance, currentClinic)} outstanding
+              {filteredRecords.length.toLocaleString('en-US')} invoices · {total('outstandingBalance')} outstanding
             </Typography>
           </Box>
           <Button
@@ -476,7 +458,7 @@ const OutstandingReceivables: React.FC = () => {
             <InputLabel>Salesperson</InputLabel>
             <Select value={salesPerson} label="Salesperson" onChange={(event) => setSalesPerson(event.target.value)}>
               <MenuItem value="ALL">All salespeople</MenuItem>
-              {salesPeople.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+              {salesPeople.map(([key, name]) => <MenuItem key={key} value={key}>{name}</MenuItem>)}
             </Select>
           </FormControl>
           <FormControl size="small">
@@ -511,6 +493,7 @@ const OutstandingReceivables: React.FC = () => {
           <Table size="small" stickyHeader>
             <TableHead><TableRow>
               <TableCell sx={headerCellStyles}>Order Date</TableCell>
+              <TableCell sx={headerCellStyles}>Branch</TableCell>
               <TableCell sx={headerCellStyles}>Invoice</TableCell>
               <TableCell sx={headerCellStyles}>Customer</TableCell>
               <TableCell sx={headerCellStyles}>Salesperson</TableCell>
@@ -525,20 +508,21 @@ const OutstandingReceivables: React.FC = () => {
               {filteredRecords
                 .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((record) => (
-                  <TableRow key={record.InvoiceNumber} hover>
+                  <TableRow key={branchKey(record.BranchId, record.InvoiceNumber)} hover>
                     <TableCell sx={bodyCellStyles}>{record.OrderDate}</TableCell>
+                    <TableCell sx={bodyCellStyles}>{record.Branch}</TableCell>
                     <TableCell sx={{ ...bodyCellStyles, color: 'var(--text-primary)', fontWeight: 600 }}>{record.InvoiceNumber}</TableCell>
                     <TableCell
                       sx={{ ...bodyCellStyles, color: 'var(--primary)', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-                      onClick={() => navigate(`/customers/${encodeURIComponent(record.CustomerPhoneNumber || record.CustomerName)}`)}
+                      onClick={() => record.CustomerPhoneNumber && navigate(branchDetailPath(`/customers/${encodeURIComponent(record.CustomerPhoneNumber)}`, record.BranchId))}
                     >
                       {record.CustomerName || '-'}
                     </TableCell>
                     <TableCell sx={bodyCellStyles}>{record.SalePerson}</TableCell>
-                    <TableCell sx={bodyCellStyles} align="right">{formatCurrency(record.InvoiceTotal, currentClinic)}</TableCell>
-                    <TableCell sx={bodyCellStyles} align="right">{formatCurrency(record.AmountPaid, currentClinic)}</TableCell>
+                    <TableCell sx={bodyCellStyles} align="right">{formatCurrencyAmount(record.InvoiceTotal, record.Currency)}</TableCell>
+                    <TableCell sx={bodyCellStyles} align="right">{formatCurrencyAmount(record.AmountPaid, record.Currency)}</TableCell>
                     <TableCell sx={{ ...bodyCellStyles, color: 'var(--error)', fontWeight: 600 }} align="right">
-                      {formatCurrency(record.OutstandingBalance, currentClinic)}
+                      {formatCurrencyAmount(record.OutstandingBalance, record.Currency)}
                     </TableCell>
                     <TableCell sx={bodyCellStyles}>
                       <Chip
@@ -556,7 +540,7 @@ const OutstandingReceivables: React.FC = () => {
                   </TableRow>
                 ))}
               {!filteredRecords.length && (
-                <TableRow><TableCell colSpan={10} align="center" sx={{ ...bodyCellStyles, py: 5 }}>
+                <TableRow><TableCell colSpan={11} align="center" sx={{ ...bodyCellStyles, py: 5 }}>
                   No outstanding invoices match the selected filters.
                 </TableCell></TableRow>
               )}

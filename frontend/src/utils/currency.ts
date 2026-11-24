@@ -33,16 +33,18 @@ export const formatCurrency = (
     maximumFractionDigits?: number;
   }
 ): string => {
-  if (amount === null || amount === undefined || isNaN(amount)) {
-    return `0 ${getCurrency(clinic)}`;
-  }
-
-  const currency = getCurrency(clinic);
-  const formatted = amount.toLocaleString('en-US', {
-    minimumFractionDigits: options?.minimumFractionDigits ?? 0,
-    maximumFractionDigits: options?.maximumFractionDigits ?? 0
-  });
-
-  return `${formatted} ${currency}`;
+  return formatCurrencyAmount(amount, getCurrency(clinic), { maximumFractionDigits: 0, ...options });
 };
 
+export function formatCurrencyAmount(
+  amount: number | null | undefined,
+  currency: string,
+  options?: { minimumFractionDigits?: number; maximumFractionDigits?: number },
+): string {
+  const value = amount == null || Number.isNaN(amount) ? 0 : amount;
+  const formatted = value.toLocaleString('en-US', {
+    minimumFractionDigits: options?.minimumFractionDigits ?? 0,
+    maximumFractionDigits: options?.maximumFractionDigits ?? (Number.isInteger(value) ? 0 : 2),
+  });
+  return `${formatted} ${currency}`;
+}

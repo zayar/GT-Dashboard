@@ -1,4 +1,6 @@
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+
+import { clinicCompanyKey, getReportBranches, type ReportClinic } from '../utils/clinicBranches';
 
 // Clinic interface
 export interface Clinic {
@@ -20,6 +22,9 @@ interface ClinicContextType {
   setCurrentClinic: (clinic: Clinic) => void;
   availableClinics: Clinic[];
   loadingClinics: boolean;
+  reportBranches: ReportClinic[];
+  selectAllReportBranches: () => void;
+  openBranchDetails: (clinic: Clinic) => void;
 }
 
 const ClinicContext = createContext<ClinicContextType | undefined>(undefined);
@@ -39,18 +44,30 @@ export const ClinicProvider: React.FC<ClinicProviderProps> = ({ children, clinic
   const [selectedId, setSelectedId] = useState(() => localStorage.getItem('selectedClinicId'));
   const currentClinic = clinics.find(clinic => clinic.id === selectedId) ?? clinics[0] ?? null;
   const currentId = currentClinic?.id;
+  const [allCompany, setAllCompany] = useState<string | null>(null);
+  const companyKey = currentClinic ? clinicCompanyKey(currentClinic) : null;
+  const reportBranches = useMemo(() => getReportBranches(clinics, currentId, allCompany === companyKey),
+    [clinics, currentId, allCompany, companyKey]);
+
   useEffect(() => {
     if (currentId) localStorage.setItem('selectedClinicId', currentId);
     else localStorage.removeItem('selectedClinicId');
   }, [currentId]);
 
-  const setCurrentClinic = (clinic: Clinic) => {
+  const openBranchDetails = (clinic: Clinic) => {
     if (clinic.id === currentId || !clinics.some(branch => branch.id === clinic.id)) return;
     setSelectedId(clinic.id);
     sessionStorage.removeItem('chatMessages');
   };
+  const setCurrentClinic = (clinic: Clinic) => {
+    if (!clinics.some(branch => branch.id === clinic.id)) return;
+    setAllCompany(null);
+    openBranchDetails(clinic);
+  };
+
   return (
-    <ClinicContext.Provider value={{ currentClinic, setCurrentClinic, availableClinics: clinics, loadingClinics: false }}>
+    <ClinicContext.Provider value={{ currentClinic, setCurrentClinic, openBranchDetails, availableClinics: clinics,
+      reportBranches, selectAllReportBranches: () => setAllCompany(companyKey), loadingClinics: false }}>
       {children}
     </ClinicContext.Provider>
   );

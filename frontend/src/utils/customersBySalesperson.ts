@@ -8,7 +8,7 @@ interface ClinicQueryInput {
 }
 
 interface CustomerQueryInput extends ClinicQueryInput {
-  sellerId: string;
+  sellerId: string | null;
 }
 
 const escapeSqlString = (value: string) => value.replace(/'/g, "''");
@@ -51,7 +51,7 @@ export const buildCustomersBySalespersonQuery = ({
     WHERE
       CustomerName IS NOT NULL
       AND CustomerPhoneNumber IS NOT NULL
-      AND SellerId = '${escapeSqlString(sellerId)}'
+      AND ${sellerId === null ? "SellerId IS NOT NULL AND SellerName IS NOT NULL AND SellerName != ''" : `SellerId = '${escapeSqlString(sellerId)}'`}
       AND PaymentStatus = 'PAID'
       AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
       AND LOWER(ClinicCode) = LOWER('${escapeSqlString(clinicCode)}')

@@ -29,14 +29,15 @@ import { useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useClinic } from '../contexts/ClinicContext';
-import { useBiActivity } from '../hooks/useBiAccounting';
+import { useBranchActivity } from '../hooks/useBiAccounting';
 import { useReportSection } from '../hooks/useReportSection';
 import { fetchWarehouseRows } from '../api/warehouseReport';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import SearchIcon from '@mui/icons-material/Search';
-import { formatCurrency } from '../utils/currency';
+import { branchKey, branchDetailPath, readBranchRows, formatReportTotal, type BranchRow, type ReportBranch } from '../utils/reportBranches';
+import { formatCurrencyAmount, getCurrency } from '../utils/currency';
 import {
   buildCustomerServiceActivityQuery,
   CustomerServiceActivityPeriod,
@@ -59,7 +60,7 @@ interface DailyReportData {
   SellerNames?: string | null;
 }
 
-const NO_ACTIVITY_ROWS: DailyReportData[] = [];
+const NO_ACTIVITY_ROWS: BranchRow<DailyReportData>[] = [];
 
 interface DailyReportProps {
   rangeEnabled?: boolean;
@@ -67,7 +68,7 @@ interface DailyReportProps {
 
 const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
   const navigate = useNavigate();
-  const { currentClinic, loadingClinics } = useClinic();
+  const { currentClinic, reportBranches, loadingClinics } = useClinic();
   const [refresh, setRefresh] = useState(0);
   const fetchDailyData = () => setRefresh(value => value + 1);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
@@ -94,13 +95,13 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
         }
   ), [customEndDate, customStartDate, period, periodDate, rangeEnabled, selectedDate]);
 
-  const clinicCode = currentClinic?.code ?? '';
   const { startDateKey, endDateKey } = reportRange;
-  const loadActivity = useCallback((signal: AbortSignal) => fetchWarehouseRows<DailyReportData>(
-    buildCustomerServiceActivityQuery({ clinicCode, startDate: startDateKey, endDate: endDateKey }), signal,
-  ), [clinicCode, startDateKey, endDateKey]);
-  const activity = useReportSection(clinicCode ? loadActivity : null, refresh);
-  const accounting = useBiActivity(currentClinic?.id, reportRange.startDate, reportRange.endDate, refresh);
+  const loadActivity = useCallback((signal: AbortSignal) => readBranchRows(reportBranches, signal, (clinic, requestSignal) =>
+    fetchWarehouseRows<DailyReportData>(buildCustomerServiceActivityQuery({
+      clinicCode: clinic.code, startDate: startDateKey, endDate: endDateKey,
+    }), requestSignal)), [reportBranches, startDateKey, endDateKey]);
+  const activity = useReportSection(reportBranches.length ? loadActivity : null, refresh);
+  const accounting = useBranchActivity(reportBranches, reportRange.startDate, reportRange.endDate, refresh);
   const rawData = activity.data ?? NO_ACTIVITY_ROWS;
   const lastUpdated = activity.updatedAt ?? accounting.updatedAt;
 
@@ -116,11 +117,12 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     const practitionerCounts = new Map<string, number>();
 
     rawData.forEach((record, index) => {
-      const customerKey = record.CustomerPhoneNumber?.trim() || record.CustomerId?.trim() || `${record.CustomerName}-${index}`;
+      const customerKey = branchKey(record.BranchId, record.CustomerPhoneNumber?.trim() || record.CustomerId?.trim() || `${record.CustomerName}-${index}`);
       if (!uniqueCustomers.has(customerKey)) uniqueCustomers.set(customerKey, record);
       serviceCounts.set(record.ServiceName, (serviceCounts.get(record.ServiceName) || 0) + 1);
       if (record.PractitionerName) {
-        practitionerCounts.set(record.PractitionerName, (practitionerCounts.get(record.PractitionerName) || 0) + 1);
+        const label = reportBranches.length > 1 ? `${record.PractitionerName} · ${record.Branch}` : record.PractitionerName;
+        practitionerCounts.set(label, (practitionerCounts.get(label) || 0) + 1);
       }
     });
 
@@ -139,7 +141,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
       topService: topService ? { name: topService[0], count: topService[1] } : null,
       topPractitioner: topPractitioner ? { name: topPractitioner[0], count: topPractitioner[1] } : null
     };
-  }, [rawData]);
+  }, [rawData, reportBranches]);
 
   // Prepare heatmap data: Customer (rows) x Service (columns)
   const heatmapData = useMemo(() => {
@@ -154,11 +156,13 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     const customerPaymentMethodMap: { [customer: string]: string } = {};
     const customerPaymentNoteMap: { [customer: string]: string } = {};
     const customerSellerMap: { [customer: string]: string } = {};
+    const branches: Record<string, ReportBranch> = {};
     const customerNameMap: { [customer: string]: string } = {};
 
     rawData.forEach((record, index) => {
-      const customer = record.CustomerPhoneNumber?.trim() || record.CustomerId?.trim() || `${record.CustomerName}-${index}`;
+      const customer = branchKey(record.BranchId, record.CustomerPhoneNumber?.trim() || record.CustomerId?.trim() || `${record.CustomerName}-${index}`);
       const service = record.ServiceName;
+      branches[customer] = record;
       customerNameMap[customer] = record.CustomerName;
 
       // Store phone number and customer ID for reference
@@ -219,7 +223,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
       customers,
       services,
       data: customerServiceMap,
-      customerNameMap,
+      customerNameMap, branches,
       phoneMap: customerPhoneMap,
       customerIdMap,
       practitionerMap,
@@ -251,7 +255,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     if (!deferredSearchTerm) return heatmapData.customers;
     return heatmapData.customers.filter(customer => {
       const searchable = [
-        heatmapData.customerNameMap[customer],
+        heatmapData.customerNameMap[customer], heatmapData.branches[customer].Branch,
         heatmapData.phoneMap[customer],
         heatmapData.customerIdMap[customer],
         heatmapData.practitionerMap[customer],
@@ -265,7 +269,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
 
   useEffect(() => {
     setPage(0);
-  }, [deferredSearchTerm, reportRange.endDateKey, reportRange.startDateKey, rowsPerPage]);
+  }, [deferredSearchTerm, reportBranches, reportRange.endDateKey, reportRange.startDateKey, rowsPerPage]);
 
   const lastPage = Math.max(0, Math.ceil(filteredCustomers.length / rowsPerPage) - 1);
   const effectivePage = Math.min(page, lastPage);
@@ -278,12 +282,12 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     navigate(-1);
   };
 
-  const handleCustomerClick = (phoneNumber: string) => {
-    navigate(`/customers/${encodeURIComponent(phoneNumber)}`);
+  const handleCustomerClick = (phoneNumber: string, branchId: string) => {
+    if (phoneNumber) navigate(branchDetailPath(`/customers/${encodeURIComponent(phoneNumber)}`, branchId));
   };
 
-  const handleServiceClick = (serviceName: string) => {
-    navigate(`/services/${encodeURIComponent(serviceName)}`);
+  const handleServiceClick = (serviceName: string, branchId: string) => {
+    navigate(branchDetailPath(`/services/${encodeURIComponent(serviceName)}`, branchId));
   };
 
   const exportToExcel = () => {
@@ -295,6 +299,8 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     const exportData = filteredCustomers.map(customer => {
       const row: any = {
         'Customer Name': heatmapData.customerNameMap[customer],
+        Branch: heatmapData.branches[customer].Branch,
+        Currency: heatmapData.branches[customer].Currency,
         'Customer ID': heatmapData.customerIdMap[customer],
         'Phone Number': heatmapData.phoneMap[customer],
         'New Customer': heatmapData.newCustomerMap[customer],
@@ -323,6 +329,8 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     // Set column widths
     const colWidths = [
       { wch: 30 }, // Customer Name
+      { wch: 26 }, // Branch
+      { wch: 12 }, // Currency
       { wch: 15 }, // Customer ID
       { wch: 15 }, // Phone Number
       { wch: 15 }, // New Customer
@@ -532,21 +540,21 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
             label: CANONICAL_SALES_METRICS.grossSales.label,
             description: CANONICAL_SALES_METRICS.grossSales.description,
             pending: accounting.loading,
-            value: accounting.data && formatCurrency(accounting.data.grossSales, currentClinic),
-            detail: accounting.data && `${accounting.data.invoiceCount.toLocaleString()} invoices · ${CANONICAL_SALES_METRICS.grossSales.dateBasis}`
+            value: accounting.data && formatReportTotal(accounting.data, row => row.grossSales, getCurrency(currentClinic)),
+            detail: accounting.data && `${accounting.data.reduce((sum, row) => sum + row.invoiceCount, 0).toLocaleString()} invoices · ${CANONICAL_SALES_METRICS.grossSales.dateBasis}`
           },
           {
             label: CANONICAL_SALES_METRICS.paymentsReceived.label,
             description: CANONICAL_SALES_METRICS.paymentsReceived.description,
             pending: accounting.loading,
-            value: accounting.data && formatCurrency(accounting.data.paymentsReceived, currentClinic),
-            detail: accounting.data && `${accounting.data.paymentCount.toLocaleString()} payments · ${CANONICAL_SALES_METRICS.paymentsReceived.dateBasis}`
+            value: accounting.data && formatReportTotal(accounting.data, row => row.paymentsReceived, getCurrency(currentClinic)),
+            detail: accounting.data && `${accounting.data.reduce((sum, row) => sum + row.paymentCount, 0).toLocaleString()} payments · ${CANONICAL_SALES_METRICS.paymentsReceived.dateBasis}`
           },
           {
-            label: 'Customers served',
+            label: reportBranches.length > 1 ? 'Customers served across branches' : 'Customers served',
             pending: activity.loading,
             value: activity.data && summary.totalCustomers.toLocaleString(),
-            detail: activity.data && `${summary.newCustomers} new customers`
+            detail: activity.data && (reportBranches.length > 1 ? 'Counted once per customer at each branch' : `${summary.newCustomers} new customers`)
           },
           {
             label: 'Services delivered',
@@ -555,7 +563,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
             detail: activity.data && `${summary.totalServices} unique services`
           },
           {
-            label: 'New customers',
+            label: reportBranches.length > 1 ? 'New to the branch' : 'New customers',
             pending: activity.loading,
             value: activity.data && summary.newCustomers.toLocaleString(),
             detail: activity.data && `${summary.sellerAssignedCustomers} customers assigned to sellers`
@@ -682,6 +690,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                   >
                     Customer Name
                   </TableCell>
+                  <TableCell>Branch</TableCell>
                   <TableCell
                     sx={{
                       bgcolor: 'var(--surface)',
@@ -815,13 +824,9 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                         borderBottom: '1px solid var(--border)',
                         minWidth: 120,
                         textAlign: 'center',
-                        cursor: 'pointer',
-                        '&:hover': {
-                          color: 'var(--primary)',
-                          textDecoration: 'underline'
-                        }
+                        cursor: reportBranches.length === 1 ? 'pointer' : 'default'
                       }}
-                      onClick={() => handleServiceClick(service)}
+                      onClick={reportBranches.length === 1 ? () => handleServiceClick(service, reportBranches[0].id) : undefined}
                     >
                       {service}
                     </TableCell>
@@ -853,7 +858,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                           textDecoration: 'underline'
                         }
                       }}
-                      onClick={() => handleCustomerClick(heatmapData.phoneMap[customer])}
+                      onClick={() => handleCustomerClick(heatmapData.phoneMap[customer], heatmapData.branches[customer].BranchId)}
                     >
                       <Box>
                         <Typography sx={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 500 }}>
@@ -864,6 +869,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                         </Typography>
                       </Box>
                     </TableCell>
+                    <TableCell>{heatmapData.branches[customer].Branch}</TableCell>
                     <TableCell
                       sx={{
                         color: 'var(--text-secondary)',
@@ -959,7 +965,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                         textAlign: 'right'
                       }}
                     >
-                      {formatCurrency(heatmapData.paymentAmountMap[customer], currentClinic, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatCurrencyAmount(heatmapData.paymentAmountMap[customer], heatmapData.branches[customer].Currency, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell
                       sx={{
@@ -1016,7 +1022,10 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
                             } : {}
                           }}
                         >
-                          {count > 0 ? count : '-'}
+                          {count > 0
+                            ? <Button size="small" onClick={() => handleServiceClick(service, heatmapData.branches[customer].BranchId)}
+                                aria-label={`${service} at ${heatmapData.branches[customer].Branch}`}>{count}</Button>
+                            : '-'}
                         </TableCell>
                       );
                     })}

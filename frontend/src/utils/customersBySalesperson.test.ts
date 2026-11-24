@@ -15,6 +15,13 @@ describe('customers by salesperson queries', () => {
     expect(query).toContain("LOWER('clinic''code')");
   });
 
+  it('queries all assigned salespeople with clinic restrictions on both customers and lifetime spend', () => {
+    const query = buildCustomersBySalespersonQuery({ clinicCode: 'north', sellerId: null });
+    expect(query).toContain('SellerId IS NOT NULL');
+    expect(query.match(/LOWER\('north'\)/g)).toHaveLength(2);
+    expect(query).toContain('MAX(CAST(payments.NetTotal AS FLOAT64))');
+  });
+
   it('deduplicates service rows to one NetTotal per paid SO invoice', () => {
     const query = buildCustomersBySalespersonQuery({
       clinicCode: 'gtdenovo',

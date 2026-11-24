@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -22,7 +22,9 @@ import {
   IconButton,
   Alert
 } from '@mui/material';
-import axios from 'axios';
+import { fetchWarehouseRows } from '../api/warehouseReport';
+import { useReportSection } from '../hooks/useReportSection';
+import { branchDetailPath, readBranchRows, type BranchRow } from '../utils/reportBranches';
 import { useNavigate } from 'react-router-dom';
 import { useClinic } from '../contexts/ClinicContext';
 import * as XLSX from 'xlsx';
@@ -30,7 +32,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { formatCurrency } from '../utils/currency';
+import { formatCurrencyAmount } from '../utils/currency';
 import {
   buildCustomersBySalespersonQuery,
   buildSalespeopleQuery,
@@ -49,128 +51,54 @@ interface Customer {
 type SortField = 'totalSpend' | 'lastPurchaseDate' | 'name';
 type SortOrder = 'asc' | 'desc';
 
+const EMPTY_CUSTOMERS: BranchRow<Customer>[] = [];
+
 const CustomersBySalesperson: React.FC = () => {
   const navigate = useNavigate();
-  const { currentClinic } = useClinic();
+  const { reportBranches } = useClinic();
 
   // State variables
-  const [salespeople, setSalespeople] = useState<SalespersonOption[]>([]);
-  const [selectedSalesperson, setSelectedSalesperson] = useState<string>('');
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [salesPeopleLoading, setSalesPeopleLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [validationError, setValidationError] = useState('');
+  const [sellerId, setSellerId] = useState('');
+  const [appliedSeller, setAppliedSeller] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('lastPurchaseDate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [page, setPage] = useState(0);
   const [rowsPerPage] = useState(25);
 
-  // Fetch salespeople on component mount
-  useEffect(() => {
-    if (currentClinic) {
-      fetchSalespeople();
+  const loadSellers = useCallback((signal: AbortSignal) => readBranchRows(reportBranches, signal, (clinic, requestSignal) =>
+    fetchWarehouseRows<SalespersonOption>(buildSalespeopleQuery({ clinicCode: clinic.code }), requestSignal,
+      import.meta.env.VITE_OPENAI_API_KEY)), [reportBranches]);
+  const sellers = useReportSection(reportBranches.length ? loadSellers : null);
+  const salespeople = useMemo(() => {
+    const people = new Map<string, { id: string; name: string; branches: string[] }>();
+    for (const seller of sellers.data ?? []) {
+      const person = people.get(seller.id);
+      if (person) person.branches.push(seller.Branch);
+      else people.set(seller.id, { id: seller.id, name: seller.name, branches: [seller.Branch] });
     }
-  }, [currentClinic]);
-
-  // Apply search and sort whenever data changes
-  useEffect(() => {
-    applyFiltersAndSort();
-  }, [customers, searchTerm, sortField, sortOrder]);
-
-  const fetchSalespeople = useCallback(async () => {
-    if (!currentClinic) {
-      setError('Please select a clinic first.');
-      setSalesPeopleLoading(false);
-      return;
-    }
-
-    try {
-      setSalesPeopleLoading(true);
-      setError('');
-
-      const query = buildSalespeopleQuery({ clinicCode: currentClinic.code });
-
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/query`,
-        { query },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-          },
-          timeout: 15000
-        }
-      );
-
-      if (!response.data.success) {
-        throw new Error('Failed to fetch salespeople: ' + (response.data.error || 'Unknown error'));
-      }
-
-      const salespeopleData = response.data.data || [];
-      setSalespeople(salespeopleData.map((item: any) => ({
-        id: item.id,
-        name: item.name,
-      })));
-    } catch (err: any) {
-      console.error('Error fetching salespeople:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to fetch salespeople');
-    } finally {
-      setSalesPeopleLoading(false);
-    }
-  }, [currentClinic]);
-
-  const fetchCustomers = useCallback(async () => {
-    if (!selectedSalesperson) {
-      setValidationError('Please select a salesperson.');
-      return;
-    }
-
-    if (!currentClinic) {
-      setError('Please select a clinic first.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError('');
-      setValidationError('');
-
-      const query = buildCustomersBySalespersonQuery({
-        clinicCode: currentClinic.code,
-        sellerId: selectedSalesperson,
-      });
-
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/query`,
-        { query },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-          },
-          timeout: 15000
-        }
-      );
-
-      if (!response.data.success) {
-        throw new Error('Failed to fetch customers: ' + (response.data.error || 'Unknown error'));
-      }
-
-      const customerData = response.data.data || [];
-      setCustomers(customerData);
-      setPage(0); // Reset to first page
-    } catch (err: any) {
-      console.error('Error fetching customers:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to fetch customers');
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedSalesperson, currentClinic]);
-
-  const applyFiltersAndSort = () => {
+    return [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [sellers.data]);
+  const selectedSalesperson = sellerId === '*' || salespeople.some(person => person.id === sellerId) ? sellerId : '';
+  const loadCustomers = useCallback((signal: AbortSignal) => {
+    const branches = appliedSeller === '*' ? reportBranches : reportBranches.filter(clinic =>
+      sellers.data?.some(seller => seller.BranchId === clinic.id && seller.id === appliedSeller));
+    return readBranchRows(branches, signal, (clinic, requestSignal) =>
+      fetchWarehouseRows<Customer>(buildCustomersBySalespersonQuery({
+        clinicCode: clinic.code, sellerId: appliedSeller === '*' ? null : appliedSeller,
+      }), requestSignal, import.meta.env.VITE_OPENAI_API_KEY));
+  }, [reportBranches, sellers.data, appliedSeller]);
+  const report = useReportSection(appliedSeller && selectedSalesperson === appliedSeller && sellers.data ? loadCustomers : null);
+  const fetchCustomers = () => {
+    if (appliedSeller === selectedSalesperson) report.retry();
+    else setAppliedSeller(selectedSalesperson);
+  };
+  const salesPeopleLoading = sellers.loading;
+  const error = sellers.error ?? report.error;
+  const loading = report.loading;
+  const customers = report.data ?? EMPTY_CUSTOMERS;
+  useEffect(() => { setPage(0); }, [reportBranches, selectedSalesperson, searchTerm]);
+  const filteredCustomers = useMemo(() => {
     let filtered = [...customers];
 
     // Apply search filter
@@ -191,6 +119,7 @@ const CustomersBySalesperson: React.FC = () => {
 
       switch (sortField) {
         case 'totalSpend':
+          if (a.Currency !== b.Currency) return a.Currency.localeCompare(b.Currency);
           aValue = a.totalSpend || 0;
           bValue = b.totalSpend || 0;
           break;
@@ -212,15 +141,12 @@ const CustomersBySalesperson: React.FC = () => {
       return 0;
     });
 
-    setFilteredCustomers(filtered);
-  };
+    return filtered;
+  }, [customers, searchTerm, sortField, sortOrder]);
 
   const handleSalespersonChange = (event: SelectChangeEvent<string>) => {
-    setSelectedSalesperson(event.target.value);
-    setCustomers([]);
-    setFilteredCustomers([]);
-    setValidationError('');
-    setError('');
+    setSellerId(event.target.value);
+    setAppliedSeller('');
   };
 
   const handleSort = (field: SortField) => {
@@ -242,6 +168,7 @@ const CustomersBySalesperson: React.FC = () => {
     // Prepare data for export
     const exportData = filteredCustomers.map((customer) => ({
       'Customer Name': customer.name,
+      Branch: customer.Branch, Currency: customer.Currency,
       'Phone Number': customer.phoneNumber,
       'Member ID': customer.memberId,
       'Total Amount Spent': customer.totalSpend,
@@ -255,6 +182,8 @@ const CustomersBySalesperson: React.FC = () => {
     // Set column widths
     ws['!cols'] = [
       { wch: 30 }, // Customer Name
+      { wch: 28 }, // Branch
+      { wch: 12 }, // Currency
       { wch: 15 }, // Phone Number
       { wch: 15 }, // Member ID
       { wch: 20 }, // Total Amount Spent
@@ -267,10 +196,7 @@ const CustomersBySalesperson: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Customers');
 
     // Generate filename
-    const salespersonName = salespeople.find(
-      salesperson => salesperson.id === selectedSalesperson
-    )?.name || selectedSalesperson;
-    const sanitizedSalesperson = salespersonName.replace(/[^a-z0-9]/gi, '_');
+    const sanitizedSalesperson = selectedSalespersonName.replace(/[^a-z0-9]/gi, '_');
     const filename = `customers_by_${sanitizedSalesperson}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
     // Download file
@@ -281,7 +207,7 @@ const CustomersBySalesperson: React.FC = () => {
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
   );
-  const selectedSalespersonName = salespeople.find(
+  const selectedSalespersonName = selectedSalesperson === '*' ? 'All salespeople' : salespeople.find(
     salesperson => salesperson.id === selectedSalesperson
   )?.name || '';
 
@@ -306,7 +232,7 @@ const CustomersBySalesperson: React.FC = () => {
           </Typography>
         </Box>
         <IconButton
-          onClick={selectedSalesperson ? fetchCustomers : fetchSalespeople}
+          onClick={selectedSalesperson && !sellers.error ? fetchCustomers : sellers.retry}
           sx={{
             color: 'var(--text-primary)',
             bgcolor: 'rgba(255,255,255,0.1)',
@@ -348,9 +274,10 @@ const CustomersBySalesperson: React.FC = () => {
               <MenuItem value="">
                 <em>Select a salesperson</em>
               </MenuItem>
+              <MenuItem value="*">All salespeople</MenuItem>
               {salespeople.map((salesperson) => (
                 <MenuItem key={salesperson.id} value={salesperson.id}>
-                  {salesperson.name}
+                  {salesperson.name}{reportBranches.length > 1 ? ` · ${salesperson.branches.join(', ')}` : ''}
                 </MenuItem>
               ))}
             </Select>
@@ -372,16 +299,10 @@ const CustomersBySalesperson: React.FC = () => {
           </Button>
         </Box>
 
-        {/* Validation Error */}
-        {validationError && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            {validationError}
-          </Alert>
-        )}
       </Paper>
 
       {/* Error Display */}
-      {error && !validationError && (
+      {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
         </Alert>
@@ -485,6 +406,7 @@ const CustomersBySalesperson: React.FC = () => {
                   >
                     Customer Name {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </TableCell>
+                  <TableCell>Branch</TableCell>
                   <TableCell
                     sx={{
                       bgcolor: 'var(--surface)',
@@ -547,7 +469,7 @@ const CustomersBySalesperson: React.FC = () => {
               <TableBody>
                 {paginatedCustomers.map((customer, index) => (
                   <TableRow
-                    key={`${customer.phoneNumber}-${index}`}
+                    key={`${customer.BranchId}-${customer.phoneNumber}-${index}`}
                     sx={{
                       '&:hover': { bgcolor: 'var(--surface)' },
                       bgcolor: index % 2 === 0 ? 'var(--surface-secondary)' : 'var(--background)'
@@ -563,10 +485,11 @@ const CustomersBySalesperson: React.FC = () => {
                           textDecoration: 'underline'
                         }
                       }}
-                      onClick={() => navigate(`/customers/${encodeURIComponent(customer.phoneNumber)}`)}
+                      onClick={() => customer.phoneNumber && navigate(branchDetailPath(`/customers/${encodeURIComponent(customer.phoneNumber)}`, customer.BranchId))}
                     >
                       {customer.name}
                     </TableCell>
+                    <TableCell>{customer.Branch}</TableCell>
                     <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       {customer.phoneNumber}
                     </TableCell>
@@ -581,7 +504,7 @@ const CustomersBySalesperson: React.FC = () => {
                         fontWeight: 600
                       }}
                     >
-                      {formatCurrency(customer.totalSpend, currentClinic)}
+                      {formatCurrencyAmount(customer.totalSpend, customer.Currency)}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       {customer.lastPurchaseDate}
@@ -626,7 +549,7 @@ const CustomersBySalesperson: React.FC = () => {
       )}
 
       {/* No Data State */}
-      {selectedSalesperson && !loading && customers.length === 0 && !error && (
+      {report.data && customers.length === 0 && (
         <Paper sx={{ p: 4, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', textAlign: 'center' }}>
           <Typography sx={{ color: 'var(--text-secondary)' }}>
             No customers found for {selectedSalespersonName}

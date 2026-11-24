@@ -13,13 +13,14 @@ import {
   Typography
 } from '@mui/material';
 import { useClinic } from '../contexts/ClinicContext';
-import { formatCurrency } from '../utils/currency';
+import { branchKey, branchDetailPath } from '../utils/reportBranches';
+import { formatCurrencyAmount, getCurrency } from '../utils/currency';
 import { Link, useLocation } from 'react-router-dom';
 
 interface DataTableProps {
   data: any[];
   customerReturnLabel?: string;
-  onServiceClick?: (serviceName: string) => void;
+  onServiceClick?: (serviceName: string, branchId?: string) => void;
   onTherapistClick?: (therapistName: string) => void;
   columnAliases?: { [key: string]: string };
 }
@@ -34,6 +35,7 @@ interface HeadCell {
 
 // Define column widths for specific columns - making them more compact
 const COLUMN_WIDTHS: { [key: string]: string } = {
+  Branch: '130px',
   CustomerName: '140px',
   name: '140px',
   Date: '90px',
@@ -96,11 +98,12 @@ const DataTable: React.FC<DataTableProps> = ({
     const invoiceGroups: Record<string, number> = {};
     return data.map(row => {
       if (row.InvoiceNumber) {
-        invoiceGroups[row.InvoiceNumber] = (invoiceGroups[row.InvoiceNumber] || 0) + 1;
+        const key = branchKey(row.BranchId, row.InvoiceNumber);
+        invoiceGroups[key] = (invoiceGroups[key] || 0) + 1;
         return {
           ...row,
-          _invoicePosition: invoiceGroups[row.InvoiceNumber],
-          _isFirstInvoiceRow: invoiceGroups[row.InvoiceNumber] === 1
+          _invoicePosition: invoiceGroups[key],
+          _isFirstInvoiceRow: invoiceGroups[key] === 1
         };
       }
       return { ...row, _invoicePosition: 1, _isFirstInvoiceRow: true };
@@ -146,12 +149,13 @@ const DataTable: React.FC<DataTableProps> = ({
     return [...processedInvoices].sort(getComparator(order, orderBy));
   }, [processedInvoices, order, orderBy]);
 
+  const effectivePage = Math.min(page, Math.max(0, Math.ceil(sortedData.length / rowsPerPage) - 1));
   const paginatedData = sortedData.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
+    effectivePage * rowsPerPage,
+    effectivePage * rowsPerPage + rowsPerPage
   );
 
-  const handleCellClick = (columnId: string, value: unknown) => {
+  const handleCellClick = (columnId: string, value: unknown, branchId?: string) => {
     // Don't trigger clicks on empty or undefined values
     if (value === null || value === undefined || String(value).trim() === '') {
       return;
@@ -164,7 +168,7 @@ const DataTable: React.FC<DataTableProps> = ({
 
     if ((lowerColumnId.includes('service') || columnId === 'service' || lowerColumnId.includes('service_name')) && onServiceClick) {
       console.log(`Navigating to service: ${value}`);
-      onServiceClick(displayValue);
+      onServiceClick(displayValue, branchId);
     }
     // Therapist/Practitioner name columns
     else if ((lowerColumnId.includes('practitioner') || lowerColumnId.includes('therapist') || columnId === 'therapist' ||
@@ -188,7 +192,7 @@ const DataTable: React.FC<DataTableProps> = ({
       }
 
       if (typeof value === 'number') {
-        return formatCurrency(value, currentClinic);
+        return formatCurrencyAmount(value, rowData.Currency ?? getCurrency(currentClinic));
       }
     }
 
@@ -301,7 +305,7 @@ const DataTable: React.FC<DataTableProps> = ({
               </TableRow>
             </TableHead>
             <TableBody>
-              {sortedData.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row, index) => {
+              {paginatedData.map((row, index) => {
                 return (
                   <TableRow
                     hover
@@ -319,7 +323,7 @@ const DataTable: React.FC<DataTableProps> = ({
                     {headCells.map(({ id: key }) => (
                       <TableCell
                         key={key}
-                        onClick={() => handleCellClick(key, row[key])}
+                        onClick={() => handleCellClick(key, row[key], row.BranchId)}
                         align={typeof row[key] === 'number' ? 'right' : 'left'}
                         sx={{
                           color: key === 'CustomerName' ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -356,7 +360,7 @@ const DataTable: React.FC<DataTableProps> = ({
                         }}
                       >
                         {key === 'CustomerName' && customerReturnLabel && row.CustomerName && row.CustomerPhoneNumber?.trim() ? (
-                          <Link to={`/customers/${encodeURIComponent(row.CustomerPhoneNumber.trim())}`}
+                          <Link to={branchDetailPath(`/customers/${encodeURIComponent(row.CustomerPhoneNumber.trim())}`, row.BranchId)}
                             state={{ returnTo: pathname, returnLabel: customerReturnLabel }}
                             style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
                             {row.CustomerName}
@@ -377,7 +381,7 @@ const DataTable: React.FC<DataTableProps> = ({
           component="div"
           count={data.length}
           rowsPerPage={rowsPerPage}
-          page={page}
+          page={effectivePage}
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
           sx={{

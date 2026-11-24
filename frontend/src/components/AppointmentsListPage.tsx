@@ -32,6 +32,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useClinic } from '../contexts/ClinicContext';
+import { readBranchRows, type BranchRow } from '../utils/reportBranches';
 import { useAuth } from '../contexts/AuthContext';
 import { useReportSection } from '../hooks/useReportSection';
 import { writeFile } from 'xlsx';
@@ -72,10 +73,10 @@ const getEndDateRange = (range: 'day' | 'week' | 'month', end: Date | null): Dat
   }
 };
 
-const EMPTY_RECORDS: AppointmentRecord[] = [];
+const EMPTY_RECORDS: BranchRow<AppointmentRecord>[] = [];
 
 const AppointmentsListPage: React.FC = () => {
-  const { currentClinic } = useClinic();
+  const { reportBranches } = useClinic();
   const { getAccessToken } = useAuth();
 
   // Filter states
@@ -90,19 +91,19 @@ const AppointmentsListPage: React.FC = () => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
 
-  const clinicCode = currentClinic?.code;
   const load = useCallback(async (signal: AbortSignal) => {
     const start = getStartDate(dateRange, endDate);
     const end = getEndDateRange(dateRange, endDate);
-    if (!start || !end || !clinicCode) throw new Error('Select a clinic and a valid date.');
+    if (!start || !end || !reportBranches.length) throw new Error('Select a clinic and a valid date.');
     const accessToken = await getAccessToken();
     if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
-    return fetchAppointmentRecords({
-      clinicCode, startDate: start, endDate: end, accessToken, signal,
+    const rows = await readBranchRows(reportBranches, signal, (clinic, requestSignal) => fetchAppointmentRecords({
+      clinicCode: clinic.code, startDate: start, endDate: end, accessToken, signal: requestSignal,
       status: statusFilter === 'all' ? undefined : statusFilter,
-    });
-  }, [clinicCode, dateRange, endDate, statusFilter, getAccessToken]);
-  const report = useReportSection(clinicCode && endDate ? load : null, 0, null);
+    }));
+    return rows.sort((a, b) => (b.FromTime ?? '').localeCompare(a.FromTime ?? ''));
+  }, [reportBranches, dateRange, endDate, statusFilter, getAccessToken]);
+  const report = useReportSection(reportBranches.length && endDate ? load : null, 0, null);
   const records = report.data ?? EMPTY_RECORDS;
   const { loading, error, updatedAt: lastUpdated } = report;
 
@@ -118,13 +119,13 @@ const AppointmentsListPage: React.FC = () => {
       record.PractitionerName?.toLowerCase().includes(lowerSearchTerm) ||
       record.MemberPhoneNumber?.includes(deferredSearchTerm) ||
       record.bookingid?.toLowerCase().includes(lowerSearchTerm) ||
-      record.ClinicName?.toLowerCase().includes(lowerSearchTerm)
+      record.Branch.toLowerCase().includes(lowerSearchTerm)
     );
   }, [records, deferredSearchTerm]);
 
   useEffect(() => {
     setPage(0);
-  }, [clinicCode, dateRange, endDate, statusFilter, deferredSearchTerm, rowsPerPage]);
+  }, [reportBranches, dateRange, endDate, statusFilter, deferredSearchTerm, rowsPerPage]);
 
   const lastPage = Math.max(0, Math.ceil(filteredRecords.length / rowsPerPage) - 1);
   const effectivePage = Math.min(page, lastPage);
@@ -321,6 +322,7 @@ const AppointmentsListPage: React.FC = () => {
                 {/* Adjust columns based on what's most important */}
                 <TableCell sx={{ minWidth: 145, width: 145 }}>From Time (MMT)</TableCell>
                 <TableCell sx={{ minWidth: 145, width: 145 }}>To Time (MMT)</TableCell>
+                <TableCell>Branch</TableCell>
                 <TableCell>Service</TableCell>
                 <TableCell>Member</TableCell>
                 <TableCell>Phone</TableCell>
@@ -333,13 +335,13 @@ const AppointmentsListPage: React.FC = () => {
             <TableBody>
               {loading && records.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
+                  <TableCell colSpan={10} align="center">
                     <Typography color="text.secondary" sx={{ my: 4 }}>Loading appointments…</Typography>
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length === 0 ? (
                  <TableRow>
-                   <TableCell colSpan={9} align="center">
+                   <TableCell colSpan={10} align="center">
                      <Typography color="text.secondary" sx={{ my: 4 }}>
                        {error ? 'Appointment data is unavailable.' : 'No appointments match the current filters.'}
                      </Typography>
@@ -348,12 +350,13 @@ const AppointmentsListPage: React.FC = () => {
               ) : (
                 paginatedRecords.map((record, index) => (
                   <TableRow
-                    key={`${record.bookingid}-${record.FromTime}-${record.ServiceName}-${index}`}
+                    key={`${record.BranchId}-${record.bookingid}-${record.FromTime}-${record.ServiceName}-${index}`}
                     hover
                     sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                   >
                     <TableCell sx={{ minWidth: 145, width: 145, whiteSpace: 'nowrap' }}>{formatAppointmentDateTime(record.FromTime)}</TableCell>
                     <TableCell sx={{ minWidth: 145, width: 145, whiteSpace: 'nowrap' }}>{formatAppointmentDateTime(record.ToTime)}</TableCell>
+                    <TableCell>{record.Branch}</TableCell>
                     <TableCell>{record.ServiceName}</TableCell>
                     <TableCell>
                       <Typography variant="body2">{record.MemberName ?? '-'}</Typography>

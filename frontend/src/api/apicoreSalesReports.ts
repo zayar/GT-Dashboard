@@ -965,6 +965,7 @@ export async function fetchPaymentReportRecords(input: ReportDateInput & {
 }
 
 interface OutstandingReportInput {
+  signal?: AbortSignal;
   clinicId: string;
   asOfDate: Date;
   accessToken: string;
@@ -975,6 +976,7 @@ async function fetchOutstandingReportOrders(input: OutstandingReportInput) {
     clinicId: input.clinicId,
     accessToken: input.accessToken,
     where: buildOutstandingOrderWhere(input),
+    signal: input.signal,
   });
 }
 

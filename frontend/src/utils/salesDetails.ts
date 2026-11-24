@@ -1,24 +1,27 @@
 import type { SalesDetailRecord } from '../api/apicoreSalesReports';
 
-type SalesDetailDisplayRecord = Omit<SalesDetailRecord, 'InvoiceNetTotal'> & {
+import { branchKey, type ReportBranch } from './reportBranches';
+
+type SalesRow = SalesDetailRecord & Partial<ReportBranch>;
+type SalesDetailDisplayRecord = Omit<SalesRow, 'InvoiceNetTotal'> & {
   InvoiceNetTotal: number | null;
 };
 
 export function buildSalesDetailDisplayRows(
-  data: SalesDetailRecord[],
+  data: SalesRow[],
   viewMode: 'detailed' | 'summary',
 ): SalesDetailDisplayRecord[] {
   const filteredData = data;
 
   // If in summary view, group by invoice number
   if (viewMode === 'summary') {
-    const invoiceSummary: Record<string, SalesDetailRecord> = {};
+    const invoiceSummary: Record<string, SalesRow> = {};
     const servicesMap: Record<string, string[]> = {};
     const practitionersMap: Record<string, Set<string>> = {};
 
     // First pass: collect unique invoices and their services
     data.forEach(record => {
-      const invoiceNum = record.InvoiceNumber;
+      const invoiceNum = branchKey(record.BranchId, record.InvoiceNumber);
 
       // Initialize invoice record if not exists
       if (!invoiceSummary[invoiceNum]) {
@@ -63,9 +66,12 @@ export function buildSalesDetailDisplayRows(
   }
 
   // Keep the existing table column order and invoice-level suppression.
-  const result = filteredData.map((record, index) => {
+  const seen = new Set<string>();
+  const result = filteredData.map(record => {
     // Check if this is the first occurrence of this invoice number
-    const isFirstInvoiceRow = index === 0 || filteredData[index - 1].InvoiceNumber !== record.InvoiceNumber;
+    const key = branchKey(record.BranchId, record.InvoiceNumber);
+    const isFirstInvoiceRow = !seen.has(key);
+    seen.add(key);
 
     return {
       Date: record.Date,
@@ -96,6 +102,7 @@ export function buildSalesDetailDisplayRows(
       Note: isFirstInvoiceRow ? record.Note : null,
       PaymentNote: record.PaymentNote,
       CustomerPhoneNumber: record.CustomerPhoneNumber,
+      Branch: record.Branch, BranchId: record.BranchId, Currency: record.Currency,
     };
   });
 
@@ -120,6 +127,7 @@ export function buildSalesDetailExportRows(records: SalesDetailDisplayRecord[]) 
     processedRows.push({
       'Date': record.Date,
       'Invoice Number': record.InvoiceNumber,
+      Branch: record.Branch,
       'Customer Name': record.CustomerName,
       'Member ID': record.MemberId || '',
       'Sale Person': record.SalePerson || '',
@@ -144,7 +152,8 @@ export function buildSalesDetailExportRows(records: SalesDetailDisplayRecord[]) 
       'Payment Type': record.PaymentType || '',
       'Payment Amount': record.PaymentAmount || '',
       'Note': record.Note || '',
-      'Payment Note': record.PaymentNote || ''
+      'Payment Note': record.PaymentNote || '',
+      Currency: record.Currency
     });
   });
   return processedRows;

@@ -12,6 +12,7 @@ import BankingDetails from './components/BankingDetails';
 import CheckInCheckOutPage from './components/CheckInCheckOutPage';
 import DailyReport from './components/DailyReport';
 import TaskflowDashboard from './components/TaskflowDashboard';
+import ReportDetailBranch from './components/ReportDetailBranch';
 import ClinicSelector from './components/ClinicSelector';
 import BranchPerformance from './components/BranchPerformance';
 import Commission from './components/Commission';
@@ -2116,14 +2117,20 @@ const AppContent = () => {
             <Route path="/appointments-list" element={<AppointmentsListPage />} />
             <Route path="/daily-report" element={<DailyReport />} />
             <Route path="/customer-service-activity-report" element={<CustomerServiceActivityReport />} />
-            {/* Older reports keep branch data in local component state. */}
+            <Route path="/outstanding-receivables" element={<OutstandingReceivables />} />
+            <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
+            <Route path="/customers-by-salesperson" element={<CustomersBySalesperson />} />
+            <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
+            <Route element={<ReportDetailBranch />}>
+              <Route path="/services/:name" element={<ServiceDetails />} />
+              <Route path="/customers/:phoneNumber" element={<CustomerDetails />} />
+            </Route>
+            {/* Single-branch pages reset local data when the active clinic changes. */}
             <Route element={<Outlet key={currentClinic?.id} />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/customers" element={<CustomersTable />} />
-              <Route path="/customers/:phoneNumber" element={<CustomerDetails />} />
               <Route path="/services" element={<ServicesTable />} />
-              <Route path="/services/:name" element={<ServiceDetails />} />
               <Route path="/therapists" element={<TherapistList />} />
               <Route path="/therapists/:name" element={<TherapistDetails />} />
               <Route path="/helpers" element={<HelperList />} />
@@ -2131,15 +2138,11 @@ const AppContent = () => {
               <Route path="/inactive-customers-report" element={<InactiveCustomersReport />} />
               <Route path="/commission" element={<Commission />} />
               <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
-              <Route path="/outstanding-receivables" element={<OutstandingReceivables />} />
               {/* <Route path="/appointments" element={<Appointments />} /> */}{/* Removed old appointments */}
               <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
               <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
               <Route path="/taskflow-dashboard" element={<TaskflowDashboard />} />
-              <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
-              <Route path="/customers-by-salesperson" element={<CustomersBySalesperson />} />
               {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
-              <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
               <Route path="/top-treatment-report" element={<TopTreatmentReport />} />
               <Route path="/top-treatment-report/treatment-details" element={<TreatmentDetailsReport />} />
               <Route path="/transactions" element={<Transaction />} />

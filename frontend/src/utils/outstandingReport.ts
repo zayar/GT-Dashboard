@@ -34,8 +34,8 @@ export interface OutstandingBreakdown {
   outstandingBalance: number;
 }
 
-export const filterOutstandingRecords = (
-  records: OutstandingReportRecord[],
+export const filterOutstandingRecords = <T extends OutstandingReportRecord>(
+  records: T[],
   filters: OutstandingFilters,
 ) => {
   const search = filters.search.trim().toLowerCase();

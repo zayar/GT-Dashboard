@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -34,6 +34,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
+import { branchDetailPath, readBranchRows, type BranchRow, formatReportTotal, branchKey } from '../utils/reportBranches';
 import { useReportSection } from '../hooks/useReportSection';
 import { useClinic } from '../contexts/ClinicContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,39 +46,43 @@ import {
 import { format } from 'date-fns';
 import { writeFile } from 'xlsx';
 import { buildPaymentWorkbook } from '../utils/reportWorkbooks';
-import { getCurrency, formatCurrency } from '../utils/currency';
+import { getCurrency, formatCurrencyAmount } from '../utils/currency';
 import {
   filterPaymentsByMethod,
   normalizePaymentMethod,
-  summarizePaymentMethods,
+  summarizeBranchPayments,
 } from '../utils/paymentReport';
 
 type PaymentRecord = PaymentReportRecord;
 
-const EMPTY_ROWS: PaymentRecord[] = [];
+const EMPTY_ROWS: BranchRow<PaymentRecord>[] = [];
 
 const BankingDetails: React.FC = () => {
   const navigate = useNavigate();
-  const { currentClinic } = useClinic();
+  const { currentClinic, reportBranches } = useClinic();
   const { getAccessToken } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [startDate, setStartDate] = useState<Date | null>(new Date());
   const [endDate, setEndDate] = useState<Date | null>(new Date());
   const [filterType, setFilterType] = useState<'day' | 'month'>('day');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
+  const [summaryBranchId, setSummaryBranchId] = useState('');
+  useEffect(() => { setSummaryBranchId(''); }, [reportBranches]);
+  const summaryBranch = reportBranches.find(branch => branch.id === summaryBranchId);
   const [searchTerm, setSearchTerm] = useState('');
   const [paymentFilterAnchorEl, setPaymentFilterAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [walletTopupFilter, setWalletTopupFilter] = useState<'all' | 'hide' | 'only'>('all');
 
-  const clinicId = currentClinic?.id;
   const load = useCallback(async (signal: AbortSignal) => {
-    if (!clinicId) throw new Error('Select a clinic.');
     const accessToken = await getAccessToken();
     if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
-    return fetchPaymentReportRecords({ clinicId, filterType, startDate, endDate, selectedDate, accessToken, signal });
-  }, [clinicId, filterType, startDate, endDate, selectedDate, getAccessToken]);
+    const rows = await readBranchRows(reportBranches, signal, (clinic, requestSignal) => fetchPaymentReportRecords({
+      clinicId: clinic.id, filterType, startDate, endDate, selectedDate, accessToken, signal: requestSignal,
+    }));
+    return rows.sort((a, b) => b.Date.localeCompare(a.Date));
+  }, [reportBranches, filterType, startDate, endDate, selectedDate, getAccessToken]);
   const hasDates = filterType === 'day' ? startDate && endDate : selectedDate;
-  const report = useReportSection(clinicId && hasDates ? load : null, 0, null);
+  const report = useReportSection(reportBranches.length && hasDates ? load : null, 0, null);
   const rawData = report.data ?? EMPTY_ROWS;
   const { loading, error } = report;
 
@@ -122,6 +127,7 @@ const BankingDetails: React.FC = () => {
     if (searchTerm.trim() !== '') {
       const normalizedSearchTerm = searchTerm.toLowerCase().trim();
       filteredData = filteredData.filter(record =>
+        record.Branch.toLowerCase().includes(normalizedSearchTerm) ||
         (record.InvoiceNumber?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.CustomerName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.MemberId?.toLowerCase().includes(normalizedSearchTerm) || false) ||
@@ -138,12 +144,13 @@ const BankingDetails: React.FC = () => {
 
   // Payment method selection drills the detailed table without hiding the other summary rows.
   const data = useMemo(() => {
-    return filterPaymentsByMethod(baseFilteredData, selectedPaymentMethods);
-  }, [baseFilteredData, selectedPaymentMethods]);
+    const methods = filterPaymentsByMethod(baseFilteredData, selectedPaymentMethods);
+    return summaryBranch ? methods.filter(row => row.BranchId === summaryBranch.id) : methods;
+  }, [baseFilteredData, selectedPaymentMethods, summaryBranch]);
 
   // Generate summary data from filtered data
   const summaryData = useMemo(() => {
-    return summarizePaymentMethods(baseFilteredData);
+    return summarizeBranchPayments(baseFilteredData);
   }, [baseFilteredData]);
 
   const handleFilterTypeChange = (event: SelectChangeEvent<'day' | 'month'>) => {
@@ -151,6 +158,7 @@ const BankingDetails: React.FC = () => {
   };
 
   const handlePaymentMethodChange = (method: string) => {
+    setSummaryBranchId('');
     setSelectedPaymentMethods(prev => {
       if (method === 'all') {
         return [];
@@ -166,11 +174,12 @@ const BankingDetails: React.FC = () => {
     });
   };
 
-  const handleSummaryMethodClick = (method: string) => {
-    const normalizedMethod = normalizePaymentMethod(method);
-    setSelectedPaymentMethods(current => (
-      current.length === 1 && current[0] === normalizedMethod ? [] : [normalizedMethod]
-    ));
+  const isSummarySelected = (method: string, branchId: string) =>
+    selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method && summaryBranchId === branchId;
+  const handleSummaryMethodClick = (method: string, branchId: string) => {
+    const clear = isSummarySelected(method, branchId);
+    setSelectedPaymentMethods(clear ? [] : [method]);
+    setSummaryBranchId(clear ? '' : branchId);
   };
 
   const handleBack = () => {
@@ -286,8 +295,8 @@ const BankingDetails: React.FC = () => {
     );
   }
 
-  const grandTotal = summaryData.reduce((total, method) => total + method.TotalAmount, 0);
-  const detailedTotal = data.reduce((total, record) => total + (Number(record.PaymentAmount) || 0), 0);
+  const grandTotal = formatReportTotal(summaryData, method => method.TotalAmount, getCurrency(currentClinic));
+  const detailedTotal = formatReportTotal(data, record => Number(record.PaymentAmount) || 0, getCurrency(currentClinic));
   const activePaymentFilter = selectedPaymentMethods.length === 1 ? selectedPaymentMethods[0] : null;
 
   return (
@@ -798,7 +807,7 @@ const BankingDetails: React.FC = () => {
               Payment Methods Summary
             </Typography>
             <Typography variant="body2" sx={{ mt: 0.35, color: 'var(--text-secondary)' }}>
-              Individual payment records · Click a method to filter the details below
+              Individual payment records · Select a branch and payment method below to see its transactions
             </Typography>
           </Box>
         </Box>
@@ -818,6 +827,7 @@ const BankingDetails: React.FC = () => {
                   >
                     Payment Method
                   </TableCell>
+                  <TableCell>Branch</TableCell>
                   <TableCell
                     sx={{
                       bgcolor: 'var(--background)',
@@ -845,21 +855,21 @@ const BankingDetails: React.FC = () => {
               <TableBody>
                 {summaryData.map((method) => (
                   <TableRow
-                    key={method.PaymentMethod}
+                    key={branchKey(method.BranchId, method.PaymentMethod)}
                     hover
                     role="button"
                     tabIndex={0}
-                    aria-label={`Filter detailed transactions by ${method.PaymentMethod}`}
-                    aria-pressed={selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method.PaymentMethod}
-                    onClick={() => handleSummaryMethodClick(method.PaymentMethod)}
+                    aria-label={`${method.PaymentMethod} payments at ${method.Branch}`}
+                    aria-pressed={isSummarySelected(method.PaymentMethod, method.BranchId)}
+                    onClick={() => handleSummaryMethodClick(method.PaymentMethod, method.BranchId)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        handleSummaryMethodClick(method.PaymentMethod);
+                        handleSummaryMethodClick(method.PaymentMethod, method.BranchId);
                       }
                     }}
                     sx={{
-                      bgcolor: selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method.PaymentMethod
+                      bgcolor: isSummarySelected(method.PaymentMethod, method.BranchId)
                         ? 'color-mix(in srgb, var(--primary) 10%, var(--surface))'
                         : undefined,
                       outline: 'none',
@@ -876,28 +886,29 @@ const BankingDetails: React.FC = () => {
                     <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography component="span" sx={{ fontSize: 'inherit', fontWeight: 650 }}>{method.PaymentMethod}</Typography>
-                        {selectedPaymentMethods.length === 1 && selectedPaymentMethods[0] === method.PaymentMethod && (
+                        {isSummarySelected(method.PaymentMethod, method.BranchId) && (
                           <Chip size="small" label="Selected" sx={{ height: 22, fontSize: '0.65rem', bgcolor: 'var(--primary)', color: '#fff' }} />
                         )}
                       </Box>
                     </TableCell>
+                    <TableCell>{method.Branch}</TableCell>
                     <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
                       {method.TransactionCount.toLocaleString()}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
-                      {formatCurrency(method.TotalAmount, currentClinic)}
+                      {formatCurrencyAmount(method.TotalAmount, method.Currency)}
                     </TableCell>
                   </TableRow>
                 ))}
                 <TableRow sx={{ bgcolor: 'var(--background)' }}>
-                  <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none' }}>
+                  <TableCell colSpan={2} sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none' }}>
                     Grand Total
                   </TableCell>
                   <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
                     {summaryData.reduce((count, method) => count + method.TransactionCount, 0).toLocaleString()}
                   </TableCell>
                   <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
-                    {formatCurrency(grandTotal, currentClinic)}
+                    {grandTotal}
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -928,24 +939,26 @@ const BankingDetails: React.FC = () => {
             {selectedPaymentMethods.length > 0 && (
               <Chip
                 size="small"
-                label={activePaymentFilter ? `Payment: ${activePaymentFilter}` : `${selectedPaymentMethods.length} payment methods`}
-                onDelete={() => setSelectedPaymentMethods([])}
+                label={activePaymentFilter ? [activePaymentFilter, summaryBranch?.reportName].filter(Boolean).join(' · ') : `${selectedPaymentMethods.length} payment methods`}
+                onDelete={() => { setSelectedPaymentMethods([]); setSummaryBranchId(''); }}
                 sx={{ bgcolor: 'var(--primary-soft)', color: 'var(--primary)' }}
               />
             )}
           </Box>
           <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
             <Typography sx={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Detailed total</Typography>
-            <Typography sx={{ mt: 0.2, fontWeight: 750, color: 'var(--text-primary)' }}>{formatCurrency(detailedTotal, currentClinic)}</Typography>
+            <Typography sx={{ mt: 0.2, fontWeight: 750, color: 'var(--text-primary)' }}>{detailedTotal}</Typography>
           </Box>
         </Box>
         <DataTable
           data={data}
           customerReturnLabel="Payment Report"
-          onServiceClick={(serviceName: string) => navigate(`/services/${encodeURIComponent(serviceName)}`)}
+          onServiceClick={(serviceName, branchId) => navigate(branchDetailPath(`/services/${encodeURIComponent(serviceName)}`, branchId))}
           columnAliases={{
             Date: 'Payment Date',
             InvoiceNumber: 'Invoice Number',
+          Branch: 'Branch',
+          ...(new Set(rawData.map(row => row.Currency)).size > 1 ? { Currency: 'Currency' } : {}),
             CustomerName: 'Customer Name',
             MemberId: 'Member ID',
             SalePerson: 'Sale Person',

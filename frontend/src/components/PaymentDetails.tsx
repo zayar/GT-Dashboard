@@ -30,6 +30,7 @@ import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
+import { branchDetailPath, readBranchRows, type BranchRow } from '../utils/reportBranches';
 import { useReportSection } from '../hooks/useReportSection';
 import { useClinic } from '../contexts/ClinicContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,11 +44,11 @@ import { buildSalesDetailDisplayRows, buildSalesDetailExportRows } from '../util
 
 type PaymentRecord = SalesDetailRecord;
 
-const EMPTY_ROWS: PaymentRecord[] = [];
+const EMPTY_ROWS: BranchRow<PaymentRecord>[] = [];
 
 const PaymentDetails: React.FC = () => {
   const navigate = useNavigate();
-  const { currentClinic } = useClinic();
+  const { reportBranches } = useClinic();
   const { getAccessToken } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [startDate, setStartDate] = useState<Date | null>(new Date());
@@ -59,15 +60,16 @@ const PaymentDetails: React.FC = () => {
   const [paymentFilterAnchorEl, setPaymentFilterAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [viewMode, setViewMode] = useState<'detailed' | 'summary'>('detailed');
 
-  const clinicId = currentClinic?.id;
   const load = useCallback(async (signal: AbortSignal) => {
-    if (!clinicId) throw new Error('Select a clinic.');
     const accessToken = await getAccessToken();
     if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
-    return fetchSalesDetailRecords({ clinicId, filterType, startDate, endDate, selectedDate, accessToken, signal, includePractitioners: true });
-  }, [clinicId, filterType, startDate, endDate, selectedDate, getAccessToken]);
+    const rows = await readBranchRows(reportBranches, signal, (clinic, requestSignal) => fetchSalesDetailRecords({
+      clinicId: clinic.id, filterType, startDate, endDate, selectedDate, accessToken, signal: requestSignal, includePractitioners: true,
+    }));
+    return rows.sort((a, b) => b.Date.localeCompare(a.Date));
+  }, [reportBranches, filterType, startDate, endDate, selectedDate, getAccessToken]);
   const hasDates = filterType === 'day' ? startDate && endDate : selectedDate;
-  const report = useReportSection(clinicId && hasDates ? load : null, 0, null);
+  const report = useReportSection(reportBranches.length && hasDates ? load : null, 0, null);
   const rawData = report.data ?? EMPTY_ROWS;
   const { loading, error } = report;
 
@@ -109,6 +111,7 @@ const PaymentDetails: React.FC = () => {
     if (searchTerm.trim() !== '') {
       const normalizedSearchTerm = searchTerm.toLowerCase().trim();
       filteredData = filteredData.filter(record =>
+        record.Branch.toLowerCase().includes(normalizedSearchTerm) ||
         (record.InvoiceNumber?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.CustomerName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.MemberId?.toLowerCase().includes(normalizedSearchTerm) || false) ||
@@ -228,6 +231,7 @@ const PaymentDetails: React.FC = () => {
     const colWidths = [
       { wch: 12 },  // Date
       { wch: 15 },  // Invoice Number
+      { wch: 26 },  // Branch
       { wch: 25 },  // Customer Name
       { wch: 15 },  // Member ID
       { wch: 20 },  // Sale Person
@@ -281,9 +285,9 @@ const PaymentDetails: React.FC = () => {
     }
   };
 
-  const handleServiceClick = (serviceName: string) => {
+  const handleServiceClick = (serviceName: string, branchId?: string) => {
     if (serviceName) {
-      navigate(`/services/${encodeURIComponent(serviceName)}`);
+      navigate(branchDetailPath(`/services/${encodeURIComponent(serviceName)}`, branchId));
     }
   };
 
@@ -800,6 +804,8 @@ const PaymentDetails: React.FC = () => {
         columnAliases={{
           Date: 'Date',
           InvoiceNumber: 'Invoice Number',
+          Branch: 'Branch',
+          ...(new Set(rawData.map(row => row.Currency)).size > 1 ? { Currency: 'Currency' } : {}),
           CustomerName: 'Customer Name',
           MemberId: 'Member ID',
           SalePerson: 'Sale Person',
