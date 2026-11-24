@@ -14,6 +14,7 @@ import {
   type User as FirebaseUser,
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import type { Clinic } from './ClinicContext';
 import {
   mapAuthorizedClinics,
   normalizeClinicClaims,
@@ -27,6 +28,7 @@ interface SessionUser {
   photo?: string;
   roles: string[];
   clinicIds: string[];
+  clinics: Clinic[];
   getIdToken: () => Promise<string>;
 }
 
@@ -68,6 +70,9 @@ const ALLOWED_CLINICS_QUERY = `
       logo
       name
       code
+      company_id
+      company { name }
+      currency
       pass
     }
   }
@@ -124,26 +129,13 @@ function normalizeRoles(value: unknown) {
     : [];
 }
 
-function writeAuthorizedClinics(clinics: ReturnType<typeof mapAuthorizedClinics>) {
-  const previousClinicId = localStorage.getItem('selectedClinicId');
-  const selectedClinicId = clinics.some((clinic) => clinic.id === previousClinicId)
-    ? previousClinicId
-    : clinics[0]?.id;
-
-  localStorage.removeItem('currentUser');
-  localStorage.setItem('availableClinics', JSON.stringify(clinics));
-  if (selectedClinicId) {
-    localStorage.setItem('selectedClinicId', selectedClinicId);
-  } else {
-    localStorage.removeItem('selectedClinicId');
-  }
-}
-
 async function buildSession(firebaseUser: FirebaseUser): Promise<SessionUser> {
   const tokenResult = await firebaseUser.getIdTokenResult();
   const clinicIds = normalizeClinicClaims(tokenResult.claims.clinics);
+  const staffId = [tokenResult.claims.id, tokenResult.claims.userId, firebaseUser.uid]
+    .find((value): value is string => typeof value === 'string' && Boolean(value));
 
-  if (clinicIds.length === 0) {
+  if (!staffId || clinicIds.length === 0) {
     throw new Error('This Google account does not have access to any GreatTime clinic.');
   }
 
@@ -154,6 +146,7 @@ async function buildSession(firebaseUser: FirebaseUser): Promise<SessionUser> {
         id: {
           in: clinicIds,
         },
+        users: { some: { id: { equals: staffId }, active: { equals: true } } },
       },
     },
     tokenResult.token,
@@ -164,13 +157,11 @@ async function buildSession(firebaseUser: FirebaseUser): Promise<SessionUser> {
     throw new Error('This Google account does not have access to an active GreatTime clinic.');
   }
 
-  writeAuthorizedClinics(clinics);
+  localStorage.removeItem('currentUser');
+  localStorage.removeItem('availableClinics');
 
   return {
-    id:
-      typeof tokenResult.claims.userId === 'string'
-        ? tokenResult.claims.userId
-        : firebaseUser.uid,
+    id: staffId,
     email:
       typeof tokenResult.claims.email === 'string'
         ? tokenResult.claims.email
@@ -184,7 +175,8 @@ async function buildSession(firebaseUser: FirebaseUser): Promise<SessionUser> {
         ? tokenResult.claims.photo
         : firebaseUser.photoURL ?? undefined,
     roles: normalizeRoles(tokenResult.claims.roles),
-    clinicIds,
+    clinicIds: clinics.map(clinic => clinic.id),
+    clinics,
     getIdToken: () => firebaseUser.getIdToken(),
   };
 }

@@ -3,10 +3,11 @@ import { Clinic } from '../contexts/ClinicContext';
 /**
  * Get the currency symbol for a clinic
  * @param clinic - The current clinic object
- * @returns Currency symbol (USD for LA BELLA, MMK for others)
+ * @returns The configured currency code, with the legacy fallback for older clinic records.
  */
 export const getCurrency = (clinic: Clinic | null): string => {
   if (!clinic) return 'MMK';
+  if (clinic.currency?.trim()) return clinic.currency.trim().toUpperCase();
   
   // LA BELLA CLINIC uses USD
   if (clinic.code?.toLowerCase() === 'gtlabella' || clinic.id?.toLowerCase() === 'gtlabella') {

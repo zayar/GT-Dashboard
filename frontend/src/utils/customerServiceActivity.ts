@@ -118,6 +118,8 @@ export const buildCustomerServiceActivityQuery = ({
       FROM great_time.MainDataView
       WHERE LOWER(ClinicCode) = LOWER('${clinic}')
         AND CustomerName IS NOT NULL
+        AND DATE(CheckInTime) <= DATE('${endDate}')
+        AND CustomerPhoneNumber IN (SELECT CustomerPhoneNumber FROM VisitsInRange)
       GROUP BY CustomerPhoneNumber
     ),
     PaymentData AS (

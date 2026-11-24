@@ -1,6 +1,6 @@
 import type { SalesDetailRecord } from '../api/apicoreSalesReports';
 
-type SalesDetailDisplayRecord = Omit<SalesDetailRecord, 'CustomerPhoneNumber' | 'InvoiceNetTotal'> & {
+type SalesDetailDisplayRecord = Omit<SalesDetailRecord, 'InvoiceNetTotal'> & {
   InvoiceNetTotal: number | null;
 };
 
@@ -94,7 +94,8 @@ export function buildSalesDetailDisplayRows(
       PaymentType: record.PaymentType,
       PaymentAmount: record.PaymentAmount,
       Note: isFirstInvoiceRow ? record.Note : null,
-      PaymentNote: record.PaymentNote
+      PaymentNote: record.PaymentNote,
+      CustomerPhoneNumber: record.CustomerPhoneNumber,
     };
   });
 

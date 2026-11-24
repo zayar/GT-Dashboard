@@ -276,6 +276,7 @@ export async function postApicoreGraphql<T>(input: {
   query: string;
   variables: Record<string, unknown>;
   accessToken: string;
+  signal?: AbortSignal;
 }): Promise<T> {
   if (!APICORE_GRAPHQL_URL) {
     throw new Error('APICORE GraphQL is not configured. Please check VITE_APICORE_GRAPHQL_URL.');
@@ -283,6 +284,7 @@ export async function postApicoreGraphql<T>(input: {
 
   const response = await fetch(APICORE_GRAPHQL_URL, {
     method: 'POST',
+    signal: input.signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${input.accessToken}`,
@@ -344,6 +346,7 @@ export async function fetchAppointmentRecords(input: {
   endDate: Date;
   status?: BookingStatus;
   accessToken: string;
+  signal?: AbortSignal;
 }): Promise<AppointmentRecord[]> {
   const records: AppointmentRecord[] = [];
   let skip = 0;
@@ -353,6 +356,7 @@ export async function fetchAppointmentRecords(input: {
     const data = await postApicoreGraphql<BookingDetailsResponse>({
       query: GET_BOOKING_DETAILS,
       accessToken: input.accessToken,
+      signal: input.signal,
       variables: {
         clinicCode: input.clinicCode,
         startDate: toApicoreBookingWallClockIso(input.startDate),

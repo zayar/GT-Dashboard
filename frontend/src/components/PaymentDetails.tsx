@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -30,6 +30,7 @@ import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
+import { useReportSection } from '../hooks/useReportSection';
 import { useClinic } from '../contexts/ClinicContext';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -42,13 +43,12 @@ import { buildSalesDetailDisplayRows, buildSalesDetailExportRows } from '../util
 
 type PaymentRecord = SalesDetailRecord;
 
+const EMPTY_ROWS: PaymentRecord[] = [];
+
 const PaymentDetails: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
   const { getAccessToken } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [rawData, setRawData] = useState<PaymentRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [startDate, setStartDate] = useState<Date | null>(new Date());
   const [endDate, setEndDate] = useState<Date | null>(new Date());
@@ -58,6 +58,18 @@ const PaymentDetails: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [paymentFilterAnchorEl, setPaymentFilterAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [viewMode, setViewMode] = useState<'detailed' | 'summary'>('detailed');
+
+  const clinicId = currentClinic?.id;
+  const load = useCallback(async (signal: AbortSignal) => {
+    if (!clinicId) throw new Error('Select a clinic.');
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
+    return fetchSalesDetailRecords({ clinicId, filterType, startDate, endDate, selectedDate, accessToken, signal, includePractitioners: true });
+  }, [clinicId, filterType, startDate, endDate, selectedDate, getAccessToken]);
+  const hasDates = filterType === 'day' ? startDate && endDate : selectedDate;
+  const report = useReportSection(clinicId && hasDates ? load : null, 0, null);
+  const rawData = report.data ?? EMPTY_ROWS;
+  const { loading, error } = report;
 
   // Get unique payment methods from the data
   const paymentMethods = useMemo(() => {
@@ -119,46 +131,6 @@ const PaymentDetails: React.FC = () => {
   const dataToDisplay = useMemo(() => {
     return buildSalesDetailDisplayRows(data, viewMode);
   }, [data, viewMode]);
-
-  useEffect(() => {
-    if (currentClinic && ((filterType === 'day' && startDate && endDate) || (filterType === 'month' && selectedDate))) {
-      fetchPaymentData();
-    }
-  }, [selectedDate, startDate, endDate, filterType, currentClinic]);
-
-  const fetchPaymentData = async () => {
-    if (!currentClinic) return;
-
-    // Check if we have the required dates based on filter type
-    if (filterType === 'day' && (!startDate || !endDate)) return;
-    if (filterType === 'month' && !selectedDate) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
-
-      const records = await fetchSalesDetailRecords({
-        clinicId: currentClinic.id,
-        filterType,
-        startDate,
-        endDate,
-        selectedDate,
-        includePractitioners: true,
-        accessToken,
-      });
-
-      setRawData(records);
-    } catch (err) {
-      console.error('Payment Data Error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleFilterTypeChange = (event: SelectChangeEvent<'day' | 'month'>) => {
     setFilterType(event.target.value as 'day' | 'month');
@@ -309,10 +281,6 @@ const PaymentDetails: React.FC = () => {
     }
   };
 
-  const handleCustomerClick = (customerName: string) => {
-    navigate(`/customers/${encodeURIComponent(customerName)}`);
-  };
-
   const handleServiceClick = (serviceName: string) => {
     if (serviceName) {
       navigate(`/services/${encodeURIComponent(serviceName)}`);
@@ -353,7 +321,7 @@ const PaymentDetails: React.FC = () => {
         <Typography variant="h6" sx={{ color: 'var(--error)' }}>{error}</Typography>
         <Button
           variant="contained"
-          onClick={fetchPaymentData}
+          onClick={report.retry}
           sx={{
             mt: 2,
             bgcolor: 'var(--primary)',
@@ -827,7 +795,7 @@ const PaymentDetails: React.FC = () => {
       {/* Data table */}
       <DataTable
         data={dataToDisplay}
-        onCustomerClick={handleCustomerClick}
+        customerReturnLabel="Sales Details"
         onServiceClick={handleServiceClick}
         columnAliases={{
           Date: 'Date',

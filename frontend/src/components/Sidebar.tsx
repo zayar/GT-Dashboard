@@ -83,6 +83,9 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
   }, [isMinimized]);
 
   useEffect(() => {
+    if (location.pathname === '/branch-performance') {
+      setExpandedMenus(prev => prev.includes('dashboard') ? prev : [...prev, 'dashboard']);
+    }
     if (location.pathname.startsWith('/top-treatment-report')) {
       setExpandedMenus(prev => prev.includes('treatment') ? prev : [...prev, 'treatment']);
     }
@@ -149,6 +152,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
       hasSubmenu: true,
       submenu: [
         { id: 'main-dashboard', label: 'Main Dashboard', icon: 'fas fa-home', path: '/dashboard' },
+        { id: 'branch-performance', label: 'Branch Performance', icon: 'fas fa-code-branch', path: '/branch-performance' },
         { id: 'customer-behavior', label: 'Customer Behavior', icon: 'fas fa-chart-bar', path: '/customer-behavior-report' },
         { id: 'service-behavior', label: 'Service Behavior', icon: 'fas fa-spa', path: '/service-behavior-report' },
         { id: 'taskflow-dashboard', label: 'Taskflow Dashboard', icon: 'fas fa-tasks', path: '/taskflow-dashboard' },

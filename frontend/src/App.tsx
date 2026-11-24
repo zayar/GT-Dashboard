@@ -6,13 +6,14 @@ import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Title
 import { lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { Toaster } from 'react-hot-toast';
-import { Link, Navigate, Route, BrowserRouter as Router, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, BrowserRouter as Router, Routes, useNavigate, Outlet } from 'react-router-dom';
 import AppointmentsListPage from './components/AppointmentsListPage';
 import BankingDetails from './components/BankingDetails';
 import CheckInCheckOutPage from './components/CheckInCheckOutPage';
 import DailyReport from './components/DailyReport';
 import TaskflowDashboard from './components/TaskflowDashboard';
 import ClinicSelector from './components/ClinicSelector';
+import BranchPerformance from './components/BranchPerformance';
 import Commission from './components/Commission';
 import CustomerBehaviorReport from './components/CustomerBehaviorReport';
 import CustomerDetails from './components/CustomerDetails';
@@ -41,7 +42,7 @@ import Transaction from './components/Transaction';
 import Wallet from './components/Wallet';
 import WalletTransactionDetails from './components/WalletTransactionDetails';
 import { useAuth } from './contexts/AuthContext'; // Import useAuth
-import { Clinic, ClinicProvider, useClinic } from './contexts/ClinicContext';
+import { ClinicProvider, useClinic } from './contexts/ClinicContext';
 
 ChartJS.register(
   CategoryScale,
@@ -2076,7 +2077,7 @@ const App = () => {
       {!currentUser ? (
         <Login />
       ) : (
-        <ClinicProvider>
+        <ClinicProvider key={currentUser.id} clinics={currentUser.clinics}>
           <div className="app-shell">
             <AppContent />
           </div>
@@ -2087,31 +2088,8 @@ const App = () => {
 };
 
 const AppContent = () => {
-  const navigate = useNavigate();
-  const { currentUser, signOut } = useAuth(); // Can use currentUser here too if needed
-  const {
-    currentClinic,
-    setCurrentClinic,
-    isUsingFallbackData,
-    setIsUsingFallbackData,
-    availableClinics,
-    setAvailableClinics
-    // TODO: Add loadingClinics state here from ClinicContext later
-  } = useClinic();
-
-  const handleClinicChange = (clinic: Clinic) => {
-    // If clinic is different, update it
-    if (clinic.code !== currentClinic?.code) {
-      setCurrentClinic(clinic);
-
-      // Store the new clinic selection in localStorage
-      localStorage.setItem('selectedClinicId', clinic.id);
-
-      // Clear chat history in sessionStorage when changing clinics
-      sessionStorage.removeItem('chatMessages');
-    }
-  };
-
+  const { signOut } = useAuth();
+  const { currentClinic } = useClinic();
   const handleLogout = async () => {
     try {
       await signOut();
@@ -2120,58 +2098,56 @@ const AppContent = () => {
     }
   };
 
-  // TODO: Add loading indicator while clinics are loading from ClinicContext
-  // if (loadingClinics) { ... }
-
   return (
     <>
       <Sidebar onLogout={handleLogout} /> {/* Pass updated handleLogout */}
       <div className="flex-1 h-full overflow-auto min-w-0">
         <header className="app-header">
-          <ClinicSelector
-            onClinicChange={handleClinicChange}
-          />
+          <ClinicSelector />
           <ThemeSwitcher />
         </header>
 
         {/* Main content area */}
         <main className="app-content flex-1 overflow-auto">
           <Routes>
-            {/* Routes remain the same */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/customers" element={<CustomersTable />} />
-            <Route path="/customers/:phoneNumber" element={<CustomerDetails />} />
-            <Route path="/services" element={<ServicesTable />} />
-            <Route path="/services/:name" element={<ServiceDetails />} />
-            <Route path="/therapists" element={<TherapistList />} />
-            <Route path="/therapists/:name" element={<TherapistDetails />} />
-            <Route path="/helpers" element={<HelperList />} />
-            <Route path="/helpers/:name" element={<HelperDetails />} />
-            <Route path="/inactive-customers-report" element={<InactiveCustomersReport />} />
-            <Route path="/commission" element={<Commission />} />
-            <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
+            <Route path="/branch-performance" element={<BranchPerformance />} />
             <Route path="/payment-details" element={<PaymentDetails />} />
             <Route path="/banking-details" element={<BankingDetails />} />
-            <Route path="/outstanding-receivables" element={<OutstandingReceivables />} />
-            {/* <Route path="/appointments" element={<Appointments />} /> */}{/* Removed old appointments */}
             <Route path="/appointments-list" element={<AppointmentsListPage />} />
-            <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
-            <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
-            <Route path="/taskflow-dashboard" element={<TaskflowDashboard />} />
-            <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
-            <Route path="/customers-by-salesperson" element={<CustomersBySalesperson />} />
-            {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
-            <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
             <Route path="/daily-report" element={<DailyReport />} />
             <Route path="/customer-service-activity-report" element={<CustomerServiceActivityReport />} />
-            <Route path="/top-treatment-report" element={<TopTreatmentReport />} />
-            <Route path="/top-treatment-report/treatment-details" element={<TreatmentDetailsReport />} />
-            <Route path="/transactions" element={<Transaction />} />
-            <Route path="/wallet" element={<Wallet />} />
-            <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
-            {/* <Route path="/mysql-connector" element={<MySQLConnector />} /> */}{/* Removed mysql connector */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            {/* Older reports keep branch data in local component state. */}
+            <Route element={<Outlet key={currentClinic?.id} />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/customers" element={<CustomersTable />} />
+              <Route path="/customers/:phoneNumber" element={<CustomerDetails />} />
+              <Route path="/services" element={<ServicesTable />} />
+              <Route path="/services/:name" element={<ServiceDetails />} />
+              <Route path="/therapists" element={<TherapistList />} />
+              <Route path="/therapists/:name" element={<TherapistDetails />} />
+              <Route path="/helpers" element={<HelperList />} />
+              <Route path="/helpers/:name" element={<HelperDetails />} />
+              <Route path="/inactive-customers-report" element={<InactiveCustomersReport />} />
+              <Route path="/commission" element={<Commission />} />
+              <Route path="/daily-treatment" element={<DailyTreatmentReport />} />
+              <Route path="/outstanding-receivables" element={<OutstandingReceivables />} />
+              {/* <Route path="/appointments" element={<Appointments />} /> */}{/* Removed old appointments */}
+              <Route path="/customer-behavior-report" element={<CustomerBehaviorReport />} />
+              <Route path="/service-behavior-report" element={<ServiceBehaviorReport />} />
+              <Route path="/taskflow-dashboard" element={<TaskflowDashboard />} />
+              <Route path="/sales-by-sales-person" element={<SalesBySalesPerson />} />
+              <Route path="/customers-by-salesperson" element={<CustomersBySalesperson />} />
+              {/* <Route path="/check-in-out" element={<CheckInOut />} /> */}{/* Removed old check-in-out */}
+              <Route path="/checkin-checkout-page" element={<CheckInCheckOutPage />} />
+              <Route path="/top-treatment-report" element={<TopTreatmentReport />} />
+              <Route path="/top-treatment-report/treatment-details" element={<TreatmentDetailsReport />} />
+              <Route path="/transactions" element={<Transaction />} />
+              <Route path="/wallet" element={<Wallet />} />
+              <Route path="/wallet-transactions/:ownerName" element={<WalletTransactionDetails />} />
+              {/* <Route path="/mysql-connector" element={<MySQLConnector />} /> */}{/* Removed mysql connector */}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Route>
           </Routes>
         </main>
       </div>

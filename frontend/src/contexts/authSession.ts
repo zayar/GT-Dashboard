@@ -4,7 +4,10 @@ export interface ApiClinic {
   id: string;
   logo?: string | null;
   name: string;
-  code: string;
+  code: string | null;
+  company_id?: string | null;
+  company?: { name: string } | null;
+  currency?: string | null;
   pass?: string | null;
 }
 
@@ -48,7 +51,7 @@ export function mapAuthorizedClinics(clinics: ApiClinic[], allowedClinicIds: str
   const clinicsById = new Map<string, Clinic>();
 
   clinics.forEach((clinic) => {
-    if (!allowedIds.has(clinic.id) || !clinic.code.trim()) {
+    if (!allowedIds.has(clinic.id) || !clinic.code?.trim()) {
       return;
     }
 
@@ -58,6 +61,9 @@ export function mapAuthorizedClinics(clinics: ApiClinic[], allowedClinicIds: str
       name: clinic.name,
       logo: clinic.logo ?? '',
       active: 1,
+      companyId: clinic.company_id ?? undefined,
+      companyName: clinic.company?.name,
+      currency: clinic.currency ?? undefined,
       ...parsePass(clinic.pass),
     });
   });

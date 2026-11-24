@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import {
   Box,
   Paper,
   Typography,
   Grid,
   CircularProgress,
+  Skeleton,
   Table,
   TableBody,
   TableCell,
@@ -28,8 +29,9 @@ import { useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useClinic } from '../contexts/ClinicContext';
-import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
+import { useBiActivity } from '../hooks/useBiAccounting';
+import { useReportSection } from '../hooks/useReportSection';
+import { fetchWarehouseRows } from '../api/warehouseReport';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
@@ -40,12 +42,7 @@ import {
   CustomerServiceActivityPeriod,
   getCustomerServiceActivityRange,
 } from '../utils/customerServiceActivity';
-import { loadCanonicalSalesMetrics } from '../utils/loadCanonicalSalesMetrics';
-import {
-  CANONICAL_SALES_METRICS,
-  CanonicalSalesMetrics,
-  EMPTY_CANONICAL_SALES_METRICS,
-} from '../utils/canonicalSalesMetrics';
+import { CANONICAL_SALES_METRICS } from '../utils/canonicalSalesMetrics';
 
 interface DailyReportData {
   CustomerName: string;
@@ -62,31 +59,25 @@ interface DailyReportData {
   SellerNames?: string | null;
 }
 
+const NO_ACTIVITY_ROWS: DailyReportData[] = [];
+
 interface DailyReportProps {
   rangeEnabled?: boolean;
 }
 
 const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
   const navigate = useNavigate();
-  const { currentClinic } = useClinic();
-  const { getAccessToken } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [accountingMetrics, setAccountingMetrics] = useState<CanonicalSalesMetrics>(
-    EMPTY_CANONICAL_SALES_METRICS,
-  );
-  const [accountingError, setAccountingError] = useState<string | null>(null);
-  const [rawData, setRawData] = useState<DailyReportData[]>([]);
+  const { currentClinic, loadingClinics } = useClinic();
+  const [refresh, setRefresh] = useState(0);
+  const fetchDailyData = () => setRefresh(value => value + 1);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [period, setPeriod] = useState<CustomerServiceActivityPeriod>('week');
   const [periodDate, setPeriodDate] = useState<Date | null>(new Date());
   const [customStartDate, setCustomStartDate] = useState<Date | null>(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [customEndDate, setCustomEndDate] = useState<Date | null>(new Date());
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const latestRequestIdRef = useRef(0);
   const deferredSearchTerm = useDeferredValue(searchTerm.trim().toLowerCase());
 
   const reportRange = useMemo(() => getCustomerServiceActivityRange(
@@ -103,87 +94,15 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
         }
   ), [customEndDate, customStartDate, period, periodDate, rangeEnabled, selectedDate]);
 
-  const fetchDailyData = useCallback(async () => {
-    const requestId = ++latestRequestIdRef.current;
-    const isLatestRequest = () => latestRequestIdRef.current === requestId;
-    if (!currentClinic) {
-      setError('No clinic selected');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setAccountingError(null);
-
-      const query = buildCustomerServiceActivityQuery({
-        clinicCode: currentClinic.code,
-        startDate: reportRange.startDateKey,
-        endDate: reportRange.endDateKey,
-      });
-
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/query`,
-        { query },
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          timeout: rangeEnabled ? 30000 : 15000
-        }
-      );
-
-      if (!isLatestRequest()) return;
-
-      if (!response.data.success) {
-        console.error('BigQuery Error:', response.data.error);
-        throw new Error(response.data.error || 'Failed to fetch customer service activity');
-      }
-
-      const data = response.data.data || [];
-      setRawData(data);
-
-      try {
-        const accessToken = await getAccessToken();
-        if (!accessToken) {
-          throw new Error('Your session has expired. Please sign in again.');
-        }
-
-        const metrics = await loadCanonicalSalesMetrics({
-          clinicId: currentClinic.id,
-          startDate: reportRange.startDate,
-          endDate: reportRange.endDate,
-          asOfDate: reportRange.endDate,
-          accessToken,
-        });
-        if (!isLatestRequest()) return;
-        setAccountingMetrics(metrics);
-      } catch (accountingFetchError) {
-        if (!isLatestRequest()) return;
-        console.error('Error fetching canonical sales metrics:', accountingFetchError);
-        setAccountingMetrics(EMPTY_CANONICAL_SALES_METRICS);
-        setAccountingError(
-          accountingFetchError instanceof Error
-            ? accountingFetchError.message
-            : 'Unable to load accounting metrics.',
-        );
-      }
-      setLastUpdated(new Date());
-    } catch (err: any) {
-      if (!isLatestRequest()) return;
-      console.error('Error fetching daily report:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to fetch customer service activity');
-    } finally {
-      if (isLatestRequest()) setLoading(false);
-    }
-  }, [currentClinic, getAccessToken, rangeEnabled, reportRange.endDate, reportRange.endDateKey, reportRange.startDate, reportRange.startDateKey]);
-
-  useEffect(() => {
-    if (currentClinic) {
-      fetchDailyData();
-    }
-  }, [currentClinic, fetchDailyData]);
+  const clinicCode = currentClinic?.code ?? '';
+  const { startDateKey, endDateKey } = reportRange;
+  const loadActivity = useCallback((signal: AbortSignal) => fetchWarehouseRows<DailyReportData>(
+    buildCustomerServiceActivityQuery({ clinicCode, startDate: startDateKey, endDate: endDateKey }), signal,
+  ), [clinicCode, startDateKey, endDateKey]);
+  const activity = useReportSection(clinicCode ? loadActivity : null, refresh);
+  const accounting = useBiActivity(currentClinic?.id, reportRange.startDate, reportRange.endDate, refresh);
+  const rawData = activity.data ?? NO_ACTIVITY_ROWS;
+  const lastUpdated = activity.updatedAt ?? accounting.updatedAt;
 
   const handleDateChange = (date: Date | null) => {
     setSelectedDate(date);
@@ -429,43 +348,6 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
     XLSX.writeFile(wb, filename);
   };
 
-  if (loading) {
-    return (
-      <Box sx={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        bgcolor: 'var(--surface-secondary)'
-      }}>
-        <CircularProgress sx={{ color: 'var(--primary)' }} />
-      </Box>
-    );
-  }
-
-  if (error) {
-    return (
-      <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: 3 }}>
-        <Paper sx={{ p: 4, bgcolor: 'var(--surface)', textAlign: 'center', borderRadius: 2 }}>
-          <Typography color="error" sx={{ mb: 2 }}>
-            {error}
-          </Typography>
-          <Button
-            variant="contained"
-            onClick={fetchDailyData}
-            startIcon={<RefreshIcon />}
-            sx={{
-              bgcolor: 'var(--primary)',
-              '&:hover': { bgcolor: 'var(--primary-hover)' }
-            }}
-          >
-            Retry
-          </Button>
-        </Paper>
-      </Box>
-    );
-  }
-
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box sx={{ bgcolor: 'var(--surface-secondary)', minHeight: '100vh', p: { xs: 1.5, md: 3 } }}>
@@ -620,6 +502,7 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
             )}
             <IconButton
               onClick={fetchDailyData}
+              aria-label="Refresh report"
               sx={{
                 color: 'var(--text-primary)',
                 bgcolor: 'rgba(255,255,255,0.1)',
@@ -631,11 +514,16 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
           </Box>
         </Box>
 
-      {accountingError && (
-        <Alert severity="warning" sx={{ mb: 2.5 }}>
-          Accounting metrics could not be loaded: {accountingError}
+      {!currentClinic && !loadingClinics && <Alert severity="info">Select a clinic to see its report.</Alert>}
+      {[
+        { label: 'Accounting metrics', ...accounting },
+        { label: 'Customer service activity', ...activity },
+      ].filter(section => section.error).map(section => (
+        <Alert key={section.label} severity="warning" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={section.retry}>Retry</Button>}>
+          {section.label} unavailable. {section.error}
         </Alert>
-      )}
+      ))}
 
       {/* Canonical accounting and operational summary */}
       <Grid container spacing={2} sx={{ mb: 2.5 }}>
@@ -643,41 +531,42 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
           {
             label: CANONICAL_SALES_METRICS.grossSales.label,
             description: CANONICAL_SALES_METRICS.grossSales.description,
-            value: formatCurrency(accountingMetrics.grossSales, currentClinic),
-            detail: `${accountingMetrics.invoiceCount.toLocaleString()} invoices · ${CANONICAL_SALES_METRICS.grossSales.dateBasis}`
+            pending: accounting.loading,
+            value: accounting.data && formatCurrency(accounting.data.grossSales, currentClinic),
+            detail: accounting.data && `${accounting.data.invoiceCount.toLocaleString()} invoices · ${CANONICAL_SALES_METRICS.grossSales.dateBasis}`
           },
           {
             label: CANONICAL_SALES_METRICS.paymentsReceived.label,
             description: CANONICAL_SALES_METRICS.paymentsReceived.description,
-            value: formatCurrency(accountingMetrics.paymentsReceived, currentClinic),
-            detail: `${accountingMetrics.paymentCount.toLocaleString()} payments · ${CANONICAL_SALES_METRICS.paymentsReceived.dateBasis}`
-          },
-          {
-            label: CANONICAL_SALES_METRICS.outstandingBalance.label,
-            description: CANONICAL_SALES_METRICS.outstandingBalance.description,
-            value: formatCurrency(accountingMetrics.outstandingBalance, currentClinic),
-            detail: `${accountingMetrics.outstandingInvoiceCount.toLocaleString()} invoices · as of ${reportRange.endDateKey}`
+            pending: accounting.loading,
+            value: accounting.data && formatCurrency(accounting.data.paymentsReceived, currentClinic),
+            detail: accounting.data && `${accounting.data.paymentCount.toLocaleString()} payments · ${CANONICAL_SALES_METRICS.paymentsReceived.dateBasis}`
           },
           {
             label: 'Customers served',
-            value: summary.totalCustomers.toLocaleString(),
-            detail: `${summary.newCustomers} new customers`
+            pending: activity.loading,
+            value: activity.data && summary.totalCustomers.toLocaleString(),
+            detail: activity.data && `${summary.newCustomers} new customers`
           },
           {
             label: 'Services delivered',
-            value: summary.servicesDelivered.toLocaleString(),
-            detail: `${summary.totalServices} unique services`
+            pending: activity.loading,
+            value: activity.data && summary.servicesDelivered.toLocaleString(),
+            detail: activity.data && `${summary.totalServices} unique services`
           },
           {
             label: 'New customers',
-            value: summary.newCustomers.toLocaleString(),
-            detail: `${summary.sellerAssignedCustomers} customers assigned to sellers`
+            pending: activity.loading,
+            value: activity.data && summary.newCustomers.toLocaleString(),
+            detail: activity.data && `${summary.sellerAssignedCustomers} customers assigned to sellers`
           }
         ].map(card => (
-          <Grid item xs={12} sm={6} lg={4} key={card.label}>
+          <Grid item xs={12} sm={6} lg={'description' in card ? 6 : 4} key={card.label}>
             <Paper sx={{ p: 2.5, height: '100%', bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
               <Typography title={'description' in card ? card.description : undefined} variant="body2" sx={{ color: 'var(--text-secondary)' }}>{card.label}</Typography>
-              <Typography variant="h5" sx={{ color: 'var(--text-primary)', fontWeight: 700, mt: 1 }}>{card.value}</Typography>
+              <Typography variant="h5" sx={{ color: 'var(--text-primary)', fontWeight: 700, mt: 1 }}>
+                {loadingClinics || card.pending ? <Skeleton width="55%" /> : card.value ?? 'Unavailable'}
+              </Typography>
               <Typography variant="caption" sx={{ color: 'var(--text-secondary)' }}>{card.detail}</Typography>
             </Paper>
           </Grid>
@@ -733,7 +622,9 @@ const DailyReport: React.FC<DailyReportProps> = ({ rangeEnabled = false }) => {
           </Box>
         </Box>
 
-        {filteredCustomers.length === 0 ? (
+        {loadingClinics || activity.loading ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress aria-label="Loading customer service activity" /></Box>
+        ) : !activity.data ? null : filteredCustomers.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 8 }}>
             <Typography sx={{ color: 'var(--text-secondary)' }}>
               {searchTerm

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -34,29 +34,32 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import { useNavigate } from 'react-router-dom';
 import DataTable from './DataTable';
+import { useReportSection } from '../hooks/useReportSection';
 import { useClinic } from '../contexts/ClinicContext';
 import { useAuth } from '../contexts/AuthContext';
 import {
   fetchPaymentReportRecords,
+  resolveReportDateRange,
   type PaymentReportRecord,
 } from '../api/apicoreSalesReports';
 import { format } from 'date-fns';
+import { writeFile } from 'xlsx';
+import { buildPaymentWorkbook } from '../utils/reportWorkbooks';
+import { getCurrency, formatCurrency } from '../utils/currency';
 import {
   filterPaymentsByMethod,
-  formatPaymentMmk,
   normalizePaymentMethod,
   summarizePaymentMethods,
 } from '../utils/paymentReport';
 
 type PaymentRecord = PaymentReportRecord;
 
+const EMPTY_ROWS: PaymentRecord[] = [];
+
 const BankingDetails: React.FC = () => {
   const navigate = useNavigate();
   const { currentClinic } = useClinic();
   const { getAccessToken } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [rawData, setRawData] = useState<PaymentRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [startDate, setStartDate] = useState<Date | null>(new Date());
   const [endDate, setEndDate] = useState<Date | null>(new Date());
@@ -65,6 +68,18 @@ const BankingDetails: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [paymentFilterAnchorEl, setPaymentFilterAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [walletTopupFilter, setWalletTopupFilter] = useState<'all' | 'hide' | 'only'>('all');
+
+  const clinicId = currentClinic?.id;
+  const load = useCallback(async (signal: AbortSignal) => {
+    if (!clinicId) throw new Error('Select a clinic.');
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
+    return fetchPaymentReportRecords({ clinicId, filterType, startDate, endDate, selectedDate, accessToken, signal });
+  }, [clinicId, filterType, startDate, endDate, selectedDate, getAccessToken]);
+  const hasDates = filterType === 'day' ? startDate && endDate : selectedDate;
+  const report = useReportSection(clinicId && hasDates ? load : null, 0, null);
+  const rawData = report.data ?? EMPTY_ROWS;
+  const { loading, error } = report;
 
   // Get unique payment methods from the data
   const paymentMethods = useMemo(() => {
@@ -112,6 +127,8 @@ const BankingDetails: React.FC = () => {
         (record.MemberId?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.SalePerson?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServiceName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
+        (record.ProductName?.toLowerCase().includes(normalizedSearchTerm) || false) ||
+        (record.OtherItems?.toLowerCase().includes(normalizedSearchTerm) || false) ||
         (record.ServicePackageName?.toLowerCase().includes(normalizedSearchTerm) || false)
       );
     }
@@ -128,45 +145,6 @@ const BankingDetails: React.FC = () => {
   const summaryData = useMemo(() => {
     return summarizePaymentMethods(baseFilteredData);
   }, [baseFilteredData]);
-
-  useEffect(() => {
-    if (currentClinic && ((filterType === 'day' && startDate && endDate) || (filterType === 'month' && selectedDate))) {
-      fetchBankingData();
-    }
-  }, [selectedDate, startDate, endDate, filterType, currentClinic]);
-
-  const fetchBankingData = async () => {
-    if (!currentClinic) return;
-
-    // Check if we have the required dates based on filter type
-    if (filterType === 'day' && (!startDate || !endDate)) return;
-    if (filterType === 'month' && !selectedDate) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
-
-      const records = await fetchPaymentReportRecords({
-        clinicId: currentClinic.id,
-        filterType,
-        startDate,
-        endDate,
-        selectedDate,
-        accessToken,
-      });
-
-      setRawData(records);
-    } catch (err) {
-      console.error('Banking Data Error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleFilterTypeChange = (event: SelectChangeEvent<'day' | 'month'>) => {
     setFilterType(event.target.value as 'day' | 'month');
@@ -251,107 +229,12 @@ const BankingDetails: React.FC = () => {
     setSearchTerm(event.target.value);
   };
 
-  const exportToCSV = () => {
-    if (data.length === 0) return;
-
-    const headers = [
-      'Date',
-      'Invoice Number',
-      'Customer Name',
-      'Member ID',
-      'Sale Person',
-      'Service Name',
-      'Service Package',
-      'Payment Method',
-      'Payment Status',
-      'Wallet',
-      'Paid Amount (MMK)'
-    ];
-
-    const processedRows: string[] = [];
-
-    data.forEach((record) => {
-      const walletValue = record.WalletTopUp ?
-        (String(record.WalletTopUp).includes('*Point') || isWalletTopup(record) ? 'Topup' : record.WalletTopUp) :
-        '';
-
-      processedRows.push([
-        record.Date,
-        `"${record.InvoiceNumber}"`,
-        `"${record.CustomerName}"`,
-        `"${record.MemberId || ''}"`,
-        `"${record.SalePerson}"`,
-        `"${record.ServiceName || ''}"`,
-        `"${record.ServicePackageName || ''}"`,
-        `"${record.PaymentMethod}"`,
-        `"${record.PaymentStatus}"`,
-        `"${walletValue}"`,
-        record.PaymentAmount.toString()
-      ].join(','));
-    });
-
-    const csvString = headers.join(',') + '\n' + processedRows.join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-
-    // Generate filename based on filter type and date
-    let dateStr = '';
-    if (filterType === 'month') {
-      dateStr = selectedDate ? format(selectedDate, 'yyyy-MM') : format(new Date(), 'yyyy-MM');
-    } else {
-      const start = startDate ? format(startDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-      const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-      dateStr = start === end ? start : `${start}_to_${end}`;
-    }
-
-    link.setAttribute('download', `banking_details_${dateStr}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const exportSummaryToCSV = () => {
-    if (summaryData.length === 0) return;
-
-    const headers = ['Payment Method', 'Transaction Count', 'Total Amount (MMK)'];
-    const csvRows = [
-      headers.join(','),
-      ...summaryData.map(row => [
-        `"${row.PaymentMethod}"`,
-        row.TransactionCount,
-        row.TotalAmount
-      ].join(',')),
-      [
-        '"Grand Total"',
-        summaryData.reduce((count, method) => count + method.TransactionCount, 0),
-        summaryData.reduce((total, method) => total + method.TotalAmount, 0)
-      ].join(',')
-    ];
-
-    const csvString = csvRows.join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-
-    let dateStr = '';
-    if (filterType === 'month') {
-      dateStr = selectedDate ? format(selectedDate, 'yyyy-MM') : format(new Date(), 'yyyy-MM');
-    } else {
-      const start = startDate ? format(startDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-      const end = endDate ? format(endDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-      dateStr = start === end ? start : `${start}_to_${end}`;
-    }
-
-    link.download = `banking_summary_${dateStr}.csv`;
-    link.href = url;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const exportPayments = () => {
+    if (!data.length) return;
+    const range = resolveReportDateRange({ filterType, startDate, endDate, selectedDate });
+    const from = format(range.startDate, 'yyyy-MM-dd');
+    const to = format(range.endDate, 'yyyy-MM-dd');
+    writeFile(buildPaymentWorkbook(data, getCurrency(currentClinic)), `payment_report_${from}_${to}.xlsx`);
   };
 
   if (loading) {
@@ -388,7 +271,7 @@ const BankingDetails: React.FC = () => {
         <Typography variant="h6" sx={{ color: 'var(--error)' }}>{error}</Typography>
         <Button
           variant="contained"
-          onClick={fetchBankingData}
+          onClick={report.retry}
           sx={{
             mt: 2,
             bgcolor: 'var(--primary)',
@@ -798,12 +681,13 @@ const BankingDetails: React.FC = () => {
           </Button>
 
           {/* Export Button */}
-          <Tooltip title="Export to CSV">
+          <Tooltip title="Download payment summary and detailed transactions">
             <Button
               variant="outlined"
               size="small"
               startIcon={<FileDownloadIcon />}
-              onClick={exportToCSV}
+              onClick={exportPayments}
+              disabled={!data.length}
               sx={{
                 height: 40,
                 borderColor: 'var(--border)',
@@ -818,7 +702,7 @@ const BankingDetails: React.FC = () => {
                 }
               }}
             >
-              CSV
+              Export Excel
             </Button>
           </Tooltip>
         </Box>
@@ -917,21 +801,6 @@ const BankingDetails: React.FC = () => {
               Individual payment records · Click a method to filter the details below
             </Typography>
           </Box>
-          {summaryData.length > 0 && (
-            <Tooltip title="Export Summary to CSV">
-              <IconButton
-                onClick={exportSummaryToCSV}
-                sx={{
-                  color: 'var(--primary)',
-                  '&:hover': {
-                    bgcolor: 'rgba(59, 130, 246, 0.08)'
-                  }
-                }}
-              >
-                <FileDownloadIcon />
-              </IconButton>
-            </Tooltip>
-          )}
         </Box>
 
         {summaryData.length > 0 ? (
@@ -1016,7 +885,7 @@ const BankingDetails: React.FC = () => {
                       {method.TransactionCount.toLocaleString()}
                     </TableCell>
                     <TableCell sx={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
-                      {formatPaymentMmk(method.TotalAmount)}
+                      {formatCurrency(method.TotalAmount, currentClinic)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1028,7 +897,7 @@ const BankingDetails: React.FC = () => {
                     {summaryData.reduce((count, method) => count + method.TransactionCount, 0).toLocaleString()}
                   </TableCell>
                   <TableCell sx={{ color: 'var(--text-primary)', fontWeight: 600, borderBottom: 'none', textAlign: 'right' }}>
-                    {formatPaymentMmk(grandTotal)}
+                    {formatCurrency(grandTotal, currentClinic)}
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -1067,12 +936,12 @@ const BankingDetails: React.FC = () => {
           </Box>
           <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
             <Typography sx={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Detailed total</Typography>
-            <Typography sx={{ mt: 0.2, fontWeight: 750, color: 'var(--text-primary)' }}>{formatPaymentMmk(detailedTotal)}</Typography>
+            <Typography sx={{ mt: 0.2, fontWeight: 750, color: 'var(--text-primary)' }}>{formatCurrency(detailedTotal, currentClinic)}</Typography>
           </Box>
         </Box>
         <DataTable
           data={data}
-          onCustomerClick={(customerName: string) => navigate(`/customers/${encodeURIComponent(customerName)}`)}
+          customerReturnLabel="Payment Report"
           onServiceClick={(serviceName: string) => navigate(`/services/${encodeURIComponent(serviceName)}`)}
           columnAliases={{
             Date: 'Payment Date',
@@ -1081,7 +950,9 @@ const BankingDetails: React.FC = () => {
             MemberId: 'Member ID',
             SalePerson: 'Sale Person',
             ServiceName: 'Service Name',
+            ProductName: 'Product Name',
             ServicePackageName: 'Service Package',
+            ...(data.some(row => row.OtherItems) ? { OtherItems: 'Other Items' } : {}),
             PaymentMethod: 'Payment Method',
             PaymentStatus: 'Payment Status',
             WalletTopUp: 'Wallet',

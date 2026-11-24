@@ -14,10 +14,11 @@ import {
 } from '@mui/material';
 import { useClinic } from '../contexts/ClinicContext';
 import { formatCurrency } from '../utils/currency';
+import { Link, useLocation } from 'react-router-dom';
 
 interface DataTableProps {
   data: any[];
-  onCustomerClick?: (customerName: string) => void;
+  customerReturnLabel?: string;
   onServiceClick?: (serviceName: string) => void;
   onTherapistClick?: (therapistName: string) => void;
   columnAliases?: { [key: string]: string };
@@ -66,12 +67,13 @@ const COLUMN_WIDTHS: { [key: string]: string } = {
 
 const DataTable: React.FC<DataTableProps> = ({
   data,
-  onCustomerClick,
+  customerReturnLabel,
   onServiceClick,
   onTherapistClick,
   columnAliases = {}
 }): JSX.Element => {
   const { currentClinic } = useClinic();
+  const { pathname } = useLocation();
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<string>('');
   const [page, setPage] = useState(0);
@@ -81,7 +83,8 @@ const DataTable: React.FC<DataTableProps> = ({
   const headCells: HeadCell[] = useMemo(() => {
     if (data.length === 0) return [];
 
-    return Object.keys(data[0]).map(key => ({
+    const columns = Object.keys(columnAliases);
+    return (columns.length ? columns : Object.keys(data[0])).map(key => ({
       id: key,
       label: columnAliases[key] || key.replace(/([A-Z])/g, ' $1').trim(), // Use alias if available
       numeric: typeof data[0][key] === 'number'
@@ -159,13 +162,7 @@ const DataTable: React.FC<DataTableProps> = ({
     // Map various possible column IDs to standard types
     const lowerColumnId = columnId.toLowerCase();
 
-    // Customer name columns
-    if ((lowerColumnId.includes('customer') || columnId === 'name' || lowerColumnId.includes('customer_name')) && onCustomerClick) {
-      console.log(`Navigating to customer: ${value}`);
-      onCustomerClick(displayValue);
-    }
-    // Service name columns
-    else if ((lowerColumnId.includes('service') || columnId === 'service' || lowerColumnId.includes('service_name')) && onServiceClick) {
+    if ((lowerColumnId.includes('service') || columnId === 'service' || lowerColumnId.includes('service_name')) && onServiceClick) {
       console.log(`Navigating to service: ${value}`);
       onServiceClick(displayValue);
     }
@@ -319,9 +316,9 @@ const DataTable: React.FC<DataTableProps> = ({
                       },
                     }}
                   >
-                    {Object.keys(row).filter(key => !key.startsWith('_')).map((key, i) => (
+                    {headCells.map(({ id: key }) => (
                       <TableCell
-                        key={i}
+                        key={key}
                         onClick={() => handleCellClick(key, row[key])}
                         align={typeof row[key] === 'number' ? 'right' : 'left'}
                         sx={{
@@ -341,13 +338,11 @@ const DataTable: React.FC<DataTableProps> = ({
                           wordBreak: key === 'Note' || key === 'PaymentNote' ? 'break-word' : 'normal',
                           verticalAlign: key === 'Note' || key === 'PaymentNote' ? 'top' : 'middle',
                           lineHeight: key === 'Note' || key === 'PaymentNote' ? 1.45 : 'inherit',
-                          cursor: (key === 'CustomerName' && onCustomerClick) ||
-                                  (key === 'ServiceName' && onServiceClick) ||
+                          cursor: (key === 'ServiceName' && onServiceClick) ||
                                   (key === 'TherapistName' && onTherapistClick)
                                   ? 'pointer' : 'default',
                           fontWeight: key === 'CustomerName' ? 500 : 400,
                           ...(
-                            (key === 'CustomerName' && onCustomerClick) ||
                             (key === 'ServiceName' && onServiceClick) ||
                             (key === 'TherapistName' && onTherapistClick)
                             ? {
@@ -360,7 +355,13 @@ const DataTable: React.FC<DataTableProps> = ({
                           ),
                         }}
                       >
-                        {formatValue(row[key], key, row)}
+                        {key === 'CustomerName' && customerReturnLabel && row.CustomerName && row.CustomerPhoneNumber?.trim() ? (
+                          <Link to={`/customers/${encodeURIComponent(row.CustomerPhoneNumber.trim())}`}
+                            state={{ returnTo: pathname, returnLabel: customerReturnLabel }}
+                            style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+                            {row.CustomerName}
+                          </Link>
+                        ) : formatValue(row[key], key, row)}
                       </TableCell>
                     ))}
                   </TableRow>

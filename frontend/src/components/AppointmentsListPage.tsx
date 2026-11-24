@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import {
   Paper,
   Typography,
@@ -33,6 +33,9 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useClinic } from '../contexts/ClinicContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useReportSection } from '../hooks/useReportSection';
+import { writeFile } from 'xlsx';
+import { buildAppointmentWorkbook } from '../utils/reportWorkbooks';
 import { formatAppointmentDateTime, MYANMAR_TIME_LABEL } from '../utils/checkInOutReport';
 import {
   fetchAppointmentRecords,
@@ -42,10 +45,36 @@ import {
 
 type AppointmentStatusFilter = 'all' | BookingStatus;
 
+// Calculate start date based on end date and range
+const getStartDate = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
+  if (!end) return null;
+  switch (range) {
+    case 'day':
+      return startOfDay(end);
+    case 'week':
+      return startOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
+    case 'month':
+      return startOfMonth(end);
+    default:
+      return null;
+  }
+};
+
+const getEndDateRange = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
+  if (!end) return null;
+  switch (range) {
+    case 'day':
+      return endOfDay(end);
+    case 'week':
+      return endOfWeek(end, { weekStartsOn: 1 });
+    case 'month':
+      return endOfMonth(end);
+  }
+};
+
+const EMPTY_RECORDS: AppointmentRecord[] = [];
+
 const AppointmentsListPage: React.FC = () => {
-  const [records, setRecords] = useState<AppointmentRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const { currentClinic } = useClinic();
   const { getAccessToken } = useAuth();
 
@@ -56,96 +85,26 @@ const AppointmentsListPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const requestIdRef = useRef(0);
   const deferredSearchTerm = useDeferredValue(searchTerm.trim());
 
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
 
-  // Calculate start date based on end date and range
-  const getStartDate = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
-    if (!end) return null;
-    switch (range) {
-      case 'day':
-        return startOfDay(end);
-      case 'week':
-        return startOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
-      case 'month':
-        return startOfMonth(end);
-      default:
-        return null;
-    }
-  };
-
-  const getEndDateRange = (range: 'day' | 'week' | 'month', end: Date | null): Date | null => {
-     if (!end) return null;
-      switch (range) {
-        case 'day':
-           return endOfDay(end);
-        case 'week':
-           return endOfWeek(end, { weekStartsOn: 1 }); // Assuming week starts on Monday
-        case 'month':
-           return endOfMonth(end);
-         default:
-           return null;
-       }
-  };
-
-  const fetchData = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    if (!currentClinic) {
-      setError("No clinic selected");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    const calculatedStartDate = getStartDate(dateRange, endDate);
-    const calculatedEndDate = getEndDateRange(dateRange, endDate);
-
-    if (!calculatedStartDate || !calculatedEndDate) {
-        setError("Invalid date range selected.");
-        setLoading(false);
-        return;
-    }
-
-    try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
-
-      const nextRecords = await fetchAppointmentRecords({
-        clinicCode: currentClinic.code,
-        startDate: calculatedStartDate,
-        endDate: calculatedEndDate,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        accessToken,
-      });
-
-      if (requestId !== requestIdRef.current) return;
-
-      setRecords(nextRecords);
-      setLastUpdated(new Date());
-    } catch (err: unknown) {
-      if (requestId !== requestIdRef.current) return;
-      console.error('Fetch error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch appointment records');
-      setRecords([]);
-    } finally {
-      if (requestId === requestIdRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [dateRange, endDate, statusFilter, currentClinic, getAccessToken]);
-
-  useEffect(() => {
-    if (currentClinic) {
-      fetchData();
-    }
-  }, [fetchData, currentClinic]);
+  const clinicCode = currentClinic?.code;
+  const load = useCallback(async (signal: AbortSignal) => {
+    const start = getStartDate(dateRange, endDate);
+    const end = getEndDateRange(dateRange, endDate);
+    if (!start || !end || !clinicCode) throw new Error('Select a clinic and a valid date.');
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Your session has expired. Please sign in again.');
+    return fetchAppointmentRecords({
+      clinicCode, startDate: start, endDate: end, accessToken, signal,
+      status: statusFilter === 'all' ? undefined : statusFilter,
+    });
+  }, [clinicCode, dateRange, endDate, statusFilter, getAccessToken]);
+  const report = useReportSection(clinicCode && endDate ? load : null, 0, null);
+  const records = report.data ?? EMPTY_RECORDS;
+  const { loading, error, updatedAt: lastUpdated } = report;
 
   // Memoized filtered records based on search term
   const filteredRecords = useMemo(() => {
@@ -165,7 +124,7 @@ const AppointmentsListPage: React.FC = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [dateRange, endDate, statusFilter, deferredSearchTerm, rowsPerPage]);
+  }, [clinicCode, dateRange, endDate, statusFilter, deferredSearchTerm, rowsPerPage]);
 
   const lastPage = Math.max(0, Math.ceil(filteredRecords.length / rowsPerPage) - 1);
   const effectivePage = Math.min(page, lastPage);
@@ -194,38 +153,10 @@ const AppointmentsListPage: React.FC = () => {
     return `${format(start, 'MMM d, yyyy')} – ${format(end, 'MMM d, yyyy')}`;
   }, [dateRange, endDate]);
 
-  // Function to handle CSV export
-  const handleExportCSV = () => {
-    if (!filteredRecords.length) return;
-
-    const headers = ['Booking ID', 'From (Myanmar Time)', 'To (Myanmar Time)', 'Service', 'Member', 'Phone', 'Practitioner', 'Status', 'Helper', 'Note'];
-    const rows = filteredRecords.map(record => [
-      record.bookingid ?? '-',
-      formatAppointmentDateTime(record.FromTime),
-      formatAppointmentDateTime(record.ToTime),
-      record.ServiceName ?? '-',
-      record.MemberName ?? '-',
-      record.MemberPhoneNumber ?? '-',
-      record.PractitionerName ?? '-',
-      record.status ?? '-',
-      record.HelperName ?? '-',
-      record.member_note ?? '-' // Handle quotes/commas in notes if necessary
-    ]);
-
-    // Simple escaping for CSV (replace quotes with double quotes)
-    const escapeCsv = (field: string) => `"${String(field).replace(/"/g, '""')}"`;
-
-    const csvContent = headers.map(escapeCsv).join(",") + "\n"
-      + rows.map(row => row.map(escapeCsv).join(",")).join("\n");
-    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", objectUrl);
-    link.setAttribute("download", `appointments_${format(getStartDate(dateRange, endDate) || new Date(), 'yyyyMMdd')}_${dateRange}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(objectUrl);
+  const exportAppointments = () => {
+    const start = getStartDate(dateRange, endDate);
+    if (!filteredRecords.length || !start) return;
+    writeFile(buildAppointmentWorkbook(filteredRecords), `appointments_${format(start, 'yyyyMMdd')}_${dateRange}.xlsx`);
   };
 
   // Determine chip color based on appointment status
@@ -272,7 +203,7 @@ const AppointmentsListPage: React.FC = () => {
              <Button
                  variant="outlined"
                  startIcon={<RefreshIcon />}
-                 onClick={fetchData}
+                 onClick={report.retry}
                  disabled={loading}
              >
                  Refresh
@@ -280,10 +211,10 @@ const AppointmentsListPage: React.FC = () => {
             <Button
               variant="contained"
               startIcon={<FileDownloadIcon />}
-              onClick={handleExportCSV}
+              onClick={exportAppointments}
               disabled={!filteredRecords.length || loading}
             >
-              Export CSV
+              Export Excel
             </Button>
            </Box>
         </Box>
@@ -341,7 +272,7 @@ const AppointmentsListPage: React.FC = () => {
               <Grid item xs={12} sm={6} md={3}>
                  <Typography variant="body2" gutterBottom sx={{ mb: 1, fontWeight: 500 }}>Search Records</Typography>
                  <TextField
-                     placeholder="Booking ID, member, phone or service"
+                     placeholder="Member, phone, service or practitioner"
                      value={searchTerm}
                      onChange={(e) => setSearchTerm(e.target.value)}
                      size="small"
@@ -426,7 +357,6 @@ const AppointmentsListPage: React.FC = () => {
                     <TableCell>{record.ServiceName}</TableCell>
                     <TableCell>
                       <Typography variant="body2">{record.MemberName ?? '-'}</Typography>
-                      <Typography variant="caption" color="text.secondary">#{record.bookingid}</Typography>
                     </TableCell>
                     <TableCell>
                       {record.MemberPhoneNumber ? (

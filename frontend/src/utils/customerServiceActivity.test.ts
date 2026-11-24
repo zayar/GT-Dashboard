@@ -54,6 +54,8 @@ describe('customer service activity query', () => {
 
     expect(query).toContain("DATE(CheckInTime) BETWEEN DATE('2026-07-20') AND DATE('2026-07-26')");
     expect(query).toContain("DATE(OrderCreatedDate) BETWEEN DATE('2026-07-20') AND DATE('2026-07-26')");
+    expect(query).toContain('CustomerPhoneNumber IN (SELECT CustomerPhoneNumber FROM VisitsInRange)');
+    expect(query).toContain("DATE(CheckInTime) <= DATE('2026-07-26')");
     expect(query).toContain("first_visits.first_visit_date BETWEEN DATE('2026-07-20') AND DATE('2026-07-26')");
     expect(query).toContain("LOWER('clinic''one')");
   });

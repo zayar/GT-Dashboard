@@ -43,9 +43,12 @@ export interface PaymentReportRecord {
   Date: string;
   InvoiceNumber: string;
   CustomerName: string;
+  CustomerPhoneNumber: string;
   MemberId: string;
   SalePerson: string;
   ServiceName: string;
+  ProductName: string;
+  OtherItems: string;
   ServicePackageName: string;
   PaymentMethod: string;
   PaymentStatus: string;
@@ -105,6 +108,9 @@ interface RawOrderPayment {
 
 interface RawOrderItem {
   id: string;
+  service_id?: string | null;
+  product_stock_item_id?: string | null;
+  service_package_id?: string | null;
   quantity: number;
   tax?: number | string | null;
   price?: number | string | null;
@@ -242,6 +248,9 @@ const GET_SALES_PAYMENT_ORDERS = `
       }
       order_items {
         id
+        service_id
+        product_stock_item_id
+        service_package_id
         quantity
         tax
         price
@@ -410,6 +419,7 @@ async function fetchAllOrders(input: {
   clinicId: string;
   where: Record<string, unknown>;
   accessToken: string;
+  signal?: AbortSignal;
   includePractitioners?: boolean;
 }) {
   const orders: RawReportOrder[] = [];
@@ -420,6 +430,7 @@ async function fetchAllOrders(input: {
     const data = await postApicoreGraphql<OrdersResponse>({
       query: GET_SALES_PAYMENT_ORDERS,
       accessToken: input.accessToken,
+      signal: input.signal,
       variables: {
         where: input.where,
         orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
@@ -687,6 +698,39 @@ export function mapSalesDetailRecords(orders: RawReportOrder[]): SalesDetailReco
     });
 }
 
+function paymentItemNames(items: RawOrderItem[]) {
+  const services = new Set<string>();
+  const products = new Set<string>();
+  const packages = new Set<string>();
+  const other = new Set<string>();
+  for (const item of items) {
+    const metadata = parseMetadata(item.metadata);
+    const savedName = typeof metadata.name === 'string' ? metadata.name.trim() : '';
+    let categorized = false;
+    const addCatalogName = (names: Set<string>, entry?: { name?: string | null } | null, id?: string | null) => {
+      if (!entry && !id) return;
+      categorized = true;
+      const label = entry?.name?.trim() || savedName;
+      if (label) names.add(label);
+    };
+    addCatalogName(services, item.service, item.service_id);
+    addCatalogName(products, item.product_stock_item, item.product_stock_item_id);
+    addCatalogName(packages, item.service_package, item.service_package_id);
+    if (!categorized && savedName) {
+      if (metadata.type === 'SERVICE') services.add(savedName);
+      else if (metadata.type === 'PRODUCT') products.add(savedName);
+      else if (metadata.type === 'SERVICE_PACKAGE') packages.add(savedName);
+      else other.add(savedName);
+    }
+  }
+  return {
+    ServiceName: [...services].join(', '),
+    ProductName: [...products].join(', '),
+    ServicePackageName: [...packages].join(', '),
+    OtherItems: [...other].join(', '),
+  };
+}
+
 export function mapPaymentReportRecords(
   orders: RawReportOrder[],
   startDate: Date,
@@ -700,16 +744,7 @@ export function mapPaymentReportRecords(
       return [];
     }
 
-    const serviceNames = Array.from(new Set(
-      (order.order_items ?? [])
-        .map(itemName)
-        .filter((name): name is string => Boolean(name)),
-    )).join(' · ');
-    const packageNames = Array.from(new Set(
-      (order.order_items ?? [])
-        .map((item) => item.service_package?.name)
-        .filter((name): name is string => Boolean(name)),
-    )).join(' · ');
+    const names = paymentItemNames(order.order_items ?? []);
 
     return reportablePayments(order)
       .filter((payment) => {
@@ -722,10 +757,10 @@ export function mapPaymentReportRecords(
         Date: formatMyanmarDate(payment.payment_date),
         InvoiceNumber: order.order_id ?? '',
         CustomerName: customerName(order),
-        MemberId: memberId(order),
+        CustomerPhoneNumber: customerPhoneNumber(order),
+        MemberId: assignedMemberId(order),
         SalePerson: sellerName(order),
-        ServiceName: serviceNames,
-        ServicePackageName: packageNames,
+        ...names,
         PaymentMethod: normalizedMethod(payment.payment_method),
         PaymentStatus: order.payment_status ?? '',
         WalletTopUp: walletTopUp(order),
@@ -892,12 +927,14 @@ export function mapCreditReceivedRecords(
 export async function fetchSalesDetailRecords(input: ReportDateInput & {
   clinicId: string;
   accessToken: string;
+  signal?: AbortSignal;
   includePractitioners?: boolean;
 }) {
   const range = resolveReportDateRange(input);
   const orders = await fetchAllOrders({
     clinicId: input.clinicId,
     accessToken: input.accessToken,
+    signal: input.signal,
     includePractitioners: input.includePractitioners ?? false,
     where: buildSalesOrderWhere({
       clinicId: input.clinicId,
@@ -911,11 +948,13 @@ export async function fetchSalesDetailRecords(input: ReportDateInput & {
 export async function fetchPaymentReportRecords(input: ReportDateInput & {
   clinicId: string;
   accessToken: string;
+  signal?: AbortSignal;
 }) {
   const range = resolveReportDateRange(input);
   const orders = await fetchAllOrders({
     clinicId: input.clinicId,
     accessToken: input.accessToken,
+    signal: input.signal,
     where: buildPaymentOrderWhere({
       clinicId: input.clinicId,
       ...range,

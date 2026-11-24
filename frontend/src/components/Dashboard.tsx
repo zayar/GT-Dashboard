@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -10,6 +10,7 @@ import {
   SelectChangeEvent,
   Alert,
   AlertTitle,
+  Button,
   Avatar,
   Skeleton,
   useTheme
@@ -30,16 +31,13 @@ import {
 } from 'chart.js';
 import { addDays, format, subMonths } from 'date-fns';
 import { useClinic } from '../contexts/ClinicContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useBiActivity } from '../hooks/useBiAccounting';
+import { useReportSection } from '../hooks/useReportSection';
+import { loadDashboardActivity, percentageChange } from '../utils/dashboardActivity';
 import { formatCurrency as formatCurrencyUtil } from '../utils/currency';
 import { useNavigate } from 'react-router-dom';
 import {
-  loadCanonicalActivityMetrics,
-  loadCanonicalSalesMetrics,
-} from '../utils/loadCanonicalSalesMetrics';
-import {
   CANONICAL_SALES_METRICS,
-  EMPTY_CANONICAL_SALES_METRICS,
   resolveCanonicalMetricPeriodRanges,
 } from '../utils/canonicalSalesMetrics';
 
@@ -53,7 +51,9 @@ interface AnimatedMetricProps {
   formatter: (value: number) => string;
 }
 
-interface MetricCardProps extends AnimatedMetricProps {
+interface MetricCardProps extends Omit<AnimatedMetricProps, 'value'> {
+  value?: number;
+  loading: boolean;
   label: string;
   description?: string;
   context: string;
@@ -146,8 +146,18 @@ const MetricCard: React.FC<MetricCardProps> = ({
   icon,
   accent,
   accentSoft,
-  delay
+  delay,
+  loading
 }) => {
+  if (loading) {
+    return (
+      <Paper aria-label={`Loading ${label}`} sx={{ p: 2.25, borderRadius: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <Skeleton width="42%" />
+        <Skeleton width="70%" height={46} />
+        <Skeleton width="55%" />
+      </Paper>
+    );
+  }
   return (
     <Box className="dashboard-metric-card" sx={{ height: '100%', animationDelay: `${delay}s` }}>
       <Paper
@@ -178,7 +188,7 @@ const MetricCard: React.FC<MetricCardProps> = ({
                 whiteSpace: 'nowrap'
               }}
             >
-              <AnimatedMetric value={value} formatter={formatter} />
+              {value === undefined ? 'Unavailable' : <AnimatedMetric value={value} formatter={formatter} />}
             </Typography>
           </Box>
           <Box
@@ -212,28 +222,28 @@ const MetricCard: React.FC<MetricCardProps> = ({
 
 // Dashboard component
 const Dashboard: React.FC = () => {
-  const { currentClinic } = useClinic();
-  const { getAccessToken } = useAuth();
+  const { currentClinic, loadingClinics } = useClinic();
   const navigate = useNavigate();
   const theme = useTheme();
   const reduceMotion = usePrefersReducedMotion();
   // State for period selection and UI
   const [period, setPeriod] = useState<PeriodType>('monthly');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const latestAccountingRequestIdRef = useRef(0);
-
-  // State for statistics
-  const [accountingMetrics, setAccountingMetrics] = useState(EMPTY_CANONICAL_SALES_METRICS);
-  const [grossSalesChange, setGrossSalesChange] = useState<number>(0);
-  const [paymentsReceivedChange, setPaymentsReceivedChange] = useState<number>(0);
-  const [customerCount, setCustomerCount] = useState<number>(0);
-  const [customerChange, setCustomerChange] = useState<number>(0);
-  const [appointmentRate, setAppointmentRate] = useState<number>(0);
-  const [appointmentChange, setAppointmentChange] = useState<number>(0);
-  const [serviceCount, setServiceCount] = useState<number>(0);
-  const [serviceChange, setServiceChange] = useState<number>(0);
+  const ranges = useMemo(() => resolveCanonicalMetricPeriodRanges(period), [period]);
+  const clinicId = currentClinic?.id;
+  const clinicCode = currentClinic?.code ?? '';
+  const accounting = useBiActivity(clinicId, ranges.current.startDate, ranges.current.endDate);
+  const comparison = useBiActivity(clinicId, ranges.previous.startDate, ranges.previous.endDate);
+  const loadOperations = useCallback((signal: AbortSignal) => (
+    loadDashboardActivity(clinicCode, ranges, signal)
+  ), [clinicCode, ranges]);
+  const operations = useReportSection(clinicCode ? loadOperations : null);
+  const lastUpdated = accounting.updatedAt ?? operations.updatedAt;
+  const accountingChange = (metric: 'grossSales' | 'paymentsReceived') => (
+    accounting.data && comparison.data ? percentageChange(accounting.data[metric], comparison.data[metric]) : undefined
+  );
+  const operationalChange = (metric: 'customers' | 'appointmentsPerCustomer' | 'services') => (
+    operations.data ? percentageChange(operations.data.current[metric], operations.data.previous[metric]) : undefined
+  );
 
   // State for payment methods chart
   const [paymentMethods, setPaymentMethods] = useState<Array<{
@@ -267,9 +277,6 @@ const Dashboard: React.FC = () => {
   }>>([]);
   const [loadingTherapists, setLoadingTherapists] = useState<boolean>(true);
 
-  // Flag to track if we're using fallback data
-  const [usingFallbackData, setUsingFallbackData] = useState<boolean>(false);
-
   // Handle period change
   const handlePeriodChange = (event: SelectChangeEvent<string>) => {
     setPeriod(event.target.value as PeriodType);
@@ -282,187 +289,8 @@ const Dashboard: React.FC = () => {
 
   // Fetch data based on selected period and current clinic
   useEffect(() => {
-    if (!currentClinic) {
-      setError('No clinic selected. Please select a clinic first.');
-      setLoading(false);
-      return;
-    }
-
-    const fetchChartData = async () => {
-      const requestId = ++latestAccountingRequestIdRef.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const accessToken = await getAccessToken();
-        if (!accessToken) {
-          throw new Error('Your session has expired. Please sign in again.');
-        }
-        const ranges = resolveCanonicalMetricPeriodRanges(period);
-        const [currentMetrics, previousMetrics] = await Promise.all([
-          loadCanonicalSalesMetrics({
-            clinicId: currentClinic.id,
-            startDate: ranges.current.startDate,
-            endDate: ranges.current.endDate,
-            asOfDate: ranges.current.endDate,
-            accessToken,
-          }),
-          loadCanonicalActivityMetrics({
-            clinicId: currentClinic.id,
-            startDate: ranges.previous.startDate,
-            endDate: ranges.previous.endDate,
-            accessToken,
-          }),
-        ]);
-        if (latestAccountingRequestIdRef.current !== requestId) return;
-
-        const calculatePercentageChange = (current: number, previous: number): number => {
-          if (previous === 0) return current > 0 ? 100 : 0;
-          return ((current - previous) / previous) * 100;
-        };
-        setAccountingMetrics(currentMetrics);
-        setGrossSalesChange(calculatePercentageChange(
-          currentMetrics.grossSales,
-          previousMetrics.grossSales,
-        ));
-        setPaymentsReceivedChange(calculatePercentageChange(
-          currentMetrics.paymentsReceived,
-          previousMetrics.paymentsReceived,
-        ));
-        setUsingFallbackData(
-          currentMetrics.invoiceCount === 0
-          && currentMetrics.paymentCount === 0
-          && currentMetrics.outstandingInvoiceCount === 0,
-        );
-
-        // Fetch statistics from QueenDataView for cards
-        await fetchStatsData();
-
-      } catch (err) {
-        if (latestAccountingRequestIdRef.current !== requestId) return;
-        setAccountingMetrics(EMPTY_CANONICAL_SALES_METRICS);
-        setError(err instanceof Error ? err.message : 'Unable to load dashboard data.');
-        setUsingFallbackData(false);
-      } finally {
-        if (latestAccountingRequestIdRef.current === requestId) {
-          setLoading(false);
-          setLastUpdated(new Date());
-        }
-      }
-    };
-
-    // Fetch statistics data from QueenDataView
-    const fetchStatsData = async () => {
-      try {
-        // Define time periods for current and previous periods
-        let currentPeriodFilter = '';
-        let previousPeriodFilter = '';
-
-        if (period === 'monthly') {
-          const currentMonth = format(new Date(), 'yyyy-MM');
-          const previousMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
-          currentPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${currentMonth}'`;
-          previousPeriodFilter = `FORMAT_DATE('%Y-%m', DATE(CheckInTime)) = '${previousMonth}'`;
-        } else if (period === 'weekly') {
-          currentPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY) AND CURRENT_DATE()';
-          previousPeriodFilter = 'DATE(CheckInTime) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)';
-        } else if (period === 'annual') {
-          const currentYear = new Date().getFullYear();
-          currentPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear}`;
-          previousPeriodFilter = `EXTRACT(YEAR FROM CheckInTime) = ${currentYear - 1}`;
-        }
-
-        const statsQuery = `
-          WITH CurrentPeriodStats AS (
-            SELECT
-              COUNT(DISTINCT CustomerName) as current_customers,
-              COUNT(DISTINCT BookingID) as current_appointments,
-              COUNT(DISTINCT ServiceName) as current_services
-            FROM \`great_time.MainDataView\`
-            WHERE ${currentPeriodFilter}
-              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-          ),
-          PreviousPeriodStats AS (
-            SELECT
-              COUNT(DISTINCT CustomerName) as previous_customers,
-              COUNT(DISTINCT BookingID) as previous_appointments,
-              COUNT(DISTINCT ServiceName) as previous_services
-            FROM \`great_time.MainDataView\`
-            WHERE ${previousPeriodFilter}
-              AND LOWER(ClinicCode) = LOWER('${currentClinic.code}')
-          )
-          SELECT
-            cp.current_customers,
-            cp.current_appointments,
-            cp.current_services,
-            pp.previous_customers,
-            pp.previous_appointments,
-            pp.previous_services
-          FROM CurrentPeriodStats cp, PreviousPeriodStats pp
-        `;
-
-        const statsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: statsQuery }),
-        });
-
-        if (!statsResponse.ok) {
-          throw new Error(`Failed to fetch stats data (Status: ${statsResponse.status})`);
-        }
-
-        const statsResponseData = await statsResponse.json();
-
-        if (!statsResponseData.success || !statsResponseData.data || statsResponseData.data.length === 0) {
-          return; // Continue with chart data, just don't update the stats
-        }
-
-        const statsData = statsResponseData.data[0];
-
-        // Calculate percentage changes
-        const calculatePercentageChange = (current: number, previous: number): number => {
-          if (previous === 0) return current > 0 ? 100 : 0;
-          return ((current - previous) / previous) * 100;
-        };
-
-        const currentCustomers = Number(statsData.current_customers) || 0;
-        const previousCustomers = Number(statsData.previous_customers) || 0;
-        const customerChangePercentage = calculatePercentageChange(currentCustomers, previousCustomers);
-
-        const currentAppointments = Number(statsData.current_appointments) || 0;
-        const previousAppointments = Number(statsData.previous_appointments) || 0;
-
-        // Calculate appointment rate (appointments per customer)
-        const appointmentRateValue =
-          currentCustomers > 0 ?
-          (currentAppointments / currentCustomers) * 100 : 0;
-
-        const prevAppointmentRate =
-          previousCustomers > 0 ?
-          (previousAppointments / previousCustomers) * 100 : 0;
-
-        const appointmentChangePercentage = calculatePercentageChange(appointmentRateValue, prevAppointmentRate);
-
-        const currentServices = Number(statsData.current_services) || 0;
-        const previousServices = Number(statsData.previous_services) || 0;
-        const serviceChangePercentage = calculatePercentageChange(currentServices, previousServices);
-
-        // Update state with stats data
-        setCustomerCount(currentCustomers);
-        setCustomerChange(customerChangePercentage);
-        setAppointmentRate(appointmentRateValue);
-        setAppointmentChange(appointmentChangePercentage);
-        setServiceCount(currentServices);
-        setServiceChange(serviceChangePercentage);
-
-        setUsingFallbackData(false); // Ensure we're not showing the fallback data notice
-
-      } catch (err) {
-        // Don't use fallback data here, just log the error
-        // The chart data will still be displayed
-      }
-    };
+    if (!currentClinic) return;
+    const controller = new AbortController();
 
     // Fetch top services data
     const fetchTopServices = async () => {
@@ -559,6 +387,7 @@ const Dashboard: React.FC = () => {
         // Execute the query
         const servicesResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
+          signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
           },
@@ -570,6 +399,7 @@ const Dashboard: React.FC = () => {
         }
 
         const servicesResponseData = await servicesResponse.json();
+        if (controller.signal.aborted) return;
 
         if (!servicesResponseData.success || !servicesResponseData.data || servicesResponseData.data.length === 0) {
           setTopServices([]);
@@ -607,10 +437,11 @@ const Dashboard: React.FC = () => {
         setTopServices(formattedTopServices);
         setTopServiceTrend(formattedTrend);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setTopServices([]);
         setTopServiceTrend([]);
       } finally {
-        setLoadingTopServices(false);
+        if (!controller.signal.aborted) setLoadingTopServices(false);
       }
     };
 
@@ -666,6 +497,7 @@ const Dashboard: React.FC = () => {
         // Execute the query
         const methodsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
+          signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
           },
@@ -677,6 +509,7 @@ const Dashboard: React.FC = () => {
         }
 
         const methodsResponseData = await methodsResponse.json();
+        if (controller.signal.aborted) return;
 
         if (!methodsResponseData.success || !methodsResponseData.data || methodsResponseData.data.length === 0) {
           setPaymentMethods([]);
@@ -692,9 +525,10 @@ const Dashboard: React.FC = () => {
 
         setPaymentMethods(formattedPaymentMethods);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setPaymentMethods([]);
       } finally {
-        setLoadingPaymentMethods(false);
+        if (!controller.signal.aborted) setLoadingPaymentMethods(false);
       }
     };
 
@@ -747,6 +581,7 @@ const Dashboard: React.FC = () => {
         // Execute the query
         const therapistsResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
           method: 'POST',
+          signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
           },
@@ -758,6 +593,7 @@ const Dashboard: React.FC = () => {
         }
 
         const therapistsResponseData = await therapistsResponse.json();
+        if (controller.signal.aborted) return;
 
         if (!therapistsResponseData.success || !therapistsResponseData.data || therapistsResponseData.data.length === 0) {
           setTopTherapists([]);
@@ -774,17 +610,18 @@ const Dashboard: React.FC = () => {
 
         setTopTherapists(formattedTherapists);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setTopTherapists([]);
       } finally {
-        setLoadingTherapists(false);
+        if (!controller.signal.aborted) setLoadingTherapists(false);
       }
     };
 
-    fetchChartData();
     fetchTopServices();
     fetchPaymentMethods();
     fetchTopTherapists();
-  }, [period, currentClinic, getAccessToken]);
+    return () => controller.abort();
+  }, [period, currentClinic]);
 
   // Format currency using the utility function
   const formatCurrency = (value: number): string => {
@@ -1089,19 +926,25 @@ const Dashboard: React.FC = () => {
         </Box>
       </Box>
 
-      {usingFallbackData && (
+      {accounting.data?.invoiceCount === 0 && accounting.data.paymentCount === 0 && (
         <Alert severity="info" sx={{ mb: 3, bgcolor: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
           <AlertTitle>No accounting activity for this period</AlertTitle>
-          No gross sales, payment receipts, or outstanding invoices were found for {periodDetails.label}.
+          No gross sales or payment receipts were found for {periodDetails.label}.
         </Alert>
       )}
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <AlertTitle>Accounting metrics unavailable</AlertTitle>
-          {error}
+      {!currentClinic && !loadingClinics && <Alert severity="info">Select a clinic to see its reports.</Alert>}
+      {[
+        { label: 'Accounting metrics', ...accounting },
+        { label: 'Previous period comparison', ...comparison },
+        { label: 'Operational activity', ...operations },
+      ].filter(section => section.error).map(section => (
+        <Alert key={section.label} severity="warning" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={section.retry}>Retry</Button>}>
+          <AlertTitle>{section.label} unavailable</AlertTitle>
+          {section.error}
         </Alert>
-      )}
+      ))}
 
       <Typography variant="overline" sx={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
         Accounting metrics · live APICORE
@@ -1111,10 +954,10 @@ const Dashboard: React.FC = () => {
           {
             label: CANONICAL_SALES_METRICS.grossSales.label,
             description: CANONICAL_SALES_METRICS.grossSales.description,
-            value: accountingMetrics.grossSales,
+            value: accounting.data?.grossSales,
             formatter: (value: number) => formatCurrency(value),
-            change: grossSalesChange,
-            context: `${periodDetails.comparison} · ${accountingMetrics.invoiceCount.toLocaleString()} invoices`,
+            change: accountingChange('grossSales'),
+            context: accounting.data ? `${accounting.data.invoiceCount.toLocaleString()} invoices${comparison.data ? ` · ${periodDetails.comparison}` : ''}` : '',
             icon: 'fas fa-coins',
             accent: 'var(--primary)',
             accentSoft: 'var(--primary-soft)'
@@ -1122,35 +965,17 @@ const Dashboard: React.FC = () => {
           {
             label: CANONICAL_SALES_METRICS.paymentsReceived.label,
             description: CANONICAL_SALES_METRICS.paymentsReceived.description,
-            value: accountingMetrics.paymentsReceived,
+            value: accounting.data?.paymentsReceived,
             formatter: (value: number) => formatCurrency(value),
-            change: paymentsReceivedChange,
-            context: `${periodDetails.comparison} · ${accountingMetrics.paymentCount.toLocaleString()} payments`,
+            change: accountingChange('paymentsReceived'),
+            context: accounting.data ? `${accounting.data.paymentCount.toLocaleString()} payments${comparison.data ? ` · ${periodDetails.comparison}` : ''}` : '',
             icon: 'fas fa-money-bill-wave',
             accent: 'var(--success)',
             accentSoft: 'rgba(18, 166, 117, 0.10)'
-          },
-          {
-            label: CANONICAL_SALES_METRICS.outstandingBalance.label,
-            description: CANONICAL_SALES_METRICS.outstandingBalance.description,
-            value: accountingMetrics.outstandingBalance,
-            formatter: (value: number) => formatCurrency(value),
-            context: `${accountingMetrics.outstandingInvoiceCount.toLocaleString()} invoices · as of today`,
-            icon: 'fas fa-file-invoice-dollar',
-            accent: 'var(--warning)',
-            accentSoft: 'rgba(245, 158, 11, 0.10)'
           }
         ].map((metric, index) => (
-          <Grid item xs={12} md={4} key={metric.label}>
-            {loading ? (
-              <Paper sx={{ p: 2.25, borderRadius: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
-                <Skeleton width="42%" />
-                <Skeleton width="70%" height={46} />
-                <Skeleton width="55%" />
-              </Paper>
-            ) : (
-              <MetricCard {...metric} delay={index * 0.07} />
-            )}
+          <Grid item xs={12} md={6} key={metric.label}>
+            <MetricCard {...metric} loading={loadingClinics || accounting.loading} delay={index * 0.07} />
           </Grid>
         ))}
       </Grid>
@@ -1162,45 +987,37 @@ const Dashboard: React.FC = () => {
         {[
           {
             label: 'Unique customers',
-            value: customerCount,
+            value: operations.data?.current.customers,
             formatter: (value: number) => formatNumber(Math.round(value)),
-            change: customerChange,
-            context: periodDetails.comparison,
+            change: operationalChange('customers'),
+            context: operations.data ? periodDetails.comparison : '',
             icon: 'fas fa-users',
             accent: 'var(--warning)',
             accentSoft: 'rgba(245, 158, 11, 0.10)'
           },
           {
             label: 'Appointments per customer',
-            value: appointmentRate / 100,
+            value: operations.data?.current.appointmentsPerCustomer,
             formatter: (value: number) => `${value.toFixed(2)}x`,
-            change: appointmentChange,
-            context: periodDetails.comparison,
+            change: operationalChange('appointmentsPerCustomer'),
+            context: operations.data ? periodDetails.comparison : '',
             icon: 'fas fa-calendar-check',
             accent: 'var(--success)',
             accentSoft: 'rgba(18, 166, 117, 0.10)'
           },
           {
             label: 'Active services',
-            value: serviceCount,
+            value: operations.data?.current.services,
             formatter: (value: number) => formatNumber(Math.round(value)),
-            change: serviceChange,
-            context: periodDetails.comparison,
+            change: operationalChange('services'),
+            context: operations.data ? periodDetails.comparison : '',
             icon: 'fas fa-spa',
             accent: 'var(--primary)',
             accentSoft: 'var(--primary-soft)'
           }
         ].map((metric, index) => (
           <Grid item xs={12} md={4} key={metric.label}>
-            {loading ? (
-              <Paper sx={{ p: 2.25, borderRadius: 2.5, bgcolor: 'var(--surface)', border: '1px solid var(--border)' }}>
-                <Skeleton width="42%" />
-                <Skeleton width="70%" height={46} />
-                <Skeleton width="55%" />
-              </Paper>
-            ) : (
-              <MetricCard {...metric} delay={(index + 3) * 0.07} />
-            )}
+            <MetricCard {...metric} loading={loadingClinics || operations.loading} delay={(index + 3) * 0.07} />
           </Grid>
         ))}
       </Grid>
